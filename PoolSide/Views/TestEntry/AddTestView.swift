@@ -25,6 +25,11 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
+    @State private var chemicalOrder: [ChemicalField] = ChemicalField.allCases
+    @State private var draggedChemical: ChemicalField? = nil
+    @State private var chemicalRowFrames: [ChemicalField: CGRect] = [:]
+    @State private var dragStartFrame: CGRect = .zero
+    @State private var dragTranslation: CGSize = .zero
 
     // Post-save
     @State private var savedTest: PoolTest? = nil
@@ -48,7 +53,7 @@ struct AddTestView: View {
     }
 
     private var visibleChemicalFields: [ChemicalField] {
-        ChemicalField.allCases.filter { field in
+        chemicalOrder.filter { field in
             switch field {
             case .temperature:
                 return includeTemperature
@@ -71,14 +76,33 @@ struct AddTestView: View {
                         heroBanner
 
                         // Form rows on white card
-                        VStack(spacing: 0) {
-                            ForEach(Array(visibleChemicalFields.enumerated()), id: \.element.id) { index, chemical in
-                                chemicalRow(for: chemical)
+                        ZStack(alignment: .topLeading) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(visibleChemicalFields.enumerated()), id: \.element.id) { index, chemical in
+                                    chemicalRow(for: chemical)
+                                        .opacity(draggedChemical == chemical ? 0.12 : 1)
+                                        .background(rowFrameReader(for: chemical))
 
-                                if index < visibleChemicalFields.count - 1 {
-                                    divider
+                                    if index < visibleChemicalFields.count - 1 {
+                                        divider
+                                    }
                                 }
                             }
+                            .animation(.spring(response: 0.28, dampingFraction: 0.86), value: chemicalOrder)
+
+                            if let draggedChemical {
+                                chemicalDragPreview(for: draggedChemical, width: dragStartFrame.width)
+                                    .offset(
+                                        x: dragStartFrame.minX,
+                                        y: dragStartFrame.minY + dragTranslation.height
+                                    )
+                                    .zIndex(10)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .coordinateSpace(name: "chemicalList")
+                        .onPreferenceChange(ChemicalRowFramePreferenceKey.self) { frames in
+                            chemicalRowFrames = frames
                         }
                         .background(Color.white)
                         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -220,6 +244,8 @@ struct AddTestView: View {
 
         return HStack(alignment: .top, spacing: 16) {
             ChemicalIcon(field: field, size: 54)
+                .accessibilityLabel("Reorder \(label)")
+                .accessibilityHint("Touch and hold, then drag up or down to reorder this chemical")
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -266,6 +292,248 @@ struct AddTestView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .contentShape(LeadingDragHandleShape(width: 94))
+        .gesture(reorderGesture(for: field))
+    }
+
+    private func chemicalDragPreview(
+        field: ChemicalField,
+        label: String,
+        value: Double,
+        range: ClosedRange<Double>,
+        idealRange: String,
+        goodRange: ClosedRange<Double>,
+        format: String = "%.1f",
+        meterColor: Color,
+        width: CGFloat
+    ) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            ChemicalIcon(field: field, size: 54)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(label)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(PoolColor.primaryText)
+                    Spacer()
+                    Text(String(format: format, value))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(PoolColor.primaryText)
+                        .monospacedDigit()
+                }
+
+                VStack(spacing: 5) {
+                    ZStack {
+                        ChemicalMeterBackground(range: range, goodRange: goodRange)
+                            .frame(height: 8)
+                            .padding(.horizontal, 2)
+
+                        Capsule()
+                            .fill(meterColor)
+                            .frame(width: 18, height: 18)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .offset(x: previewThumbOffset(value: value, range: range))
+                    }
+                    .frame(height: 24)
+
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(formatRangeValue(range.lowerBound, format: format))
+                            .frame(width: 42, alignment: .leading)
+
+                        Spacer(minLength: 8)
+
+                        Text("Good \(idealRange)")
+                            .fontWeight(.medium)
+                            .foregroundStyle(Color(hex: "57B881"))
+
+                        Spacer(minLength: 8)
+
+                        Text(formatRangeValue(range.upperBound, format: format))
+                            .frame(width: 42, alignment: .trailing)
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(PoolColor.secondaryText)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .frame(width: width)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 8)
+        .opacity(0.9)
+    }
+
+    private func previewThumbOffset(value: Double, range: ClosedRange<Double>) -> CGFloat {
+        guard range.upperBound > range.lowerBound else { return 0 }
+        let ratio = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+        return CGFloat(ratio.clamped(to: 0...1)) * 214
+    }
+
+    private func rowFrameReader(for field: ChemicalField) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ChemicalRowFramePreferenceKey.self,
+                value: [field: proxy.frame(in: .named("chemicalList"))]
+            )
+        }
+    }
+
+    private func reorderGesture(for field: ChemicalField) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.25)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("chemicalList")))
+            .onChanged { value in
+                switch value {
+                case .first(true):
+                    beginChemicalDrag(for: field)
+                case .second(true, let drag):
+                    beginChemicalDrag(for: field)
+                    guard let drag else { return }
+                    dragTranslation = drag.translation
+                    updateChemicalOrder(for: field, at: drag.location.y)
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in
+                endChemicalDrag()
+            }
+    }
+
+    private func beginChemicalDrag(for field: ChemicalField) {
+        guard draggedChemical == nil else { return }
+        dragStartFrame = chemicalRowFrames[field] ?? .zero
+        dragTranslation = .zero
+        draggedChemical = field
+    }
+
+    private func updateChemicalOrder(for field: ChemicalField, at locationY: CGFloat) {
+        let visibleFields = visibleChemicalFields
+        guard visibleFields.contains(field) else { return }
+
+        var reorderedVisibleFields = visibleFields.filter { $0 != field }
+        let insertionIndex = reorderedVisibleFields.firstIndex { candidate in
+            guard let frame = chemicalRowFrames[candidate] else { return false }
+            return locationY < frame.midY
+        } ?? reorderedVisibleFields.count
+
+        reorderedVisibleFields.insert(field, at: insertionIndex)
+        guard reorderedVisibleFields != visibleFields else { return }
+
+        let hiddenFields = chemicalOrder.filter { !visibleFields.contains($0) }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            chemicalOrder = reorderedVisibleFields + hiddenFields
+        }
+    }
+
+    private func endChemicalDrag() {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
+            draggedChemical = nil
+            dragTranslation = .zero
+            dragStartFrame = .zero
+        }
+    }
+
+    @ViewBuilder
+    private func chemicalDragPreview(for field: ChemicalField, width: CGFloat) -> some View {
+        switch field {
+        case .pH:
+            chemicalDragPreview(
+                field: field,
+                label: "pH",
+                value: pH,
+                range: 6.8...8.4,
+                idealRange: "7.2 – 7.6",
+                goodRange: 7.2...7.6,
+                format: "%.1f",
+                meterColor: meterColor(for: chemicalStatus(for: field, value: pH, goodRange: 7.2...7.6, fullRange: 6.8...8.4)),
+                width: width
+            )
+        case .freeChlorine:
+            chemicalDragPreview(
+                field: field,
+                label: "Free Chlorine (ppm)",
+                value: freeChlorine,
+                range: 0...10,
+                idealRange: "1 – 3 ppm",
+                goodRange: 1...3,
+                meterColor: meterColor(for: chemicalStatus(for: field, value: freeChlorine, goodRange: 1...3, fullRange: 0...10)),
+                width: width
+            )
+        case .totalChlorine:
+            let goodRange = max(0, freeChlorine - 0.5)...min(10, freeChlorine + 0.5)
+            chemicalDragPreview(
+                field: field,
+                label: "Total Chlorine (ppm)",
+                value: totalChlorine,
+                range: 0...10,
+                idealRange: "within 0.5 ppm of Free Cl",
+                goodRange: goodRange,
+                meterColor: meterColor(for: chemicalStatus(for: field, value: totalChlorine, goodRange: goodRange, fullRange: 0...10)),
+                width: width
+            )
+        case .totalAlkalinity:
+            chemicalDragPreview(
+                field: field,
+                label: "Total Alkalinity (ppm)",
+                value: totalAlkalinity,
+                range: 40...240,
+                idealRange: "80 – 120 ppm",
+                goodRange: 80...120,
+                format: "%.0f",
+                meterColor: meterColor(for: chemicalStatus(for: field, value: totalAlkalinity, goodRange: 80...120, fullRange: 40...240)),
+                width: width
+            )
+        case .calciumHardness:
+            chemicalDragPreview(
+                field: field,
+                label: "Calcium Hardness (ppm)",
+                value: calciumHardness,
+                range: 100...500,
+                idealRange: "200 – 400 ppm",
+                goodRange: 200...400,
+                format: "%.0f",
+                meterColor: meterColor(for: chemicalStatus(for: field, value: calciumHardness, goodRange: 200...400, fullRange: 100...500)),
+                width: width
+            )
+        case .cyanuricAcid:
+            chemicalDragPreview(
+                field: field,
+                label: "Cyanuric Acid (ppm)",
+                value: cyanuricAcid,
+                range: 0...100,
+                idealRange: "30 – 50 ppm",
+                goodRange: 30...50,
+                format: "%.0f",
+                meterColor: meterColor(for: chemicalStatus(for: field, value: cyanuricAcid, goodRange: 30...50, fullRange: 0...100)),
+                width: width
+            )
+        case .temperature:
+            chemicalDragPreview(
+                field: field,
+                label: "Temperature (°F)",
+                value: temperature,
+                range: 50...105,
+                idealRange: "78 – 88°F",
+                goodRange: 78...88,
+                format: "%.0f",
+                meterColor: meterColor(for: chemicalStatus(for: field, value: temperature, goodRange: 78...88, fullRange: 50...105)),
+                width: width
+            )
+        case .saltLevel:
+            chemicalDragPreview(
+                field: field,
+                label: "Salt Level (ppm)",
+                value: saltLevel,
+                range: 1000...5000,
+                idealRange: "2700 – 3400 ppm",
+                goodRange: 2700...3400,
+                format: "%.0f",
+                meterColor: meterColor(for: chemicalStatus(for: field, value: saltLevel, goodRange: 2700...3400, fullRange: 1000...5000)),
+                width: width
+            )
+        }
     }
 
     @ViewBuilder
@@ -695,6 +963,27 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
         case .temperature:
             return Color(hex: "FFF1EA")
         }
+    }
+}
+
+private struct ChemicalRowFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [ChemicalField: CGRect] = [:]
+
+    static func reduce(value: inout [ChemicalField: CGRect], nextValue: () -> [ChemicalField: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
+private struct LeadingDragHandleShape: Shape {
+    let width: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: min(width, rect.width),
+            height: rect.height
+        ))
     }
 }
 
