@@ -24,7 +24,7 @@ final class PoolViewModel {
     // MARK: - AI Setup
 
     private func setupAIService() {
-        if #available(iOS 18.2, *) {
+        if #available(iOS 26.0, *) {
             let service = FoundationModelsService()
             if service.isAvailable {
                 aiService = service

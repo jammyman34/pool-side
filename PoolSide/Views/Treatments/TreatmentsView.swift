@@ -158,3 +158,12 @@ struct TreatmentsView: View {
         }
     }
 }
+
+// MARK: - Preview
+
+#Preview {
+    TreatmentsView()
+        .environment(PoolViewModel())
+        .modelContainer(for: [PoolTest.self, Treatment.self], inMemory: true)
+        .preferredColorScheme(.dark)
+}

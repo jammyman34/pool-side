@@ -74,10 +74,13 @@ enum PoolColor {
     /// #A8A8A8 — Testing / awaiting results
     static let statusTesting      = Color("StatusTesting")
 
-    // MARK: - Semantic Aliases
+    // MARK: - Semantic Aliases (Light Theme)
 
-    static let appBackground      = deepWater
-    static let cardBackground     = oceanBlue
+    static let appBackground      = Color(hex: "F5F7F6")  // very light teal-tinted white
+    static let cardBackground     = cloudWhite             // pure white cards
+    static let primaryText        = deepWater              // dark navy for headings
+    static let secondaryText      = Color(hex: "6B7A8D")  // medium gray-blue
+    static let divider            = Color(hex: "E8ECEA")  // subtle divider
     static let primaryBrand       = poolTeal
     static let primaryAction      = sunshine
     static let success            = palmGreen

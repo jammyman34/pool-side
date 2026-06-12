@@ -130,3 +130,22 @@ struct TestDetailView: View {
         }
     }
 }
+
+// MARK: - Preview
+
+#Preview {
+    let test = PoolTest(
+        pH: 7.5,
+        freeChlorine: 1.8,
+        totalChlorine: 2.0,
+        totalAlkalinity: 100,
+        calciumHardness: 280,
+        cyanuricAcid: 40,
+        notes: "Sunny day, light bather load.",
+        aiAssessment: "Pool chemistry is well-balanced. Continue your current routine and retest in 3–4 days."
+    )
+    return TestDetailView(test: test)
+        .environment(PoolViewModel())
+        .modelContainer(for: [PoolTest.self, Treatment.self], inMemory: true)
+        .preferredColorScheme(.dark)
+}

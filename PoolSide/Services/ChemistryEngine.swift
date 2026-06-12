@@ -269,7 +269,28 @@ struct ChemistryEngine {
             }
         }
 
-        return templates.sorted { $0.urgency.sortOrder < $1.urgency.sortOrder }
+        // Sort by urgency, then assign sequential wait times between steps
+        var sorted = templates.sorted { $0.urgency.sortOrder < $1.urgency.sortOrder }
+        for i in 0..<sorted.count {
+            sorted[i].sortOrder = i
+            // Set wait after this step before the next (only if there IS a next step)
+            if i < sorted.count - 1 {
+                sorted[i].minutesBeforeNext = waitMinutes(for: sorted[i].targetParameter)
+            }
+        }
+        return sorted
+    }
+
+    /// Standard wait time (in minutes) to observe after adding a chemical before the next treatment
+    private func waitMinutes(for parameter: String) -> Int {
+        switch parameter {
+        case "pH":              return 240  // 4 hours
+        case "totalAlkalinity": return 240  // 4 hours
+        case "freeChlorine":    return 60   // 1 hour
+        case "calciumHardness": return 240  // 4 hours
+        case "cyanuricAcid":    return 2880 // 48 hours
+        default:                return 30
+        }
     }
 
     // MARK: - Treatment Templates
@@ -425,6 +446,8 @@ struct TreatmentTemplate {
     var instructions: String
     var targetParameter: String
     var urgency: TreatmentUrgency
+    var minutesBeforeNext: Int = 0
+    var sortOrder: Int = 0
 
     func toTreatment(linkedTo test: PoolTest) -> Treatment {
         Treatment(
@@ -436,6 +459,8 @@ struct TreatmentTemplate {
             urgency: urgency,
             isAIGenerated: false,
             targetParameter: targetParameter,
+            minutesBeforeNext: minutesBeforeNext,
+            sortOrder: sortOrder,
             poolTest: test
         )
     }

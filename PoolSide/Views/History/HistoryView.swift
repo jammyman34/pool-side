@@ -178,3 +178,12 @@ struct HistoryRow: View {
         }
     }
 }
+
+// MARK: - Preview
+
+#Preview {
+    HistoryView()
+        .environment(PoolViewModel())
+        .modelContainer(for: [PoolTest.self, Treatment.self], inMemory: true)
+        .preferredColorScheme(.dark)
+}

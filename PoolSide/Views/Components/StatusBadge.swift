@@ -139,3 +139,58 @@ struct EmptyStateView: View {
         .padding(32)
     }
 }
+
+// MARK: - Previews
+
+#Preview("Status Badges") {
+    VStack(spacing: 12) {
+        StatusBadge(status: .ideal)
+        StatusBadge(status: .slightlyHigh)
+        StatusBadge(status: .low)
+        StatusBadge(status: .critical)
+        StatusBadge(status: .testing, compact: true)
+    }
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Score Ring") {
+    HStack(spacing: 20) {
+        ScoreRing(score: 95)
+        ScoreRing(score: 65, size: 72)
+        ScoreRing(score: 30, size: 80)
+    }
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Section Header") {
+    VStack(spacing: 16) {
+        SectionHeader(title: "Chemical Readings")
+        SectionHeader(title: "Pending Treatments", action: "See All", onAction: {})
+    }
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("AI Loading Overlay") {
+    AILoadingOverlay()
+        .padding()
+        .background(PoolColor.appBackground)
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Empty State") {
+    EmptyStateView(
+        icon: "drop.fill",
+        title: "Log Your First Test",
+        message: "Tap the + button to record your pool's chemical readings and get personalised treatment recommendations.",
+        actionLabel: "Log Test",
+        action: {}
+    )
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}

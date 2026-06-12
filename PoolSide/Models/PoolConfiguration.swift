@@ -32,6 +32,11 @@ struct PoolConfiguration: Codable {
     static var isConfigured: Bool {
         UserDefaults.standard.data(forKey: defaultsKey) != nil
     }
+
+    /// Removes all saved configuration (sign out)
+    static func clearCurrent() {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
 }
 
 // MARK: - Supporting Enums

@@ -4,45 +4,36 @@ import SwiftData
 struct ContentView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
-    @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
     @State private var selectedTab: Tab = .dashboard
     @State private var showingAddTest = false
     @State private var showingSettings = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                DashboardView(showingAddTest: $showingAddTest)
-                    .tag(Tab.dashboard)
-
-                HistoryView()
-                    .tag(Tab.history)
-
-                TreatmentsView()
-                    .tag(Tab.treatments)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-
-            // Custom tab bar
-            CustomTabBar(
-                selectedTab: $selectedTab,
-                showingAddTest: $showingAddTest,
-                pendingCount: viewModel.pendingTreatments(from: tests).count
-            )
-        }
-        .background(PoolColor.appBackground.ignoresSafeArea())
-        .sheet(isPresented: $showingAddTest) {
-            AddTestView()
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundStyle(PoolColor.poolTeal)
+            // Tab content — no TabView wrapper, drive visibility manually
+            // to keep the custom tab bar fully in control
+            Group {
+                switch selectedTab {
+                case .dashboard:
+                    DashboardView(
+                        showingAddTest: $showingAddTest,
+                        showingSettings: $showingSettings
+                    )
+                case .insights:
+                    InsightsView()
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Custom tab bar
+            PoolTabBar(
+                selectedTab: $selectedTab,
+                showingAddTest: $showingAddTest
+            )
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .fullScreenCover(isPresented: $showingAddTest) {
+            AddTestView()
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
@@ -58,33 +49,39 @@ struct ContentView: View {
 // MARK: - Tab
 
 enum Tab: Hashable {
-    case dashboard, history, treatments
+    case dashboard, insights
 }
 
-// MARK: - Custom Tab Bar
+// MARK: - Tab Bar
 
-struct CustomTabBar: View {
+struct PoolTabBar: View {
     @Binding var selectedTab: Tab
     @Binding var showingAddTest: Bool
-    let pendingCount: Int
+
+    private let raisedHeight: CGFloat = 24
+    private let buttonSize: CGFloat = 80
 
     var body: some View {
         HStack(spacing: 0) {
-            tabButton(tab: .dashboard, icon: "drop.fill", label: "Dashboard")
+            tabButton(tab: .dashboard, icon: "house.fill", label: "Dashboard")
             Spacer()
-            addButton
+            Color.clear.frame(width: buttonSize + 28, height: 1)
             Spacer()
-            treatmentsTabButton
+            tabButton(tab: .insights, icon: "chart.bar.fill", label: "Insights")
         }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 40)
+        .padding(.top, raisedHeight + 34)
+        .padding(.bottom, 28)
         .background(
-            RoundedRectangle(cornerRadius: 28)
-                .fill(PoolColor.oceanBlue)
-                .shadow(color: .black.opacity(0.4), radius: 20, y: -4)
+            RaisedCenterTabBarShape(raisedHeight: raisedHeight)
+                .fill(PoolColor.sand)
+                .shadow(color: .black.opacity(0.08), radius: 16, y: -2)
+                .ignoresSafeArea(edges: .bottom)
         )
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .overlay(alignment: .top) {
+            addButton
+                .offset(y: raisedHeight - (buttonSize / 2) + 30)
+        }
     }
 
     private func tabButton(tab: Tab, icon: String, label: String) -> some View {
@@ -93,16 +90,16 @@ struct CustomTabBar: View {
                 selectedTab = tab
             }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: 20, weight: .semibold))
                 Text(label)
-                    .font(.caption2)
-                    .fontWeight(.medium)
+                    .font(.system(size: 12, weight: .semibold))
             }
-            .foregroundStyle(selectedTab == tab ? PoolColor.poolTeal : PoolColor.cloudWhite.opacity(0.5))
+            .foregroundStyle(selectedTab == tab ? PoolColor.poolTeal : PoolColor.secondaryText)
+            .opacity(selectedTab == tab ? 1.0 : 0.85)
         }
-        .frame(width: 64)
+        .frame(width: 84)
     }
 
     private var addButton: some View {
@@ -111,42 +108,64 @@ struct CustomTabBar: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(LinearGradient.sunshineAction)
-                    .frame(width: 60, height: 60)
-                    .shadow(color: PoolColor.sunshine.opacity(0.5), radius: 12, y: 4)
+                    .fill(PoolColor.sunshine)
+                    .frame(width: buttonSize, height: buttonSize)
                 Image(systemName: "plus")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(PoolColor.deepWater)
+                    .font(.system(size: 26, weight: .heavy))
+                    .foregroundStyle(.white)
             }
+            .shadow(color: PoolColor.sunshine.opacity(0.35), radius: 14, y: 8)
         }
-        .offset(y: -16)
     }
+}
 
-    private var treatmentsTabButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                selectedTab = .treatments
-            }
-        } label: {
-            VStack(spacing: 4) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "checklist")
-                        .font(.system(size: 22, weight: .medium))
-                    if pendingCount > 0 {
-                        Text("\(min(pendingCount, 99))")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(PoolColor.deepWater)
-                            .padding(3)
-                            .background(PoolColor.coral, in: Circle())
-                            .offset(x: 10, y: -8)
-                    }
-                }
-                Text("Treatments")
-                    .font(.caption2)
-                    .fontWeight(.medium)
-            }
-            .foregroundStyle(selectedTab == .treatments ? PoolColor.poolTeal : PoolColor.cloudWhite.opacity(0.5))
+// MARK: - Raised Center Tab Bar Shape
+
+struct RaisedCenterTabBarShape: Shape {
+    var raisedHeight: CGFloat = 24
+    var cornerRadius: CGFloat = 24
+
+    func path(in rect: CGRect) -> Path {
+        Path { p in
+            let cx = rect.midX
+            let topY = rect.minY + raisedHeight
+            let r = min(cornerRadius, rect.width / 2, rect.height / 2)
+            let capWidth: CGFloat = 116
+            let capHeight: CGFloat = 18
+            let capStart = cx - capWidth / 2
+            let capEnd = cx + capWidth / 2
+
+            p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.minX, y: topY + r))
+            p.addQuadCurve(
+                to: CGPoint(x: rect.minX + r, y: topY),
+                control: CGPoint(x: rect.minX, y: topY)
+            )
+            p.addLine(to: CGPoint(x: capStart, y: topY))
+            p.addCurve(
+                to: CGPoint(x: cx, y: topY - capHeight),
+                control1: CGPoint(x: capStart + 22, y: topY),
+                control2: CGPoint(x: cx - 34, y: topY - capHeight)
+            )
+            p.addCurve(
+                to: CGPoint(x: capEnd, y: topY),
+                control1: CGPoint(x: cx + 34, y: topY - capHeight),
+                control2: CGPoint(x: capEnd - 22, y: topY)
+            )
+            p.addLine(to: CGPoint(x: rect.maxX - r, y: topY))
+            p.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: topY + r),
+                control: CGPoint(x: rect.maxX, y: topY)
+            )
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            p.closeSubpath()
         }
-        .frame(width: 64)
     }
+}
+// MARK: - Preview
+
+#Preview {
+    ContentView()
+        .environment(PoolViewModel())
+        .modelContainer(for: [PoolTest.self, Treatment.self], inMemory: true)
 }

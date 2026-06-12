@@ -20,7 +20,7 @@ struct PoolSideApp: App {
         WindowGroup {
             ContentView()
                 .environment(viewModel)
-                .preferredColorScheme(.dark)
+                // Light theme to match design
         }
         .modelContainer(sharedModelContainer)
     }

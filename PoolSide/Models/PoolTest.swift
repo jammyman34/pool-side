@@ -1,6 +1,40 @@
 import Foundation
 import SwiftData
 
+enum VisualIndicator: String, CaseIterable, Identifiable {
+    case greenWater = "Green Water"
+    case cloudyWater = "Cloudy Water"
+    case algaeSpots = "Algae Spots"
+    case foam = "Foam"
+    case strongChlorineSmell = "Strong Chlorine Smell"
+    case scaling = "Scaling"
+    case staining = "Staining"
+    case poorCirculation = "Poor Circulation"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .greenWater:
+            return "drop.fill"
+        case .cloudyWater:
+            return "cloud.fill"
+        case .algaeSpots:
+            return "leaf.fill"
+        case .foam:
+            return "bubbles.and.sparkles.fill"
+        case .strongChlorineSmell:
+            return "nose.fill"
+        case .scaling:
+            return "circle.grid.cross.fill"
+        case .staining:
+            return "paintbrush.fill"
+        case .poorCirculation:
+            return "arrow.triangle.2.circlepath"
+        }
+    }
+}
+
 @Model
 final class PoolTest {
 
@@ -35,6 +69,7 @@ final class PoolTest {
 
     // MARK: - Meta
     var notes: String
+    var visualIndicators: [String] = []
 
     /// AI-generated assessment text stored alongside the test record
     var aiAssessment: String?
@@ -56,6 +91,7 @@ final class PoolTest {
         temperatureFahrenheit: Double? = nil,
         saltLevel: Double? = nil,
         notes: String = "",
+        visualIndicators: [String] = [],
         aiAssessment: String? = nil
     ) {
         self.id = id
@@ -69,6 +105,7 @@ final class PoolTest {
         self.temperatureFahrenheit = temperatureFahrenheit
         self.saltLevel = saltLevel
         self.notes = notes
+        self.visualIndicators = visualIndicators
         self.aiAssessment = aiAssessment
         self.treatments = []
     }

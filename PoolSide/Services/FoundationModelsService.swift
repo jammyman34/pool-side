@@ -1,17 +1,14 @@
 import Foundation
 import FoundationModels
 
-// MARK: - Foundation Models Service (iOS 18.2+, Apple Intelligence devices)
+// MARK: - Foundation Models Service (iOS 26.0+, Apple Intelligence devices)
 
-@available(iOS 18.2, *)
+@available(iOS 26.0, *)
 final class FoundationModelsService: AIService, @unchecked Sendable {
 
     var isAvailable: Bool {
         // FoundationModels requires Apple Intelligence — A17 Pro / M-series chips
-        if #available(iOS 18.2, *) {
-            return SystemLanguageModel.default.isAvailable
-        }
-        return false
+        SystemLanguageModel.default.isAvailable
     }
 
     func generateRecommendations(for request: AIRecommendationRequest) async throws -> AIRecommendationResponse {

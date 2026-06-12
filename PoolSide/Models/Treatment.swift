@@ -35,6 +35,13 @@ final class Treatment {
     /// The parameter this treatment targets (e.g. "pH", "freeChlorine")
     var targetParameter: String
 
+    /// Minutes to wait after completing THIS treatment before the next one is ready.
+    /// 0 = no wait required. Used to schedule local notifications.
+    var minutesBeforeNext: Int
+
+    /// Display order within a treatment plan (lower = first)
+    var sortOrder: Int
+
     // MARK: - Relationship
     var poolTest: PoolTest?
 
@@ -52,6 +59,8 @@ final class Treatment {
         completedAt: Date? = nil,
         isAIGenerated: Bool = true,
         targetParameter: String = "",
+        minutesBeforeNext: Int = 0,
+        sortOrder: Int = 0,
         poolTest: PoolTest? = nil
     ) {
         self.id = id
@@ -66,6 +75,8 @@ final class Treatment {
         self.completedAt = completedAt
         self.isAIGenerated = isAIGenerated
         self.targetParameter = targetParameter
+        self.minutesBeforeNext = minutesBeforeNext
+        self.sortOrder = sortOrder
         self.poolTest = poolTest
     }
 

@@ -9,7 +9,8 @@ final class RuleBasedService: AIService, @unchecked Sendable {
     private let engine = ChemistryEngine()
 
     func generateRecommendations(for request: AIRecommendationRequest) async throws -> AIRecommendationResponse {
-        let treatments = engine.ruleTreatments(for: request.currentTest, config: request.poolConfig)
+        var treatments = engine.ruleTreatments(for: request.currentTest, config: request.poolConfig)
+        treatments.append(contentsOf: visualIndicatorTreatments(for: request.currentTest))
         let assessment = buildAssessment(for: request, treatments: treatments)
         return AIRecommendationResponse(treatments: treatments, assessmentText: assessment)
     }
@@ -39,6 +40,10 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             parts.append("\(count) parameter\(count == 1 ? "" : "s") \(count == 1 ? "is" : "are") outside ideal range.")
         }
 
+        if !test.visualIndicators.isEmpty {
+            parts.append("Visual indicators noted: \(test.visualIndicators.joined(separator: ", ")).")
+        }
+
         // Check for history trends
         let recentTests = request.recentHistory.prefix(3)
         if recentTests.count >= 2 {
@@ -52,5 +57,40 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         parts.append("\(treatments.count) treatment\(treatments.count == 1 ? "" : "s") recommended.")
 
         return parts.joined(separator: " ")
+    }
+
+    private func visualIndicatorTreatments(for test: PoolTest) -> [TreatmentTemplate] {
+        var treatments: [TreatmentTemplate] = []
+        let indicators = Set(test.visualIndicators)
+
+        if indicators.contains(VisualIndicator.greenWater.rawValue) || indicators.contains(VisualIndicator.algaeSpots.rawValue) {
+            treatments.append(TreatmentTemplate(
+                chemicalName: "Chlorine Shock",
+                actionDescription: "Shock pool to address visible algae",
+                amount: 1,
+                unit: "dose per label",
+                instructions: "Brush affected surfaces, run the pump continuously, and add chlorine shock according to the product label for your pool volume. Retest chlorine and pH after circulation clears.",
+                targetParameter: "visualIndicators",
+                urgency: .immediate,
+                minutesBeforeNext: 480,
+                sortOrder: 900
+            ))
+        }
+
+        if indicators.contains(VisualIndicator.cloudyWater.rawValue) {
+            treatments.append(TreatmentTemplate(
+                chemicalName: "Clarifier",
+                actionDescription: "Improve water clarity",
+                amount: 1,
+                unit: "dose per label",
+                instructions: "Clean or backwash the filter, run circulation, and add clarifier according to the label. Avoid adding more clarifier than directed.",
+                targetParameter: "visualIndicators",
+                urgency: .recommended,
+                minutesBeforeNext: 0,
+                sortOrder: 901
+            ))
+        }
+
+        return treatments
     }
 }

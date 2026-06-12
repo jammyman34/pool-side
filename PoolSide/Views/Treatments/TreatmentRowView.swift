@@ -151,3 +151,42 @@ struct TreatmentRowView: View {
         .foregroundStyle(PoolColor.poolTeal)
     }
 }
+
+// MARK: - Previews
+
+#Preview("Pending — Immediate") {
+    TreatmentRowView(
+        treatment: Treatment(
+            chemicalName: "pH Decreaser (Muriatic Acid)",
+            actionDescription: "Lower pH to ideal range (7.2 – 7.6)",
+            amount: 1.5,
+            unit: "lbs",
+            instructions: "Add slowly to deep end of pool while pump runs. Never pre-mix with other chemicals. Retest in 4 hours.",
+            urgency: .immediate
+        ),
+        showCheckbox: true,
+        onComplete: {}
+    )
+    .background(PoolColor.oceanBlue)
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Completed") {
+    let treatment = Treatment(
+        chemicalName: "Alkalinity Increaser (Sodium Bicarbonate)",
+        actionDescription: "Raise total alkalinity to 80 – 120 ppm",
+        amount: 2,
+        unit: "lbs",
+        instructions: "Add directly to pool with pump running.",
+        urgency: .recommended,
+        isCompleted: true,
+        completedAt: Date().addingTimeInterval(-3600)
+    )
+    return TreatmentRowView(treatment: treatment, showCheckbox: false)
+        .background(PoolColor.oceanBlue)
+        .padding()
+        .background(PoolColor.appBackground)
+        .preferredColorScheme(.dark)
+}

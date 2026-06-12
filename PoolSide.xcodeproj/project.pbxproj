@@ -1,0 +1,516 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03BA36BE2566CCFA48AB6C8E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 555ABE48B8891E861FCAD149 /* SettingsView.swift */; };
+		0607AFB2A4783B87439B2DDC /* Date+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E85B0902D6CABED87D7B54D /* Date+Extensions.swift */; };
+		1D925055E573DF7A2FC9F39B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3130086B3847FD28B0FA7A63 /* ContentView.swift */; };
+		1E976E6D4D68EE4771BF17E2 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC26E6406C535DD54CC22654 /* AIService.swift */; };
+		1F297DA8D2C19DA99D2635CD /* PoolViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7FCDD2AFA1595D96CE3CF96 /* PoolViewModel.swift */; };
+		27DC9C214EC1AB86E6D987EC /* FoundationModelsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCD17832DAFDD11342727FA2 /* FoundationModelsService.swift */; };
+		2D00654786C4660B3CF01925 /* RuleBasedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD49876B82B4C8A0A8CAA29F /* RuleBasedService.swift */; };
+		2E3A41EFA7183A9AED322134 /* PoolTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5257F2A016A318F0C4AF595 /* PoolTest.swift */; };
+		2F48CE6D03AB6C55D0C02293 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6BCD6BE70E4E5DA87DE2559 /* InsightsView.swift */; };
+		32D56213A60E1192149474EE /* TreatmentCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C65FE5D657EB1E72327194 /* TreatmentCardView.swift */; };
+		371DB45C369032F616431D02 /* Treatment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ECB4659535BC97B6A35D4D7 /* Treatment.swift */; };
+		3FB2B6145D90E90F1624A8E1 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2036662EAE5AE1029289E2D6 /* HistoryView.swift */; };
+		46DF8F5D092C7092A89DFB48 /* ChemicalStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67624E2C5112709EA178E028 /* ChemicalStatusCard.swift */; };
+		4AB9D1BD1174154655552DC6 /* TreatmentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAF660F26C3A3751D6F8E7AA /* TreatmentsView.swift */; };
+		5325E4C01AF239F5FCF4E84D /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0A4C8E332A7AEA46A80C54 /* DashboardView.swift */; };
+		5CEEAD65D92EA288E7C811C9 /* PoolConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03997BD5D8BB0BCD1D084DE1 /* PoolConfiguration.swift */; };
+		6571B70B1EC96A122198DB26 /* TestDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */; };
+		8CE42F94F26BB1ECC4596E4F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E9A2DCAFE611D5B8D72E73 /* StatusBadge.swift */; };
+		8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40260884F73467DEAD0224AF /* NotificationService.swift */; };
+		AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DF5015684F5FE62BCF2E0C /* AddTestView.swift */; };
+		B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */; };
+		BD045FD26E8F2E7894105DE9 /* ToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413760B903EFB0B7EE3867F8 /* ToastView.swift */; };
+		C53647315EEDAFB8B43D7D00 /* TreatmentRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8AFE290F74CD856D506AE4A /* TreatmentRowView.swift */; };
+		CC1096109839EA7AB5077BD2 /* PoolSideApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13BFA3F3D097AC3C0C77BD27 /* PoolSideApp.swift */; };
+		DCE555DE08A9B1037986EF5A /* Color+PoolSide.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE51FDEA4EA9DB252FE6E24 /* Color+PoolSide.swift */; };
+		F2C1272549890EA59FCED8E3 /* TreatmentPlanSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9227EFAE07F3F0E9EA12F090 /* TreatmentPlanSheet.swift */; };
+		F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1D60BAEFC35408A9A85109 /* ChemistryEngine.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		03997BD5D8BB0BCD1D084DE1 /* PoolConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConfiguration.swift; sourceTree = "<group>"; };
+		13BFA3F3D097AC3C0C77BD27 /* PoolSideApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolSideApp.swift; sourceTree = "<group>"; };
+		2036662EAE5AE1029289E2D6 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		24DF5015684F5FE62BCF2E0C /* AddTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTestView.swift; sourceTree = "<group>"; };
+		2D0A4C8E332A7AEA46A80C54 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		3130086B3847FD28B0FA7A63 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		40260884F73467DEAD0224AF /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		413760B903EFB0B7EE3867F8 /* ToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastView.swift; sourceTree = "<group>"; };
+		49E9A2DCAFE611D5B8D72E73 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
+		555ABE48B8891E861FCAD149 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		6309CFC28AE3D6610CFB9CA4 /* Pool Side.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Pool Side.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		67624E2C5112709EA178E028 /* ChemicalStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChemicalStatusCard.swift; sourceTree = "<group>"; };
+		6E85B0902D6CABED87D7B54D /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
+		6ECB4659535BC97B6A35D4D7 /* Treatment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Treatment.swift; sourceTree = "<group>"; };
+		8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDetailView.swift; sourceTree = "<group>"; };
+		9227EFAE07F3F0E9EA12F090 /* TreatmentPlanSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentPlanSheet.swift; sourceTree = "<group>"; };
+		A2B1172BBFB76FCBAB212A92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A7C65FE5D657EB1E72327194 /* TreatmentCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentCardView.swift; sourceTree = "<group>"; };
+		A7FCDD2AFA1595D96CE3CF96 /* PoolViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolViewModel.swift; sourceTree = "<group>"; };
+		A8AFE290F74CD856D506AE4A /* TreatmentRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentRowView.swift; sourceTree = "<group>"; };
+		AD49876B82B4C8A0A8CAA29F /* RuleBasedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleBasedService.swift; sourceTree = "<group>"; };
+		B5257F2A016A318F0C4AF595 /* PoolTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolTest.swift; sourceTree = "<group>"; };
+		B6BCD6BE70E4E5DA87DE2559 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		BCD17832DAFDD11342727FA2 /* FoundationModelsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationModelsService.swift; sourceTree = "<group>"; };
+		CAE51FDEA4EA9DB252FE6E24 /* Color+PoolSide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+PoolSide.swift"; sourceTree = "<group>"; };
+		FAF660F26C3A3751D6F8E7AA /* TreatmentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentsView.swift; sourceTree = "<group>"; };
+		FC26E6406C535DD54CC22654 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
+		FD1D60BAEFC35408A9A85109 /* ChemistryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChemistryEngine.swift; sourceTree = "<group>"; };
+		FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		05B67421F179AA5159E886CD /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				49E9A2DCAFE611D5B8D72E73 /* StatusBadge.swift */,
+				413760B903EFB0B7EE3867F8 /* ToastView.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		2C7ABFBC3C2F0C286F22180C /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				03997BD5D8BB0BCD1D084DE1 /* PoolConfiguration.swift */,
+				B5257F2A016A318F0C4AF595 /* PoolTest.swift */,
+				6ECB4659535BC97B6A35D4D7 /* Treatment.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		36512092B3FAFB313A096836 /* Insights */ = {
+			isa = PBXGroup;
+			children = (
+				B6BCD6BE70E4E5DA87DE2559 /* InsightsView.swift */,
+			);
+			path = Insights;
+			sourceTree = "<group>";
+		};
+		3A86B35222F86BEF400C7DB0 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				555ABE48B8891E861FCAD149 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		4F69D6FBFF84915859B18E81 /* Treatments */ = {
+			isa = PBXGroup;
+			children = (
+				A7C65FE5D657EB1E72327194 /* TreatmentCardView.swift */,
+				9227EFAE07F3F0E9EA12F090 /* TreatmentPlanSheet.swift */,
+				A8AFE290F74CD856D506AE4A /* TreatmentRowView.swift */,
+				FAF660F26C3A3751D6F8E7AA /* TreatmentsView.swift */,
+			);
+			path = Treatments;
+			sourceTree = "<group>";
+		};
+		5067D30786992F35FC4C32F7 /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				67624E2C5112709EA178E028 /* ChemicalStatusCard.swift */,
+				2D0A4C8E332A7AEA46A80C54 /* DashboardView.swift */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		5B46F110FCE2F9F9A798A4F5 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				2036662EAE5AE1029289E2D6 /* HistoryView.swift */,
+				8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */,
+			);
+			path = History;
+			sourceTree = "<group>";
+		};
+		6273ECD5E22D132B76EBF5EF /* PoolSide */ = {
+			isa = PBXGroup;
+			children = (
+				FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */,
+				3130086B3847FD28B0FA7A63 /* ContentView.swift */,
+				A2B1172BBFB76FCBAB212A92 /* Info.plist */,
+				13BFA3F3D097AC3C0C77BD27 /* PoolSideApp.swift */,
+				F1620E1E1A00368A9D876C21 /* Extensions */,
+				2C7ABFBC3C2F0C286F22180C /* Models */,
+				A664D93FFE0BFE1680980E89 /* Services */,
+				BBB3F6E19B7F92C1D7208B47 /* ViewModels */,
+				9FE651517B2EAC666399DAC8 /* Views */,
+			);
+			path = PoolSide;
+			sourceTree = "<group>";
+		};
+		9B14C52A511C582E2486A4AC /* TestEntry */ = {
+			isa = PBXGroup;
+			children = (
+				24DF5015684F5FE62BCF2E0C /* AddTestView.swift */,
+			);
+			path = TestEntry;
+			sourceTree = "<group>";
+		};
+		9FE651517B2EAC666399DAC8 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				05B67421F179AA5159E886CD /* Components */,
+				5067D30786992F35FC4C32F7 /* Dashboard */,
+				5B46F110FCE2F9F9A798A4F5 /* History */,
+				36512092B3FAFB313A096836 /* Insights */,
+				3A86B35222F86BEF400C7DB0 /* Settings */,
+				9B14C52A511C582E2486A4AC /* TestEntry */,
+				4F69D6FBFF84915859B18E81 /* Treatments */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A664D93FFE0BFE1680980E89 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				FC26E6406C535DD54CC22654 /* AIService.swift */,
+				FD1D60BAEFC35408A9A85109 /* ChemistryEngine.swift */,
+				BCD17832DAFDD11342727FA2 /* FoundationModelsService.swift */,
+				40260884F73467DEAD0224AF /* NotificationService.swift */,
+				AD49876B82B4C8A0A8CAA29F /* RuleBasedService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		BBB3F6E19B7F92C1D7208B47 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				A7FCDD2AFA1595D96CE3CF96 /* PoolViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		DE4425BB152244674896B3C8 = {
+			isa = PBXGroup;
+			children = (
+				6273ECD5E22D132B76EBF5EF /* PoolSide */,
+				E175366B67781B93CA631081 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E175366B67781B93CA631081 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6309CFC28AE3D6610CFB9CA4 /* Pool Side.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F1620E1E1A00368A9D876C21 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				CAE51FDEA4EA9DB252FE6E24 /* Color+PoolSide.swift */,
+				6E85B0902D6CABED87D7B54D /* Date+Extensions.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		38B26B493746009E613DB89B /* PoolSide */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 75EE5108F4F0FD69966C093C /* Build configuration list for PBXNativeTarget "PoolSide" */;
+			buildPhases = (
+				D375AF61EC95B4BD3BDD5C40 /* Sources */,
+				1B93FD9EB96389495E298D06 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PoolSide;
+			packageProductDependencies = (
+			);
+			productName = PoolSide;
+			productReference = 6309CFC28AE3D6610CFB9CA4 /* Pool Side.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		616F9721861C867647C772C0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2650;
+			};
+			buildConfigurationList = 4C0B3A621F7A33B93B4E1E55 /* Build configuration list for PBXProject "PoolSide" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = DE4425BB152244674896B3C8;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E175366B67781B93CA631081 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				38B26B493746009E613DB89B /* PoolSide */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1B93FD9EB96389495E298D06 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D375AF61EC95B4BD3BDD5C40 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E976E6D4D68EE4771BF17E2 /* AIService.swift in Sources */,
+				AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */,
+				46DF8F5D092C7092A89DFB48 /* ChemicalStatusCard.swift in Sources */,
+				F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */,
+				DCE555DE08A9B1037986EF5A /* Color+PoolSide.swift in Sources */,
+				1D925055E573DF7A2FC9F39B /* ContentView.swift in Sources */,
+				5325E4C01AF239F5FCF4E84D /* DashboardView.swift in Sources */,
+				0607AFB2A4783B87439B2DDC /* Date+Extensions.swift in Sources */,
+				27DC9C214EC1AB86E6D987EC /* FoundationModelsService.swift in Sources */,
+				3FB2B6145D90E90F1624A8E1 /* HistoryView.swift in Sources */,
+				2F48CE6D03AB6C55D0C02293 /* InsightsView.swift in Sources */,
+				8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */,
+				5CEEAD65D92EA288E7C811C9 /* PoolConfiguration.swift in Sources */,
+				CC1096109839EA7AB5077BD2 /* PoolSideApp.swift in Sources */,
+				2E3A41EFA7183A9AED322134 /* PoolTest.swift in Sources */,
+				1F297DA8D2C19DA99D2635CD /* PoolViewModel.swift in Sources */,
+				2D00654786C4660B3CF01925 /* RuleBasedService.swift in Sources */,
+				03BA36BE2566CCFA48AB6C8E /* SettingsView.swift in Sources */,
+				8CE42F94F26BB1ECC4596E4F /* StatusBadge.swift in Sources */,
+				6571B70B1EC96A122198DB26 /* TestDetailView.swift in Sources */,
+				BD045FD26E8F2E7894105DE9 /* ToastView.swift in Sources */,
+				371DB45C369032F616431D02 /* Treatment.swift in Sources */,
+				32D56213A60E1192149474EE /* TreatmentCardView.swift in Sources */,
+				F2C1272549890EA59FCED8E3 /* TreatmentPlanSheet.swift in Sources */,
+				C53647315EEDAFB8B43D7D00 /* TreatmentRowView.swift in Sources */,
+				4AB9D1BD1174154655552DC6 /* TreatmentsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0AB80C873BC83579F9C6ED08 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PoolSide/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
+				PRODUCT_NAME = "Pool Side";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1294DED14974C90EA445D8DF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 5CWYP72CU8;
+				ENABLE_BITCODE = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		284D1BB5957F25E3C351FB18 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 5CWYP72CU8;
+				ENABLE_BITCODE = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B9F0425AA9238917B1DAC24A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG = YES;
+				INFOPLIST_FILE = PoolSide/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
+				PRODUCT_NAME = "Pool Side";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4C0B3A621F7A33B93B4E1E55 /* Build configuration list for PBXProject "PoolSide" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1294DED14974C90EA445D8DF /* Debug */,
+				284D1BB5957F25E3C351FB18 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		75EE5108F4F0FD69966C093C /* Build configuration list for PBXNativeTarget "PoolSide" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B9F0425AA9238917B1DAC24A /* Debug */,
+				0AB80C873BC83579F9C6ED08 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 616F9721861C867647C772C0 /* Project object */;
+}

@@ -9,7 +9,7 @@ protocol AIService: Sendable {
 
 // MARK: - Request
 
-struct AIRecommendationRequest {
+struct AIRecommendationRequest: @unchecked Sendable {
     let currentTest: PoolTest
     let recentHistory: [PoolTest]   // Up to 14 most recent tests, newest first
     let poolConfig: PoolConfiguration
@@ -39,6 +39,9 @@ struct AIRecommendationRequest {
         }
         if !currentTest.notes.isEmpty {
             parts.append("  Notes: \(currentTest.notes)")
+        }
+        if !currentTest.visualIndicators.isEmpty {
+            parts.append("  Visual Indicators: \(currentTest.visualIndicators.joined(separator: ", "))")
         }
 
         let historyToShow = recentHistory.prefix(7)

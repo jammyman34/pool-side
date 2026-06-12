@@ -148,8 +148,45 @@ struct RangeBar: View {
     }
 }
 
-extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
+// MARK: - Previews
+
+#Preview("Ideal pH") {
+    ChemicalStatusCard(reading: ChemicalReading(
+        parameter: "pH",
+        key: "pH",
+        value: 7.4,
+        unit: "",
+        status: .ideal,
+        idealRange: "7.2 – 7.6",
+        trend: .stable
+    ))
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Critical Chlorine") {
+    ChemicalStatusCard(reading: ChemicalReading(
+        parameter: "Free Chlorine",
+        key: "freeChlorine",
+        value: 0.2,
+        unit: "ppm",
+        status: .critical,
+        idealRange: "1 – 3 ppm",
+        trend: .falling
+    ))
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Range Bar") {
+    VStack(spacing: 16) {
+        RangeBar(value: 7.4, parameter: "pH", status: .ideal)
+        RangeBar(value: 6.6, parameter: "pH", status: .critical)
+        RangeBar(value: 130, parameter: "totalAlkalinity", status: .slightlyHigh)
     }
+    .padding()
+    .background(PoolColor.appBackground)
+    .preferredColorScheme(.dark)
 }
