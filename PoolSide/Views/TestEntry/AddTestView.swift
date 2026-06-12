@@ -235,6 +235,7 @@ struct AddTestView: View {
 
     private var heroBanner: some View {
         let headerHeight: CGFloat = 250
+        let topPadding: CGFloat = 16
         let contentBottomPadding: CGFloat = 56
 
         return GeometryReader { proxy in
@@ -273,7 +274,8 @@ struct AddTestView: View {
                     .padding(.bottom, -40)
             }
         }
-        .frame(height: headerHeight)
+        .padding(.top, topPadding)
+        .frame(height: headerHeight + topPadding)
         .clipShape(RoundedRectangle(cornerRadius: 0)) // full width
         .ignoresSafeArea(edges: .top)
     }

@@ -99,11 +99,16 @@ struct TreatmentPlanSheet: View {
                             assessmentCard(assessment)
                         }
                     }
+                    .padding(18)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
                     .padding(.horizontal, 16)
-                    .padding(.top, 24)
+                    .padding(.top, -20)
                     .padding(.bottom, showsDoneButton ? 100 : 24)
                 }
             }
+            .ignoresSafeArea(edges: .top)
 
             if showsDoneButton {
                 Button { dismiss() } label: {
@@ -126,6 +131,7 @@ struct TreatmentPlanSheet: View {
         }
         .navigationTitle("Treatment Plan")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar {
             if showsCloseButton {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -150,6 +156,7 @@ struct TreatmentPlanSheet: View {
 
     private var heroBanner: some View {
         let headerHeight: CGFloat = 250
+        let topPadding: CGFloat = 16
         let contentBottomPadding: CGFloat = 56
 
         return GeometryReader { proxy in
@@ -195,7 +202,8 @@ struct TreatmentPlanSheet: View {
                     .padding(.bottom, -40)
             }
         }
-        .frame(height: headerHeight)
+        .padding(.top, topPadding)
+        .frame(height: headerHeight + topPadding)
         .clipShape(RoundedRectangle(cornerRadius: 0))
         .ignoresSafeArea(edges: .top)
     }
