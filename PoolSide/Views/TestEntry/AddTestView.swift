@@ -25,7 +25,7 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
-    @State private var chemicalOrder: [ChemicalField] = ChemicalField.allCases
+    @State private var chemicalOrder: [ChemicalField] = ChemicalField.defaultDisplayOrder
     @State private var draggedChemical: ChemicalField? = nil
     @State private var chemicalRowFrames: [ChemicalField: CGRect] = [:]
     @State private var dragStartFrame: CGRect = .zero
@@ -900,6 +900,17 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
     case saltLevel
 
     var id: String { rawValue }
+
+    static let defaultDisplayOrder: [ChemicalField] = [
+        .calciumHardness,
+        .totalChlorine,
+        .freeChlorine,
+        .pH,
+        .totalAlkalinity,
+        .cyanuricAcid,
+        .temperature,
+        .saltLevel
+    ]
 
     var label: String {
         switch self {
