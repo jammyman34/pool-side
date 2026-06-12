@@ -1,10 +1,16 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct AddTestView: View {
 
     /// When non-nil, the view is in "edit" mode for an existing test
     var editingTest: PoolTest? = nil
+
+    init(editingTest: PoolTest? = nil) {
+        self.editingTest = editingTest
+        _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -87,6 +93,9 @@ struct AddTestView: View {
                                         divider
                                     }
                                 }
+
+                                divider
+                                resetChemicalOrderButton
                             }
                             .animation(.spring(response: 0.28, dampingFraction: 0.86), value: chemicalOrder)
 
@@ -120,6 +129,7 @@ struct AddTestView: View {
                     }
                     .padding(.bottom, 100)
                 }
+                .scrollDisabled(draggedChemical != nil)
                 .ignoresSafeArea(edges: .top)
 
                 // Treatment button pinned at bottom
@@ -244,6 +254,21 @@ struct AddTestView: View {
 
         return HStack(alignment: .top, spacing: 16) {
             ChemicalIcon(field: field, size: 54)
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+                .overlay {
+                    ReorderLongPressOverlay(
+                        onBegan: {
+                            beginChemicalDrag(for: field)
+                        },
+                        onChanged: { translation in
+                            dragTranslation = translation
+                            updateChemicalOrder(for: field, with: translation)
+                        },
+                        onEnded: {
+                            endChemicalDrag()
+                        }
+                    )
+                }
                 .accessibilityLabel("Reorder \(label)")
                 .accessibilityHint("Touch and hold, then drag up or down to reorder this chemical")
 
@@ -292,8 +317,6 @@ struct AddTestView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .contentShape(LeadingDragHandleShape(width: 94))
-        .gesture(reorderGesture(for: field))
     }
 
     private func chemicalDragPreview(
@@ -380,59 +403,65 @@ struct AddTestView: View {
         }
     }
 
-    private func reorderGesture(for field: ChemicalField) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("chemicalList")))
-            .onChanged { value in
-                switch value {
-                case .first(true):
-                    beginChemicalDrag(for: field)
-                case .second(true, let drag):
-                    beginChemicalDrag(for: field)
-                    guard let drag else { return }
-                    dragTranslation = drag.translation
-                    updateChemicalOrder(for: field, at: drag.location.y)
-                default:
-                    break
-                }
-            }
-            .onEnded { _ in
-                endChemicalDrag()
-            }
+    private var resetChemicalOrderButton: some View {
+        Button {
+            resetChemicalOrder()
+        } label: {
+            Text("Reset to defaults")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.poolTeal)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
     }
 
     private func beginChemicalDrag(for field: ChemicalField) {
         guard draggedChemical == nil else { return }
+
         dragStartFrame = chemicalRowFrames[field] ?? .zero
         dragTranslation = .zero
         draggedChemical = field
     }
 
-    private func updateChemicalOrder(for field: ChemicalField, at locationY: CGFloat) {
+    private func updateChemicalOrder(for field: ChemicalField, with translation: CGSize) {
         let visibleFields = visibleChemicalFields
-        guard visibleFields.contains(field) else { return }
+        guard visibleFields.contains(field), dragStartFrame != .zero else { return }
 
         var reorderedVisibleFields = visibleFields.filter { $0 != field }
+        let draggedCenterY = dragStartFrame.midY + translation.height
         let insertionIndex = reorderedVisibleFields.firstIndex { candidate in
             guard let frame = chemicalRowFrames[candidate] else { return false }
-            return locationY < frame.midY
+            return draggedCenterY < frame.midY
         } ?? reorderedVisibleFields.count
 
         reorderedVisibleFields.insert(field, at: insertionIndex)
         guard reorderedVisibleFields != visibleFields else { return }
 
         let hiddenFields = chemicalOrder.filter { !visibleFields.contains($0) }
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.88)) {
             chemicalOrder = reorderedVisibleFields + hiddenFields
         }
     }
 
     private func endChemicalDrag() {
+        if draggedChemical != nil {
+            ChemicalField.saveDisplayOrder(chemicalOrder)
+        }
+
         withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
             draggedChemical = nil
             dragTranslation = .zero
             dragStartFrame = .zero
         }
+    }
+
+    private func resetChemicalOrder() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            chemicalOrder = ChemicalField.defaultDisplayOrder
+        }
+        ChemicalField.saveDisplayOrder(ChemicalField.defaultDisplayOrder)
     }
 
     @ViewBuilder
@@ -912,6 +941,25 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
         .saltLevel
     ]
 
+    private static let displayOrderDefaultsKey = "AddTestView.chemicalDisplayOrder"
+
+    static var savedDisplayOrder: [ChemicalField] {
+        guard let savedValues = UserDefaults.standard.stringArray(forKey: displayOrderDefaultsKey) else {
+            return defaultDisplayOrder
+        }
+
+        let savedFields = savedValues.compactMap(ChemicalField.init(rawValue:))
+        let missingFields = defaultDisplayOrder.filter { !savedFields.contains($0) }
+        let validSavedFields = savedFields.filter { defaultDisplayOrder.contains($0) }
+        let orderedFields = validSavedFields + missingFields
+
+        return orderedFields.isEmpty ? defaultDisplayOrder : orderedFields
+    }
+
+    static func saveDisplayOrder(_ order: [ChemicalField]) {
+        UserDefaults.standard.set(order.map(\.rawValue), forKey: displayOrderDefaultsKey)
+    }
+
     var label: String {
         switch self {
         case .pH:
@@ -985,16 +1033,78 @@ private struct ChemicalRowFramePreferenceKey: PreferenceKey {
     }
 }
 
-private struct LeadingDragHandleShape: Shape {
-    let width: CGFloat
+private struct ReorderLongPressOverlay: UIViewRepresentable {
+    let onBegan: () -> Void
+    let onChanged: (CGSize) -> Void
+    let onEnded: () -> Void
 
-    func path(in rect: CGRect) -> Path {
-        Path(CGRect(
-            x: rect.minX,
-            y: rect.minY,
-            width: min(width, rect.width),
-            height: rect.height
-        ))
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onBegan: onBegan, onChanged: onChanged, onEnded: onEnded)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+
+        let recognizer = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleLongPress(_:))
+        )
+        recognizer.minimumPressDuration = 0.5
+        recognizer.allowableMovement = 8
+        recognizer.cancelsTouchesInView = true
+        recognizer.delegate = context.coordinator
+        view.addGestureRecognizer(recognizer)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let onBegan: () -> Void
+        private let onChanged: (CGSize) -> Void
+        private let onEnded: () -> Void
+        private var startLocation: CGPoint?
+
+        init(
+            onBegan: @escaping () -> Void,
+            onChanged: @escaping (CGSize) -> Void,
+            onEnded: @escaping () -> Void
+        ) {
+            self.onBegan = onBegan
+            self.onChanged = onChanged
+            self.onEnded = onEnded
+        }
+
+        @objc func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            let location = recognizer.location(in: view.window)
+
+            switch recognizer.state {
+            case .began:
+                startLocation = location
+                onBegan()
+            case .changed:
+                guard let startLocation else { return }
+                onChanged(CGSize(
+                    width: location.x - startLocation.x,
+                    height: location.y - startLocation.y
+                ))
+            case .ended, .cancelled, .failed:
+                startLocation = nil
+                onEnded()
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            false
+        }
     }
 }
 
