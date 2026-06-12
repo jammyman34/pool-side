@@ -11,6 +11,7 @@ struct TreatmentPlanSheet: View {
     var embedsInNavigationStack: Bool = true
     var showsCloseButton: Bool = true
     var showsDoneButton: Bool = true
+    var onClose: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -127,9 +128,19 @@ struct TreatmentPlanSheet: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if showsCloseButton {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                        .foregroundStyle(PoolColor.poolTeal)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if let onClose {
+                            onClose()
+                        } else {
+                            dismiss()
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .accessibilityLabel("Close")
+                    .foregroundStyle(PoolColor.poolTeal)
                 }
             }
         }
@@ -138,44 +149,55 @@ struct TreatmentPlanSheet: View {
     // MARK: - Hero Banner
 
     private var heroBanner: some View {
-        ZStack(alignment: .bottomLeading) {
-            Image("Pool Water BG")
-                .resizable()
-                .scaledToFill()
-                .frame(height: 180)
-                .clipped()
-                .overlay(PoolColor.poolTeal.opacity(0.78))
+        let headerHeight: CGFloat = 250
+        let contentBottomPadding: CGFloat = 56
 
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
+        return GeometryReader { proxy in
+            ZStack {
+                Image("Pool Water BG")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: headerHeight + 160)
+                    .offset(y: -80)
+                    .clipped()
+
+                PoolColor.poolTeal.opacity(0.78)
+            }
+            .frame(width: proxy.size.width, height: headerHeight)
+            .clipped()
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("We recommend")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.85))
                     Text("\(allTreatments.count) treatment\(allTreatments.count == 1 ? "" : "s")")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(.white)
+                        .lineLimit(2)
 
                     if pendingTreatments.isEmpty && !allTreatments.isEmpty {
                         Label("All done!", systemImage: "checkmark.circle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.9))
-                            .padding(.top, 2)
+                            .padding(.top, 4)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 24)
-
-                Spacer()
-
+                .padding(.leading, 20)
+                .padding(.trailing, 210)
+                .padding(.bottom, contentBottomPadding)
+            }
+            .overlay(alignment: .bottomTrailing) {
                 Image("Treatment Hero")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 95)
+                    .frame(width: 180)
                     .padding(.trailing, 20)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, -40)
             }
         }
-        .frame(height: 180)
+        .frame(height: headerHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 0))
+        .ignoresSafeArea(edges: .top)
     }
 
     // MARK: - Section Header
@@ -252,6 +274,11 @@ struct TreatmentPlanSheet: View {
 
         // Mark complete
         viewModel.completeTreatment(treatment)
+        do {
+            try modelContext.save()
+        } catch {
+            viewModel.lastError = error.localizedDescription
+        }
 
         // Find next pending step
         let nextPending = test.treatments

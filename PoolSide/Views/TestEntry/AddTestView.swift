@@ -6,9 +6,11 @@ struct AddTestView: View {
 
     /// When non-nil, the view is in "edit" mode for an existing test
     var editingTest: PoolTest? = nil
+    var startsOnTreatmentPlan: Bool = false
 
-    init(editingTest: PoolTest? = nil) {
+    init(editingTest: PoolTest? = nil, startsOnTreatmentPlan: Bool = false) {
         self.editingTest = editingTest
+        self.startsOnTreatmentPlan = startsOnTreatmentPlan
         _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
     }
 
@@ -31,6 +33,7 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
+    @State private var originalSnapshot: TestFormSnapshot? = nil
     @State private var chemicalOrder: [ChemicalField] = ChemicalField.defaultDisplayOrder
     @State private var draggedChemical: ChemicalField? = nil
     @State private var chemicalRowFrames: [ChemicalField: CGRect] = [:]
@@ -40,9 +43,12 @@ struct AddTestView: View {
     // Post-save
     @State private var savedTest: PoolTest? = nil
     @State private var showingTreatmentPlan: Bool = false
+    @State private var didAutoShowInitialTreatmentPlan: Bool = false
     @State private var isSaving: Bool = false
 
-    private var isEditing: Bool { editingTest != nil }
+    private var activeSavedTest: PoolTest? { editingTest ?? savedTest }
+
+    private var isEditing: Bool { editingTest != nil || savedTest != nil }
 
     private var navTitle: String {
         if editingTest != nil {
@@ -56,6 +62,39 @@ struct AddTestView: View {
             return "\(shortDate(test.date)), \(timeString(test.date)) test results"
         }
         return "test results"
+    }
+
+    private var hasExistingTreatmentPlan: Bool {
+        !(activeSavedTest?.treatments.isEmpty ?? true)
+    }
+
+    private var hasFormChanges: Bool {
+        guard isEditing, let originalSnapshot else { return !isEditing }
+        return currentSnapshot != originalSnapshot
+    }
+
+    private var treatmentButtonTitle: String {
+        if isEditing {
+            if hasFormChanges { return "Update Treatment" }
+            if hasExistingTreatmentPlan { return "View Treatment" }
+        }
+        return "Show Treatment"
+    }
+
+    private var currentSnapshot: TestFormSnapshot {
+        TestFormSnapshot(
+            date: date,
+            pH: pH,
+            freeChlorine: freeChlorine,
+            totalChlorine: totalChlorine,
+            totalAlkalinity: totalAlkalinity,
+            calciumHardness: calciumHardness,
+            cyanuricAcid: cyanuricAcid,
+            temperatureFahrenheit: includeTemperature ? temperature : nil,
+            saltLevel: includeSalt ? saltLevel : nil,
+            notes: notes,
+            visualIndicators: orderedVisualIndicators
+        )
     }
 
     private var visibleChemicalFields: [ChemicalField] {
@@ -140,7 +179,7 @@ struct AddTestView: View {
                         if isSaving {
                             ProgressView().tint(.white)
                         } else {
-                            Text("Show Treatment")
+                            Text(treatmentButtonTitle)
                                 .font(.headline)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.white)
@@ -179,13 +218,17 @@ struct AddTestView: View {
                     TreatmentPlanSheet(
                         test: test,
                         embedsInNavigationStack: false,
-                        showsCloseButton: false,
-                        showsDoneButton: false
+                        showsCloseButton: true,
+                        showsDoneButton: false,
+                        onClose: { dismiss() }
                     )
                 }
             }
         }
         .onAppear(perform: prefill)
+        .task {
+            await showInitialTreatmentPlanIfNeeded()
+        }
     }
 
     // MARK: - Hero Banner
@@ -846,6 +889,7 @@ struct AddTestView: View {
             if let s = test.saltLevel { saltLevel = s; includeSalt = true }
             notes = test.notes
             selectedVisualIndicators = Set(test.visualIndicators)
+            originalSnapshot = currentSnapshot
         } else if let last = tests.first {
             pH = last.pH
             freeChlorine = last.freeChlorine
@@ -859,13 +903,33 @@ struct AddTestView: View {
     }
 
     @MainActor
+    private func showInitialTreatmentPlanIfNeeded() async {
+        guard startsOnTreatmentPlan,
+              !didAutoShowInitialTreatmentPlan,
+              let editingTest
+        else { return }
+
+        didAutoShowInitialTreatmentPlan = true
+        savedTest = editingTest
+        await Task.yield()
+        showingTreatmentPlan = true
+    }
+
+    @MainActor
     private func save() async {
         isSaving = true
         defer { isSaving = false }
 
+        if let existing = activeSavedTest, !hasFormChanges, hasExistingTreatmentPlan {
+            savedTest = existing
+            showingTreatmentPlan = true
+            return
+        }
+
+        let shouldReplaceCompletedPlan = activeSavedTest != nil && hasFormChanges
         let test: PoolTest
 
-        if let existing = editingTest {
+        if let existing = activeSavedTest {
             // Update existing
             existing.date = date
             existing.pH = pH
@@ -901,9 +965,17 @@ struct AddTestView: View {
         await viewModel.generateRecommendations(
             for: test,
             recentTests: recent,
-            modelContext: modelContext
+            modelContext: modelContext,
+            replacingCompletedPlan: shouldReplaceCompletedPlan
         )
 
+        do {
+            try modelContext.save()
+        } catch {
+            viewModel.lastError = error.localizedDescription
+        }
+
+        originalSnapshot = currentSnapshot
         savedTest = test
         showingTreatmentPlan = true
     }
@@ -916,6 +988,20 @@ struct AddTestView: View {
     private func timeString(_ date: Date) -> String {
         let f = DateFormatter(); f.timeStyle = .short; return f.string(from: date)
     }
+}
+
+private struct TestFormSnapshot: Equatable {
+    let date: Date
+    let pH: Double
+    let freeChlorine: Double
+    let totalChlorine: Double
+    let totalAlkalinity: Double
+    let calciumHardness: Double
+    let cyanuricAcid: Double
+    let temperatureFahrenheit: Double?
+    let saltLevel: Double?
+    let notes: String
+    let visualIndicators: [String]
 }
 
 private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {

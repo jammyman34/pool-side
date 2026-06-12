@@ -10,7 +10,7 @@ struct DashboardView: View {
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     @State private var showingHistory = false
-    @State private var editingTest: PoolTest? = nil
+    @State private var editRoute: DashboardEditRoute? = nil
     @State private var swipedTestID: UUID? = nil
     @State private var welcomeMessage = DashboardWelcomeMessage.random()
 
@@ -25,14 +25,14 @@ struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         // Hero header
                         headerSection
-                            .padding(.horizontal, 20)
-                            .padding(.top, 16)
-                            .padding(.bottom, 20)
+                            .padding(.horizontal, 28)
+                            .padding(.top, 18)
+                            .padding(.bottom, 18)
 
                         if let test = latestTest {
                             // Score + readings card
                             scoreCard(test: test)
-                                .padding(.horizontal, 16)
+                                .padding(.horizontal, 28)
 
                             // Recent tests
                             recentTestsSection
@@ -53,8 +53,11 @@ struct DashboardView: View {
                 HistoryView()
             }
             // Edit test sheet
-            .fullScreenCover(item: $editingTest) { test in
-                AddTestView(editingTest: test)
+            .fullScreenCover(item: $editRoute) { route in
+                AddTestView(
+                    editingTest: route.test,
+                    startsOnTreatmentPlan: route.startsOnTreatmentPlan
+                )
             }
         }
     }
@@ -62,126 +65,142 @@ struct DashboardView: View {
     // MARK: - Header
 
     private var headerSection: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
                 Text(greetingText)
-                    .font(.subheadline)
+                    .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(PoolColor.secondaryText)
 
-                Group {
-                    if let test = latestTest {
-                        let status = viewModel.overallStatus(for: test)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Your pool looks")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(PoolColor.primaryText)
-                            Text(scoreLabel(test.overallScore).lowercased() + "!")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(status == .ideal ? PoolColor.poolTeal : status.color)
-                        }
-                    } else {
-                        Text(welcomeMessage)
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(PoolColor.primaryText)
-                            .lineLimit(3)
-                    }
-                }
-
-                if let test = latestTest {
-                    Text("Latest Test • \(test.date.relativeDisplay), \(timeString(test.date))")
-                        .font(.caption)
-                        .foregroundStyle(PoolColor.secondaryText)
-                        .padding(.top, 4)
-                }
-            }
-            Spacer()
-            HStack(spacing: 12) {
-                Image("Dashboard Hero")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 180, height: 140)
+                Spacer()
 
                 Button {
                     showingSettings = true
                 } label: {
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(PoolColor.poolTeal)
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 40, weight: .regular))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(PoolColor.primaryText)
                 }
+                .buttonStyle(.plain)
+                .offset(y: -12)
             }
+            .padding(.bottom, -24)
+
+            heroTitle
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 112)
+                .background(alignment: .topTrailing) {
+                    Image("Dashboard Hero")
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(1.9)
+                        .frame(width: 162, height: 160)
+                        .offset(x: 24, y: 0)
+                }
+                .frame(height: latestTest == nil ? 164 : 148)
+
+            if let test = latestTest {
+                HStack(spacing: 5) {
+                    Text("Latest Test")
+                        .fontWeight(.bold)
+                        .foregroundStyle(PoolColor.primaryText)
+                    Text("• \(test.date.relativeDisplay), \(timeString(test.date))")
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+                .font(.system(size: 17, weight: .medium))
+                .padding(.top, 10)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var heroTitle: some View {
+        if let test = latestTest {
+            let status = viewModel.overallStatus(for: test)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your pool looks")
+                    .font(.system(size: 39, weight: .bold, design: .rounded))
+                    .foregroundStyle(PoolColor.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Text(scoreLabel(test.overallScore).lowercased() + "!")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundStyle(status == .ideal ? PoolColor.poolTeal : status.color)
+                    .lineLimit(1)
+            }
+        } else {
+            Text(welcomeMessage)
+                .font(.system(size: 39, weight: .bold, design: .rounded))
+                .foregroundStyle(PoolColor.primaryText)
+                .lineLimit(3)
+                .minimumScaleFactor(0.86)
         }
     }
 
     // MARK: - Score Card
 
     private func scoreCard(test: PoolTest) -> some View {
-        HStack(alignment: .center, spacing: 20) {
-            // Score ring
-            VStack(spacing: 6) {
-                ScoreRing(score: test.overallScore, size: 84)
+        HStack(alignment: .center, spacing: 18) {
+            VStack(spacing: 8) {
+                ScoreRing(score: test.overallScore, size: 118)
                 Text("Pool Score")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(PoolColor.secondaryText)
                 Text(scoreLabel(test.overallScore))
-                    .font(.caption)
-                    .fontWeight(.semibold)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(scoreColor(test.overallScore))
             }
-            .frame(width: 90)
+            .frame(width: 134)
 
-            // Readings list
+            Rectangle()
+                .fill(PoolColor.divider)
+                .frame(width: 1)
+                .padding(.vertical, 6)
+
             VStack(spacing: 0) {
-                let readings = viewModel.readings(for: test)
+                let readings = Array(viewModel.readings(for: test).prefix(5))
                 ForEach(readings) { reading in
                     readingRow(reading)
-                    if reading.id != readings.last?.id {
-                        Divider()
-                            .overlay(PoolColor.divider)
-                    }
                 }
             }
         }
-        .padding(20)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 20)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(PoolColor.divider.opacity(0.7), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
     }
 
     private func readingRow(_ reading: ChemicalReading) -> some View {
-        HStack(spacing: 10) {
-            // Chemical icon
-            Image(reading.parameter == "Free Chlorine" ? "Free Chlorine"
-                : reading.parameter == "Total Chlorine" ? "Total Chlorine"
-                : reading.parameter == "Total Alkalinity" ? "Alkalinity"
-                : reading.parameter == "Calcium Hardness" ? "Hardness"
-                : reading.parameter == "Cyanuric Acid" ? "CYA"
-                : reading.parameter == "Salt Level" ? "Free Chlorine" // fallback
-                : "pH")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 18, height: 18)
-
+        HStack(spacing: 12) {
             Text(reading.parameter)
-                .font(.caption)
-                .foregroundStyle(PoolColor.secondaryText)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(PoolColor.primaryText)
                 .lineLimit(1)
-                .frame(width: 110, alignment: .leading)
+                .minimumScaleFactor(0.78)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Mini bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(PoolColor.divider).frame(height: 5)
                     Capsule()
-                        .fill(reading.status.color)
-                        .frame(width: geo.size.width * barFill(reading), height: 5)
+                        .fill(PoolColor.divider)
+                        .frame(height: 8)
+                    Capsule()
+                        .fill(reading.status.color == PoolColor.statusIdeal ? PoolColor.poolTeal : reading.status.color)
+                        .frame(width: geo.size.width * barFill(reading), height: 8)
                 }
             }
-            .frame(height: 5)
+            .frame(width: 84, height: 8)
 
             Text(formattedValue(reading))
-                .font(.caption)
-                .fontWeight(.semibold)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundStyle(PoolColor.primaryText)
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 42, alignment: .trailing)
                 .monospacedDigit()
         }
         .padding(.vertical, 8)
@@ -197,10 +216,10 @@ struct DashboardView: View {
                     .fontWeight(.bold)
                     .foregroundStyle(PoolColor.primaryText)
                 Spacer()
-                Button("See all") { showingHistory = true }
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(PoolColor.poolTeal)
+//                Button("See all") { showingHistory = true }
+//                    .font(.subheadline)
+//                    .fontWeight(.medium)
+//                    .foregroundStyle(PoolColor.poolTeal)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
@@ -220,7 +239,10 @@ struct DashboardView: View {
                                 if swipedTestID == test.id {
                                     swipedTestID = nil
                                 } else {
-                                    editingTest = test
+                                    editRoute = DashboardEditRoute(
+                                        test: test,
+                                        startsOnTreatmentPlan: true
+                                    )
                                 }
                             }
                     }
@@ -282,8 +304,8 @@ struct DashboardView: View {
     }
 
     private func deleteTest(_ test: PoolTest) {
-        if editingTest?.id == test.id {
-            editingTest = nil
+        if editRoute?.test.id == test.id {
+            editRoute = nil
         }
 
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
@@ -339,7 +361,7 @@ struct DashboardView: View {
         switch score {
         case 90...100: return "Great"
         case 75..<90:  return "Good"
-        case 60..<75:  return "Fair"
+        case 60..<75:  return "Alright"
         case 40..<60:  return "Needs Attention"
         default:       return "Critical"
         }
@@ -384,6 +406,13 @@ struct DashboardView: View {
         f.timeStyle = .short
         return f.string(from: date)
     }
+}
+
+private struct DashboardEditRoute: Identifiable {
+    let test: PoolTest
+    let startsOnTreatmentPlan: Bool
+
+    var id: UUID { test.id }
 }
 
 private enum DashboardWelcomeMessage {

@@ -67,7 +67,8 @@ final class PoolViewModel {
     func generateRecommendations(
         for test: PoolTest,
         recentTests: [PoolTest],
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        replacingCompletedPlan: Bool = false
     ) async {
         isGeneratingRecommendations = true
         lastError = nil
@@ -85,10 +86,13 @@ final class PoolViewModel {
 
             let response = try await service.generateRecommendations(for: request)
 
-            // Remove previous AI-generated pending treatments for this test
-            test.treatments.filter { $0.isAIGenerated && !$0.isCompleted }.forEach {
-                modelContext.delete($0)
-            }
+            // Remove the previous AI-generated plan. Completed steps are preserved for normal regeneration,
+            // but replaced when edited test readings require a fresh treatment plan.
+            test.treatments
+                .filter { $0.isAIGenerated && (replacingCompletedPlan || !$0.isCompleted) }
+                .forEach {
+                    modelContext.delete($0)
+                }
 
             // Insert new treatments
             for template in response.treatments {
