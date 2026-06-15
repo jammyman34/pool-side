@@ -81,9 +81,10 @@ final class PoolViewModel {
             let response = try await service.generateRecommendations(for: request)
 
             // Remove the previous AI-generated plan. Completed steps are preserved for normal regeneration,
-            // but replaced when edited test readings require a fresh treatment plan.
+            // skipped steps are preserved for normal regeneration, but both are replaced when
+            // edited test readings require a fresh treatment plan.
             test.treatments
-                .filter { $0.isAIGenerated && (replacingCompletedPlan || !$0.isCompleted) }
+                .filter { $0.isAIGenerated && (replacingCompletedPlan || (!$0.isCompleted && !$0.isSkipped)) }
                 .forEach {
                     modelContext.delete($0)
                 }
@@ -107,6 +108,20 @@ final class PoolViewModel {
     func completeTreatment(_ treatment: Treatment) {
         treatment.isCompleted = true
         treatment.completedAt = Date()
+        treatment.isSkipped = false
+        treatment.skippedAt = nil
+    }
+
+    func skipTreatment(_ treatment: Treatment) {
+        treatment.isSkipped = true
+        treatment.skippedAt = Date()
+        treatment.isCompleted = false
+        treatment.completedAt = nil
+    }
+
+    func restoreTreatment(_ treatment: Treatment) {
+        treatment.isSkipped = false
+        treatment.skippedAt = nil
     }
 
     // MARK: - Pending Treatments (across all tests)
@@ -114,7 +129,7 @@ final class PoolViewModel {
     func pendingTreatments(from tests: [PoolTest]) -> [Treatment] {
         tests
             .flatMap { $0.treatments }
-            .filter { !$0.isCompleted }
+            .filter { !$0.isCompleted && !$0.isSkipped }
             .sorted { $0.urgency.sortOrder < $1.urgency.sortOrder }
     }
 

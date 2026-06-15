@@ -20,17 +20,22 @@ struct TreatmentPlanSheet: View {
 
     @State private var toastMessage: ToastMessage? = nil
     @State private var showingPermissionAlert: Bool = false
+    @State private var openSwipeTreatmentID: UUID? = nil
 
     private var allTreatments: [Treatment] {
         test.treatments.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private var pendingTreatments: [Treatment] {
-        allTreatments.filter { !$0.isCompleted }
+        allTreatments.filter { !$0.isCompleted && !$0.isSkipped }
     }
 
     private var completedTreatments: [Treatment] {
         allTreatments.filter { $0.isCompleted }
+    }
+
+    private var skippedTreatments: [Treatment] {
+        allTreatments.filter { $0.isSkipped }
     }
 
     var body: some View {
@@ -79,9 +84,13 @@ struct TreatmentPlanSheet: View {
                                 sectionHeader("To Do", count: pendingTreatments.count)
                                 VStack(spacing: 12) {
                                     ForEach(pendingTreatments, id: \.id) { treatment in
-                                        TreatmentCardView(treatment: treatment) { t in
-                                            await completeTreatment(t)
-                                        }
+                                        TreatmentCardView(
+                                            treatment: treatment,
+                                            onComplete: { t in await completeTreatment(t) },
+                                            onSkip: { t in await skipTreatment(t) },
+                                            onRestore: { t in await restoreTreatment(t) },
+                                            openSwipeTreatmentID: $openSwipeTreatmentID
+                                        )
                                     }
                                 }
                             }
@@ -90,7 +99,28 @@ struct TreatmentPlanSheet: View {
                                 sectionHeader("Completed", count: completedTreatments.count)
                                 VStack(spacing: 12) {
                                     ForEach(completedTreatments, id: \.id) { treatment in
-                                        TreatmentCardView(treatment: treatment) { _ in }
+                                        TreatmentCardView(
+                                            treatment: treatment,
+                                            onComplete: { _ in },
+                                            onSkip: { _ in },
+                                            onRestore: { _ in },
+                                            openSwipeTreatmentID: $openSwipeTreatmentID
+                                        )
+                                    }
+                                }
+                            }
+
+                            if !skippedTreatments.isEmpty {
+                                sectionHeader("Skipped", count: skippedTreatments.count)
+                                VStack(spacing: 12) {
+                                    ForEach(skippedTreatments, id: \.id) { treatment in
+                                        TreatmentCardView(
+                                            treatment: treatment,
+                                            onComplete: { _ in },
+                                            onSkip: { _ in },
+                                            onRestore: { t in await restoreTreatment(t) },
+                                            openSwipeTreatmentID: $openSwipeTreatmentID
+                                        )
                                     }
                                 }
                             }
@@ -323,9 +353,10 @@ struct TreatmentPlanSheet: View {
         let treatmentLines = allTreatments.isEmpty
             ? "No treatments recommended."
             : allTreatments.map { treatment in
-                let status = treatment.isCompleted ? "completed" : "pending"
+                let status = treatment.isCompleted ? "completed" : treatment.isSkipped ? "skipped" : "pending"
                 let completed = treatment.completedAt.map { ", completed at \(Self.promptDateFormatter.string(from: $0))" } ?? ""
-                return "- \(treatment.chemicalName): \(treatment.amount.formatted()) \(treatment.unit), \(status)\(completed). Instructions: \(treatment.instructions)"
+                let skipped = treatment.skippedAt.map { ", skipped at \(Self.promptDateFormatter.string(from: $0))" } ?? ""
+                return "- \(treatment.chemicalName): \(treatment.amount.formatted()) \(treatment.unit), \(status)\(completed)\(skipped). Instructions: \(treatment.instructions)"
             }.joined(separator: "\n")
 
         return """
@@ -405,6 +436,36 @@ struct TreatmentPlanSheet: View {
             toastMessage = ToastMessage.notificationSet(label: label)
         } else {
             toastMessage = ToastMessage.treatmentComplete()
+        }
+    }
+
+    @MainActor
+    private func skipTreatment(_ treatment: Treatment) async {
+        viewModel.skipTreatment(treatment)
+        do {
+            try modelContext.save()
+            toastMessage = ToastMessage(
+                text: "Treatment skipped",
+                icon: "slash.circle",
+                color: PoolColor.statusSlight
+            )
+        } catch {
+            viewModel.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func restoreTreatment(_ treatment: Treatment) async {
+        viewModel.restoreTreatment(treatment)
+        do {
+            try modelContext.save()
+            toastMessage = ToastMessage(
+                text: "Treatment restored",
+                icon: "arrow.uturn.left.circle",
+                color: PoolColor.poolTeal
+            )
+        } catch {
+            viewModel.lastError = error.localizedDescription
         }
     }
 }
