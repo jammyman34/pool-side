@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import UIKit
 
 /// Full-page sheet shown after saving a test. Displays AI/rule-based treatment recommendations.
 /// Each card has a checkbox at top-right; checking a treatment that has a wait interval
@@ -98,6 +99,8 @@ struct TreatmentPlanSheet: View {
                         if let assessment = test.aiAssessment, !assessment.isEmpty {
                             assessmentCard(assessment)
                         }
+
+                        validationPromptCard
                     }
                     .padding(18)
                     .background(Color.white)
@@ -267,6 +270,103 @@ struct TreatmentPlanSheet: View {
                 .stroke(PoolColor.poolTeal.opacity(0.15), lineWidth: 1)
         )
     }
+
+    private var validationPromptCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("External Review", systemImage: "square.and.arrow.up")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.primaryText)
+
+            Text("Share the current pool profile, test data, treatment history, and proposed plan for an outside review.")
+                .font(.caption)
+                .foregroundStyle(PoolColor.secondaryText)
+
+            HStack(spacing: 12) {
+                ShareLink(item: validationPrompt) {
+                    Label("Validate Plan", systemImage: "square.and.arrow.up")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                Button {
+                    UIPasteboard.general.string = validationPrompt
+                    toastMessage = ToastMessage(
+                        text: "Validation prompt copied",
+                        icon: "doc.on.doc",
+                        color: PoolColor.poolTeal
+                    )
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.headline)
+                        .foregroundStyle(PoolColor.poolTeal)
+                        .frame(width: 44, height: 44)
+                        .background(PoolColor.poolTeal.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .accessibilityLabel("Copy Validation Prompt")
+            }
+        }
+        .padding(18)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(PoolColor.divider, lineWidth: 1)
+        )
+    }
+
+    private var validationPrompt: String {
+        let config = viewModel.poolConfig
+        let treatmentLines = allTreatments.isEmpty
+            ? "No treatments recommended."
+            : allTreatments.map { treatment in
+                let status = treatment.isCompleted ? "completed" : "pending"
+                let completed = treatment.completedAt.map { ", completed at \(Self.promptDateFormatter.string(from: $0))" } ?? ""
+                return "- \(treatment.chemicalName): \(treatment.amount.formatted()) \(treatment.unit), \(status)\(completed). Instructions: \(treatment.instructions)"
+            }.joined(separator: "\n")
+
+        return """
+        Please review this pool treatment plan for safety and accuracy. Validate the math against the pool volume, check whether recent completed treatments should affect this plan, and flag anything that seems unsafe or unnecessary. Do not assume missing product concentrations.
+
+        Pool Profile:
+        - Name: \(config.name)
+        - Volume: \(Int(config.volumeGallons).formatted()) gallons
+        - Type: \(config.poolType.displayName)
+        - Surface: \(config.surfaceType.displayName)
+        - Default Testing Method: \(config.testMethod.displayName)
+        - Saltwater: \(config.isSaltwater ? "Yes" : "No")
+        - Has cover: \(config.hasCover ? "Yes" : "No")
+        - Location: \(config.location.isEmpty ? "Not provided" : config.location)
+
+        Current Test:
+        - Date: \(Self.promptDateFormatter.string(from: test.date))
+        - Testing Method: \(test.testMethod.displayName)
+        - Free Chlorine: \(test.freeChlorine.formatted()) ppm
+        - Total Chlorine: \(test.totalChlorine.formatted()) ppm
+        - pH: \(test.pH.formatted())
+        - Total Alkalinity: \(test.totalAlkalinity.formatted()) ppm
+        - Cyanuric Acid: \(test.cyanuricAcid.formatted()) ppm
+        - Calcium Hardness: \(test.calciumHardness.formatted()) ppm
+        - Notes: \(test.notes.isEmpty ? "None" : test.notes)
+        - Visual indicators: \(test.visualIndicators.isEmpty ? "None" : test.visualIndicators.joined(separator: ", "))
+
+        Proposed Plan:
+        \(treatmentLines)
+
+        App Assessment:
+        \(test.aiAssessment ?? "None")
+        """
+    }
+
+    private static let promptDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 
     // MARK: - Complete Treatment
 

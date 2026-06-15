@@ -42,6 +42,13 @@ final class Treatment {
     /// Display order within a treatment plan (lower = first)
     var sortOrder: Int
 
+    // MARK: - Expected Effect
+    var expectedEffectParameter: String = ""
+    var expectedDelta: Double = 0
+    var effectDelayHours: Int = 0
+    var effectDurationHours: Int = 0
+    var doNotRepeatBefore: Date?
+
     // MARK: - Relationship
     var poolTest: PoolTest?
 
@@ -61,6 +68,11 @@ final class Treatment {
         targetParameter: String = "",
         minutesBeforeNext: Int = 0,
         sortOrder: Int = 0,
+        expectedEffectParameter: String = "",
+        expectedDelta: Double = 0,
+        effectDelayHours: Int = 0,
+        effectDurationHours: Int = 0,
+        doNotRepeatBefore: Date? = nil,
         poolTest: PoolTest? = nil
     ) {
         self.id = id
@@ -77,6 +89,11 @@ final class Treatment {
         self.targetParameter = targetParameter
         self.minutesBeforeNext = minutesBeforeNext
         self.sortOrder = sortOrder
+        self.expectedEffectParameter = expectedEffectParameter
+        self.expectedDelta = expectedDelta
+        self.effectDelayHours = effectDelayHours
+        self.effectDurationHours = effectDurationHours
+        self.doNotRepeatBefore = doNotRepeatBefore
         self.poolTest = poolTest
     }
 

@@ -9,7 +9,11 @@ final class RuleBasedService: AIService, @unchecked Sendable {
     private let engine = ChemistryEngine()
 
     func generateRecommendations(for request: AIRecommendationRequest) async throws -> AIRecommendationResponse {
-        var treatments = engine.ruleTreatments(for: request.currentTest, config: request.poolConfig)
+        var treatments = engine.validatedTreatments(
+            for: request.currentTest,
+            config: request.poolConfig,
+            recentHistory: request.recentHistory
+        )
         treatments.append(contentsOf: visualIndicatorTreatments(for: request.currentTest))
         let assessment = buildAssessment(for: request, treatments: treatments)
         return AIRecommendationResponse(treatments: treatments, assessmentText: assessment)
@@ -25,10 +29,25 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         let outOfRange = readings.filter { $0.status != .ideal && $0.status != .testing }
 
         if criticals.isEmpty && outOfRange.isEmpty {
-            return "Pool chemistry is well balanced. All parameters are within ideal ranges — no treatments needed. Keep up the great work! 🌊"
+            var balanced = "Pool chemistry is well balanced. All parameters are within ideal ranges — no treatments needed."
+            if let testingNote = request.poolConfig.testMethod.confidenceNote {
+                balanced += " \(testingNote)"
+            }
+            return balanced
         }
 
         var parts: [String] = []
+        if let testingNote = request.poolConfig.testMethod.confidenceNote {
+            parts.append(testingNote)
+        }
+
+        if request.poolConfig.testMethod.shouldSuppressOptionalTreatments {
+            let optionalReadings = readings.filter { $0.status == .slightlyLow || $0.status == .slightlyHigh }
+            if !optionalReadings.isEmpty {
+                let names = optionalReadings.map { $0.parameter }.joined(separator: ", ")
+                parts.append("Because these readings came from test strips, borderline values for \(names) should be confirmed before adding optional chemicals.")
+            }
+        }
 
         if !criticals.isEmpty {
             let names = criticals.map { $0.parameter }.joined(separator: " and ")

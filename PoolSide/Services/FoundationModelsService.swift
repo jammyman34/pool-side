@@ -16,11 +16,20 @@ final class FoundationModelsService: AIService, @unchecked Sendable {
             throw AIServiceError.notAvailable
         }
 
+        let engine = ChemistryEngine()
+        let treatments = engine.validatedTreatments(
+            for: request.currentTest,
+            config: request.poolConfig,
+            recentHistory: request.recentHistory
+        )
         let session = LanguageModelSession()
-        let prompt = buildPrompt(from: request)
+        let prompt = buildAssessmentPrompt(from: request, treatments: treatments)
 
         let response = try await session.respond(to: prompt)
-        return parseResponse(response.content, request: request)
+        return AIRecommendationResponse(
+            treatments: treatments,
+            assessmentText: response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 
     // MARK: - Prompt
@@ -57,6 +66,29 @@ final class FoundationModelsService: AIService, @unchecked Sendable {
         ASSESSMENT: Pool chemistry is balanced and in excellent condition. No treatments are needed at this time.
         TREATMENTS:
         NONE
+        """
+    }
+
+    private func buildAssessmentPrompt(from request: AIRecommendationRequest, treatments: [TreatmentTemplate]) -> String {
+        let treatmentSummary: String
+        if treatments.isEmpty {
+            treatmentSummary = "No treatment steps were recommended by the deterministic chemistry engine."
+        } else {
+            treatmentSummary = treatments
+                .map { "- \($0.chemicalName): \($0.amount.formatted()) \($0.unit) for \($0.targetParameter)" }
+                .joined(separator: "\n")
+        }
+
+        return """
+        You are helping explain a pool treatment plan. Do not add, remove, or change treatment steps or doses.
+        The app's deterministic chemistry engine has already calculated and validated the plan.
+
+        \(request.contextString())
+
+        VALIDATED PLAN:
+        \(treatmentSummary)
+
+        Write a concise 2-3 sentence assessment for the user. Mention relevant context such as recent completed treatments, pool cover, or location only if it is present in the data. Do not invent additional chemicals, amounts, or timing.
         """
     }
 

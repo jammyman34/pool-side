@@ -18,7 +18,14 @@ struct AIRecommendationRequest: @unchecked Sendable {
     func contextString() -> String {
         var parts: [String] = []
 
-        parts.append("POOL: \(poolConfig.name), \(Int(poolConfig.volumeGallons)) gallons, \(poolConfig.poolType.displayName), \(poolConfig.surfaceType.displayName) surface\(poolConfig.isSaltwater ? ", saltwater system" : "")")
+        var poolLine = "POOL: \(poolConfig.name), \(Int(poolConfig.volumeGallons)) gallons, \(poolConfig.poolType.displayName), \(poolConfig.surfaceType.displayName) surface, testing with \(poolConfig.testMethod.displayName)\(poolConfig.isSaltwater ? ", saltwater system" : "")"
+        if poolConfig.hasCover {
+            poolLine += ", has a pool cover"
+        }
+        if !poolConfig.location.isEmpty {
+            poolLine += ", location: \(poolConfig.location)"
+        }
+        parts.append(poolLine)
 
         let df = DateFormatter()
         df.dateStyle = .medium
@@ -51,7 +58,10 @@ struct AIRecommendationRequest: @unchecked Sendable {
                 parts.append("  \(df.string(from: test.date)): pH \(String(format: "%.1f", test.pH)), Cl \(String(format: "%.1f", test.freeChlorine)) ppm, Alk \(String(format: "%.0f", test.totalAlkalinity)) ppm")
                 let completedForTest = test.treatments.filter { $0.isCompleted }
                 if !completedForTest.isEmpty {
-                    let names = completedForTest.map { $0.chemicalName }.joined(separator: ", ")
+                    let names = completedForTest.map { treatment in
+                        let completedDate = treatment.completedAt.map { df.string(from: $0) } ?? "date unknown"
+                        return "\(treatment.chemicalName) \(treatment.amount.formatted()) \(treatment.unit), completed \(completedDate)"
+                    }.joined(separator: "; ")
                     parts.append("    Treatments completed: \(names)")
                 }
             }

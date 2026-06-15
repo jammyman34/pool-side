@@ -68,6 +68,7 @@ final class PoolTest {
     var saltLevel: Double?
 
     // MARK: - Meta
+    var testMethodRaw: String = TestMethod.testStrips.rawValue
     var notes: String
     var visualIndicators: [String] = []
 
@@ -90,6 +91,7 @@ final class PoolTest {
         cyanuricAcid: Double = 40,
         temperatureFahrenheit: Double? = nil,
         saltLevel: Double? = nil,
+        testMethod: TestMethod = .testStrips,
         notes: String = "",
         visualIndicators: [String] = [],
         aiAssessment: String? = nil
@@ -104,6 +106,7 @@ final class PoolTest {
         self.cyanuricAcid = cyanuricAcid
         self.temperatureFahrenheit = temperatureFahrenheit
         self.saltLevel = saltLevel
+        self.testMethodRaw = testMethod.rawValue
         self.notes = notes
         self.visualIndicators = visualIndicators
         self.aiAssessment = aiAssessment
@@ -115,6 +118,11 @@ final class PoolTest {
     /// Combined chlorine (chloramines) = total – free. Should be < 0.5 ppm.
     var combinedChlorine: Double {
         max(0, totalChlorine - freeChlorine)
+    }
+
+    var testMethod: TestMethod {
+        get { TestMethod(rawValue: testMethodRaw) ?? .testStrips }
+        set { testMethodRaw = newValue.rawValue }
     }
 
     /// Overall pool health score 0–100 based on how many parameters are in ideal range

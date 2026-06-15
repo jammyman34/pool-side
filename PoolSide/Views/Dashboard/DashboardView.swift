@@ -76,15 +76,19 @@ struct DashboardView: View {
                 Button {
                     showingSettings = true
                 } label: {
-                    Image(systemName: "person.crop.circle")
+                    Image(systemName: "gearshape.circle")
                         .font(.system(size: 40, weight: .regular))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(PoolColor.primaryText)
+                        .frame(width: 52, height: 52)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .offset(y: -12)
+                .zIndex(10)
             }
             .padding(.bottom, -24)
+            .zIndex(10)
 
             heroTitle
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -96,8 +100,10 @@ struct DashboardView: View {
                         .scaleEffect(1.9)
                         .frame(width: 162, height: 160)
                         .offset(x: 24, y: 0)
+                        .allowsHitTesting(false)
                 }
                 .frame(height: latestTest == nil ? 164 : 148)
+                .zIndex(0)
 
             if let test = latestTest {
                 HStack(spacing: 5) {
@@ -362,7 +368,7 @@ struct DashboardView: View {
         case 90...100: return "Great"
         case 75..<90:  return "Good"
         case 60..<75:  return "Alright"
-        case 40..<60:  return "Needs Attention"
+        case 40..<60:  return "Not Great"
         default:       return "Critical"
         }
     }

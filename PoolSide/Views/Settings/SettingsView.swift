@@ -1,25 +1,33 @@
 import SwiftUI
+import CoreLocation
+import Observation
 
 struct SettingsView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
 
-    // Profile
-    @State private var profileName: String = ""
-    @State private var profileEmail: String = ""
-    @State private var profilePhone: String = ""
-
     // Pool Settings
     @State private var poolName: String = ""
     @State private var volumeGallons: Double = 15000
     @State private var poolType: PoolType = .inground
     @State private var surfaceType: SurfaceType = .plaster
+    @State private var testMethod: TestMethod = .testStrips
     @State private var isSaltwater: Bool = false
+    @State private var hasCover: Bool = false
+    @State private var chlorinePreference: ChlorinePreference = .calHypo
+    @State private var pHIncreaserPreference: PHIncreaserPreference = .sodaAsh
+    @State private var pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid
+    @State private var alkalinityIncreaserPreference: AlkalinityIncreaserPreference = .sodiumBicarbonate
+    @State private var calciumIncreaserPreference: CalciumIncreaserPreference = .calciumChloride
+    @State private var stabilizerPreference: StabilizerPreference = .granularCYA
     @State private var location: String = ""
+    @State private var latitude: Double?
+    @State private var longitude: Double?
+    @State private var locationService = PoolLocationService()
 
     @State private var showingVolumeHelp: Bool = false
-    @State private var showingSignOutConfirm: Bool = false
+    @State private var showingLocationExplanation: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -31,35 +39,6 @@ struct SettingsView: View {
                         // AI status banner
                         aiStatusBanner
 
-                        // Profile section
-                        sectionCard(header: "Profile") {
-                            VStack(spacing: 0) {
-                                settingRow(label: "Name") {
-                                    TextField("Your name", text: $profileName)
-                                        .font(.subheadline)
-                                        .foregroundStyle(PoolColor.secondaryText)
-                                        .multilineTextAlignment(.trailing)
-                                }
-                                rowDivider
-                                settingRow(label: "Email") {
-                                    TextField("your@email.com", text: $profileEmail)
-                                        .font(.subheadline)
-                                        .foregroundStyle(PoolColor.secondaryText)
-                                        .multilineTextAlignment(.trailing)
-                                        .keyboardType(.emailAddress)
-                                        .textInputAutocapitalization(.never)
-                                }
-                                rowDivider
-                                settingRow(label: "Phone") {
-                                    TextField("Optional", text: $profilePhone)
-                                        .font(.subheadline)
-                                        .foregroundStyle(PoolColor.secondaryText)
-                                        .multilineTextAlignment(.trailing)
-                                        .keyboardType(.phonePad)
-                                }
-                            }
-                        }
-
                         // Pool Settings section
                         sectionCard(header: "Pool Settings") {
                             VStack(spacing: 0) {
@@ -69,25 +48,29 @@ struct SettingsView: View {
                                 rowDivider
                                 pickerRow(label: "Surface", selection: $surfaceType)
                                 rowDivider
-                                settingRow(label: "Location") {
-                                    TextField("e.g. Phoenix, AZ", text: $location)
-                                        .font(.subheadline)
-                                        .foregroundStyle(PoolColor.secondaryText)
-                                        .multilineTextAlignment(.trailing)
-                                        .textInputAutocapitalization(.words)
-                                }
+                                testingMethodRow
                                 rowDivider
-                                HStack {
-                                    Text("Salt-Chlorine System")
-                                        .font(.subheadline)
-                                        .foregroundStyle(PoolColor.primaryText)
-                                    Spacer()
-                                    Toggle("", isOn: $isSaltwater.animation())
-                                        .labelsHidden()
-                                        .tint(PoolColor.poolTeal)
-                                }
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 14)
+                                locationRow
+                                rowDivider
+                                toggleRow(label: "Pool Cover", isOn: $hasCover)
+                                rowDivider
+                                toggleRow(label: "Salt-Chlorine System", isOn: $isSaltwater)
+                            }
+                        }
+
+                        sectionCard(header: "Chemical Preferences") {
+                            VStack(spacing: 0) {
+                                preferencePickerRow(label: "Chlorine", selection: $chlorinePreference)
+                                rowDivider
+                                preferencePickerRow(label: "pH Increaser", selection: $pHIncreaserPreference)
+                                rowDivider
+                                preferencePickerRow(label: "pH Decreaser", selection: $pHDecreaserPreference)
+                                rowDivider
+                                preferencePickerRow(label: "Alkalinity Increaser", selection: $alkalinityIncreaserPreference)
+                                rowDivider
+                                preferencePickerRow(label: "Calcium Increaser", selection: $calciumIncreaserPreference)
+                                rowDivider
+                                preferencePickerRow(label: "Stabilizer", selection: $stabilizerPreference)
                             }
                         }
 
@@ -102,21 +85,6 @@ struct SettingsView: View {
                                 .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 16))
                         }
 
-                        // Sign Out
-                        Button {
-                            showingSignOutConfirm = true
-                        } label: {
-                            Text("Sign Out")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(PoolColor.statusCritical)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(PoolColor.statusCritical.opacity(0.3), lineWidth: 1)
-                                )
-                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -140,22 +108,29 @@ struct SettingsView: View {
             .sheet(isPresented: $showingVolumeHelp) {
                 PoolVolumeHelpView()
             }
-            .confirmationDialog(
-                "Sign Out",
-                isPresented: $showingSignOutConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Sign Out", role: .destructive) {
-                    // Sign-out logic: clear config and dismiss
-                    PoolConfiguration.clearCurrent()
-                    dismiss()
+            .alert("Use Your Location?", isPresented: $showingLocationExplanation) {
+                Button("Allow While Using App") {
+                    locationService.requestWhenInUseLocation()
                 }
-                Button("Cancel", role: .cancel) { }
+                Button("Not Now", role: .cancel) { }
             } message: {
-                Text("Are you sure you want to sign out?")
+                Text("Pool Side uses your location only while the app is open so future treatment guidance can account for local weather, sun exposure, and pool-cover timing. You can keep typing your location manually instead.")
+            }
+            .alert("Location Unavailable", isPresented: locationErrorBinding) {
+                Button("OK", role: .cancel) {
+                    locationService.errorMessage = nil
+                }
+            } message: {
+                Text(locationService.errorMessage ?? "")
             }
         }
         .onAppear(perform: loadCurrentConfig)
+        .onChange(of: locationService.resolvedLocationText) { _, newValue in
+            guard !newValue.isEmpty else { return }
+            location = newValue
+            latitude = locationService.latitude
+            longitude = locationService.longitude
+        }
     }
 
     // MARK: - Section Card
@@ -213,11 +188,95 @@ struct SettingsView: View {
         .padding(.vertical, 6)
     }
 
+    private func preferencePickerRow<T: CaseIterable & Identifiable & Hashable & CustomStringConvertible>(
+        label: String,
+        selection: Binding<T>
+    ) -> some View where T.AllCases: RandomAccessCollection {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
+
+            Picker(label, selection: selection) {
+                ForEach(Array(T.allCases), id: \.self) { option in
+                    Text(option.description).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(PoolColor.poolTeal)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
     private var rowDivider: some View {
         Rectangle()
             .fill(PoolColor.divider)
             .frame(height: 1)
             .padding(.leading, 18)
+    }
+
+    private var locationRow: some View {
+        settingRow(label: "Location") {
+            HStack(spacing: 8) {
+                TextField("e.g. Phoenix, AZ", text: $location)
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+
+                Button {
+                    showingLocationExplanation = true
+                } label: {
+                    Image(systemName: locationService.isLocating ? "location.circle" : "location.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(PoolColor.poolTeal)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Use Current Location")
+            }
+        }
+    }
+
+    private var testingMethodRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Testing Method")
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.primaryText)
+                Spacer()
+                Picker("Testing Method", selection: $testMethod) {
+                    ForEach(TestMethod.allCases) { method in
+                        Text(method.displayName).tag(method)
+                    }
+                }
+                .tint(PoolColor.poolTeal)
+            }
+
+            if let note = testMethod.confidenceNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    private func toggleRow(label: String, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
+            Spacer()
+            Toggle("", isOn: isOn.animation())
+                .labelsHidden()
+                .tint(PoolColor.poolTeal)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     private var volumeRow: some View {
@@ -271,6 +330,17 @@ struct SettingsView: View {
         .padding(.vertical, 14)
     }
 
+    private var locationErrorBinding: Binding<Bool> {
+        Binding(
+            get: { locationService.errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    locationService.errorMessage = nil
+                }
+            }
+        )
+    }
+
     // MARK: - AI Status Banner
 
     private var aiStatusBanner: some View {
@@ -285,8 +355,8 @@ struct SettingsView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(PoolColor.primaryText)
                 Text(viewModel.aiServiceAvailable
-                    ? "Apple Intelligence is powering your recommendations."
-                    : "Requires iPhone 15 Pro+ for AI recommendations."
+                    ? "Apple Intelligence can help explain validated plans."
+                    : "Deterministic safety rules are creating treatment plans."
                 )
                 .font(.caption)
                 .foregroundStyle(PoolColor.secondaryText)
@@ -311,8 +381,18 @@ struct SettingsView: View {
         volumeGallons = config.volumeGallons
         poolType = config.poolType
         surfaceType = config.surfaceType
+        testMethod = config.testMethod
         isSaltwater = config.isSaltwater
+        hasCover = config.hasCover
+        chlorinePreference = config.chlorinePreference
+        pHIncreaserPreference = config.pHIncreaserPreference
+        pHDecreaserPreference = config.pHDecreaserPreference
+        alkalinityIncreaserPreference = config.alkalinityIncreaserPreference
+        calciumIncreaserPreference = config.calciumIncreaserPreference
+        stabilizerPreference = config.stabilizerPreference
         location = config.location
+        latitude = config.latitude
+        longitude = config.longitude
     }
 
     private func save() {
@@ -321,8 +401,18 @@ struct SettingsView: View {
             volumeGallons: volumeGallons,
             poolType: poolType,
             surfaceType: surfaceType,
+            testMethod: testMethod,
             isSaltwater: isSaltwater,
-            location: location
+            hasCover: hasCover,
+            chlorinePreference: chlorinePreference,
+            pHIncreaserPreference: pHIncreaserPreference,
+            pHDecreaserPreference: pHDecreaserPreference,
+            alkalinityIncreaserPreference: alkalinityIncreaserPreference,
+            calciumIncreaserPreference: calciumIncreaserPreference,
+            stabilizerPreference: stabilizerPreference,
+            location: location,
+            latitude: latitude,
+            longitude: longitude
         )
         viewModel.saveConfig(config)
         dismiss()
@@ -336,6 +426,34 @@ extension PoolType: CustomStringConvertible {
 }
 
 extension SurfaceType: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension TestMethod: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension ChlorinePreference: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension PHIncreaserPreference: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension PHDecreaserPreference: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension AlkalinityIncreaserPreference: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension CalciumIncreaserPreference: CustomStringConvertible {
+    public var description: String { displayName }
+}
+
+extension StabilizerPreference: CustomStringConvertible {
     public var description: String { displayName }
 }
 
@@ -488,6 +606,103 @@ struct PoolVolumeHelpView: View {
         case .aboveGround: return "The pool's spec card or owner's manual usually lists the exact gallon capacity."
         case .spa:         return "Most spa manuals list capacity precisely. Check the door panel or manufacturer's site."
         }
+    }
+}
+
+// MARK: - Location Service
+
+@Observable
+final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+
+    private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+
+    var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    var resolvedLocationText: String = ""
+    var latitude: Double?
+    var longitude: Double?
+    var errorMessage: String?
+    var isLocating: Bool = false
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        authorizationStatus = manager.authorizationStatus
+    }
+
+    func requestWhenInUseLocation() {
+        errorMessage = nil
+        isLocating = true
+
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            isLocating = false
+            errorMessage = "Location access is off for Pool Side. You can still type your location manually."
+        @unknown default:
+            isLocating = false
+            errorMessage = "Location is unavailable right now."
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationStatus = manager.authorizationStatus
+
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            isLocating = false
+            errorMessage = "Location access is off for Pool Side. You can still type your location manually."
+        case .notDetermined:
+            break
+        @unknown default:
+            isLocating = false
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else {
+            isLocating = false
+            return
+        }
+
+        latitude = location.coordinate.latitude
+        longitude = location.coordinate.longitude
+
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, error in
+            guard let service = self else { return }
+
+            DispatchQueue.main.async {
+                if let placemark = placemarks?.first {
+                    let city = placemark.locality ?? placemark.subAdministrativeArea ?? ""
+                    let state = placemark.administrativeArea ?? ""
+                    let resolved = [city, state]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: ", ")
+
+                    service.resolvedLocationText = resolved.isEmpty
+                        ? String(format: "%.3f, %.3f", location.coordinate.latitude, location.coordinate.longitude)
+                        : resolved
+                } else {
+                    service.resolvedLocationText = String(format: "%.3f, %.3f", location.coordinate.latitude, location.coordinate.longitude)
+                    if error != nil {
+                        service.errorMessage = "Could not name this location, so coordinates were saved instead."
+                    }
+                }
+
+                service.isLocating = false
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        isLocating = false
+        errorMessage = "Could not get your current location. You can still type it manually."
     }
 }
 

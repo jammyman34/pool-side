@@ -24,14 +24,6 @@ final class PoolViewModel {
     // MARK: - AI Setup
 
     private func setupAIService() {
-        if #available(iOS 26.0, *) {
-            let service = FoundationModelsService()
-            if service.isAvailable {
-                aiService = service
-                aiServiceAvailable = true
-                return
-            }
-        }
         aiService = RuleBasedService()
         aiServiceAvailable = false
     }
@@ -77,11 +69,13 @@ final class PoolViewModel {
 
         do {
             guard let service = aiService else { return }
+            var effectiveConfig = poolConfig
+            effectiveConfig.testMethod = test.testMethod
 
             let request = AIRecommendationRequest(
                 currentTest: test,
                 recentHistory: recentTests,
-                poolConfig: poolConfig
+                poolConfig: effectiveConfig
             )
 
             let response = try await service.generateRecommendations(for: request)

@@ -29,6 +29,8 @@ struct AddTestView: View {
     @State private var cyanuricAcid: Double = 40
     @State private var temperature: Double = 78
     @State private var saltLevel: Double = 3000
+    @State private var testMethod: TestMethod = .testStrips
+    @State private var saveTestMethodAsDefault: Bool = false
     @State private var notes: String = ""
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
@@ -92,6 +94,7 @@ struct AddTestView: View {
             cyanuricAcid: cyanuricAcid,
             temperatureFahrenheit: includeTemperature ? temperature : nil,
             saltLevel: includeSalt ? saltLevel : nil,
+            testMethod: testMethod,
             notes: notes,
             visualIndicators: orderedVisualIndicators
         )
@@ -157,6 +160,10 @@ struct AddTestView: View {
                         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
                         .padding(.horizontal, 16)
                         .padding(.top, -20) // overlap with banner bottom
+
+                        testMethodCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
 
                         visualIndicatorsCard
                             .padding(.horizontal, 16)
@@ -507,6 +514,41 @@ struct AddTestView: View {
             chemicalOrder = ChemicalField.defaultDisplayOrder
         }
         ChemicalField.saveDisplayOrder(ChemicalField.defaultDisplayOrder)
+    }
+
+    private var testMethodCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Testing Method", systemImage: "testtube.2")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.primaryText)
+
+                Spacer()
+
+                Picker("Testing Method", selection: $testMethod) {
+                    ForEach(TestMethod.allCases) { method in
+                        Text(method.displayName).tag(method)
+                    }
+                }
+                .tint(PoolColor.poolTeal)
+            }
+
+            if let note = testMethod.confidenceNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Toggle("Use this as my default for future logs", isOn: $saveTestMethodAsDefault.animation())
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
+                .tint(PoolColor.poolTeal)
+        }
+        .padding(18)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
     @ViewBuilder
@@ -889,10 +931,14 @@ struct AddTestView: View {
             cyanuricAcid = test.cyanuricAcid
             if let t = test.temperatureFahrenheit { temperature = t; includeTemperature = true }
             if let s = test.saltLevel { saltLevel = s; includeSalt = true }
+            testMethod = test.testMethod
+            saveTestMethodAsDefault = false
             notes = test.notes
             selectedVisualIndicators = Set(test.visualIndicators)
             originalSnapshot = currentSnapshot
         } else if let last = tests.first {
+            testMethod = viewModel.poolConfig.testMethod
+            saveTestMethodAsDefault = false
             pH = last.pH
             freeChlorine = last.freeChlorine
             totalChlorine = last.totalChlorine
@@ -901,6 +947,9 @@ struct AddTestView: View {
             cyanuricAcid = last.cyanuricAcid
             if let t = last.temperatureFahrenheit { temperature = t; includeTemperature = true }
             if let s = last.saltLevel { saltLevel = s; includeSalt = true }
+        } else {
+            testMethod = viewModel.poolConfig.testMethod
+            saveTestMethodAsDefault = false
         }
     }
 
@@ -942,6 +991,7 @@ struct AddTestView: View {
             existing.cyanuricAcid = cyanuricAcid
             existing.temperatureFahrenheit = includeTemperature ? temperature : nil
             existing.saltLevel = includeSalt ? saltLevel : nil
+            existing.testMethod = testMethod
             existing.notes = notes
             existing.visualIndicators = orderedVisualIndicators
             test = existing
@@ -956,10 +1006,17 @@ struct AddTestView: View {
                 cyanuricAcid: cyanuricAcid,
                 temperatureFahrenheit: includeTemperature ? temperature : nil,
                 saltLevel: includeSalt ? saltLevel : nil,
+                testMethod: testMethod,
                 notes: notes,
                 visualIndicators: orderedVisualIndicators
             )
             modelContext.insert(test)
+        }
+
+        if saveTestMethodAsDefault, viewModel.poolConfig.testMethod != testMethod {
+            var updatedConfig = viewModel.poolConfig
+            updatedConfig.testMethod = testMethod
+            viewModel.saveConfig(updatedConfig)
         }
 
         // Generate recommendations
@@ -1002,6 +1059,7 @@ private struct TestFormSnapshot: Equatable {
     let cyanuricAcid: Double
     let temperatureFahrenheit: Double?
     let saltLevel: Double?
+    let testMethod: TestMethod
     let notes: String
     let visualIndicators: [String]
 }

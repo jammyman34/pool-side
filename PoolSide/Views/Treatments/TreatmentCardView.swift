@@ -4,7 +4,7 @@ import SwiftData
 struct TreatmentCardView: View {
 
     var treatment: Treatment
-    var onComplete: (Treatment) async -> Void
+    var onComplete: @MainActor (Treatment) async -> Void
 
     @State private var expanded: Bool = false
     @State private var isCompleting: Bool = false
@@ -58,6 +58,13 @@ struct TreatmentCardView: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(urgencyColor.opacity(0.12), in: Capsule())
+
+                    if let waitLabel {
+                        Label(waitLabel, systemImage: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(PoolColor.secondaryText)
+                            .padding(.top, 2)
+                    }
                 }
 
                 Spacer()
@@ -143,6 +150,11 @@ struct TreatmentCardView: View {
         .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(treatment.isCompleted ? 0.02 : 0.06), radius: 8, y: 2)
         .opacity(treatment.isCompleted ? 0.65 : 1)
+    }
+
+    private var waitLabel: String? {
+        guard treatment.minutesBeforeNext > 0, !treatment.isCompleted else { return nil }
+        return "Wait \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
     }
 }
 

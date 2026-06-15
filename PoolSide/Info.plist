@@ -24,6 +24,8 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2025 Justin Mandell. All rights reserved.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Pool Side uses your location while the app is open to account for local weather, sun exposure, and pool-cover timing in future treatment guidance.</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
