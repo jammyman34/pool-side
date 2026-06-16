@@ -36,9 +36,6 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        // AI status banner
-                        aiStatusBanner
-
                         // Pool Settings section
                         sectionCard(header: "Pool Settings") {
                             VStack(spacing: 0) {
@@ -339,38 +336,6 @@ struct SettingsView: View {
                 }
             }
         )
-    }
-
-    // MARK: - AI Status Banner
-
-    private var aiStatusBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: viewModel.aiServiceAvailable ? "sparkles" : "wand.and.stars")
-                .font(.title3)
-                .foregroundStyle(viewModel.aiServiceAvailable ? PoolColor.poolTeal : PoolColor.secondaryText)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.aiServiceAvailable ? "On-Device AI Active" : "Rule-Based Mode")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(PoolColor.primaryText)
-                Text(viewModel.aiServiceAvailable
-                    ? "Apple Intelligence can help explain validated plans."
-                    : "Deterministic safety rules are creating treatment plans."
-                )
-                .font(.caption)
-                .foregroundStyle(PoolColor.secondaryText)
-            }
-
-            Spacer()
-
-            Circle()
-                .fill(viewModel.aiServiceAvailable ? PoolColor.statusIdeal : PoolColor.statusSlight)
-                .frame(width: 9, height: 9)
-        }
-        .padding(16)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
     }
 
     // MARK: - Actions
