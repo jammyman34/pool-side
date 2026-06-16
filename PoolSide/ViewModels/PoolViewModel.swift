@@ -105,6 +105,7 @@ final class PoolViewModel {
 
     // MARK: - Complete Treatment
 
+    @MainActor
     func completeTreatment(_ treatment: Treatment) {
         treatment.isCompleted = true
         treatment.completedAt = Date()
@@ -112,6 +113,17 @@ final class PoolViewModel {
         treatment.skippedAt = nil
     }
 
+    @MainActor
+    func markTreatmentIncomplete(_ treatment: Treatment) {
+        treatment.isCompleted = false
+        treatment.completedAt = nil
+        if let identifier = treatment.reminderNotificationIdentifier {
+            NotificationService.shared.cancel(identifier: identifier)
+            treatment.reminderNotificationIdentifier = nil
+        }
+    }
+
+    @MainActor
     func skipTreatment(_ treatment: Treatment) {
         treatment.isSkipped = true
         treatment.skippedAt = Date()
@@ -119,6 +131,7 @@ final class PoolViewModel {
         treatment.completedAt = nil
     }
 
+    @MainActor
     func restoreTreatment(_ treatment: Treatment) {
         treatment.isSkipped = false
         treatment.skippedAt = nil

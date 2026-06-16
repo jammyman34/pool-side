@@ -3,9 +3,14 @@ import SwiftUI
 // MARK: - Toast Message Model
 
 struct ToastMessage: Equatable {
+    let id = UUID()
     let text: String
     let icon: String
     let color: Color
+
+    static func == (lhs: ToastMessage, rhs: ToastMessage) -> Bool {
+        lhs.id == rhs.id
+    }
 
     static func notificationSet(label: String) -> ToastMessage {
         ToastMessage(
@@ -17,9 +22,17 @@ struct ToastMessage: Equatable {
 
     static func treatmentComplete() -> ToastMessage {
         ToastMessage(
-            text: "Treatment marked complete!",
+            text: "Step marked complete",
             icon: "checkmark.circle.fill",
             color: PoolColor.statusIdeal
+        )
+    }
+
+    static func treatmentIncomplete(reminderCanceled: Bool) -> ToastMessage {
+        ToastMessage(
+            text: reminderCanceled ? "Reminder canceled" : "Step reopened",
+            icon: reminderCanceled ? "bell.slash.fill" : "arrow.uturn.left.circle.fill",
+            color: PoolColor.poolTeal
         )
     }
 
@@ -70,11 +83,11 @@ struct ToastModifier: ViewModifier {
                 ToastView(message: message)
                     .padding(.bottom, 100)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                toast = nil
-                            }
+                    .task(id: message.id) {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        guard toast?.id == message.id else { return }
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            toast = nil
                         }
                     }
             }

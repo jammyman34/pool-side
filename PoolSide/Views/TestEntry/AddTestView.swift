@@ -113,6 +113,10 @@ struct AddTestView: View {
         }
     }
 
+    private var testMethodDiffersFromDefault: Bool {
+        testMethod != viewModel.poolConfig.testMethod
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -233,6 +237,11 @@ struct AddTestView: View {
             }
         }
         .onAppear(perform: prefill)
+        .onChange(of: testMethod) { _, newValue in
+            if newValue == viewModel.poolConfig.testMethod {
+                saveTestMethodAsDefault = false
+            }
+        }
         .task {
             await showInitialTreatmentPlanIfNeeded()
         }
@@ -541,11 +550,15 @@ struct AddTestView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Toggle("Use this as my default for future logs", isOn: $saveTestMethodAsDefault.animation())
-                .font(.subheadline)
-                .foregroundStyle(PoolColor.primaryText)
-                .tint(PoolColor.poolTeal)
+            if testMethodDiffersFromDefault {
+                Toggle("Use this as my default for future logs", isOn: $saveTestMethodAsDefault.animation())
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.primaryText)
+                    .tint(PoolColor.poolTeal)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: testMethodDiffersFromDefault)
         .padding(18)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)

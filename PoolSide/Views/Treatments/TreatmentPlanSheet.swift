@@ -30,8 +30,8 @@ struct TreatmentPlanSheet: View {
         allTreatments.filter { !$0.isCompleted && !$0.isSkipped }
     }
 
-    private var completedTreatments: [Treatment] {
-        allTreatments.filter { $0.isCompleted }
+    private var treatmentSteps: [Treatment] {
+        allTreatments.filter { !$0.isSkipped }
     }
 
     private var skippedTreatments: [Treatment] {
@@ -80,30 +80,16 @@ struct TreatmentPlanSheet: View {
                         if allTreatments.isEmpty {
                             emptyState
                         } else {
-                            if !pendingTreatments.isEmpty {
-                                sectionHeader("To Do", count: pendingTreatments.count)
+                            if !treatmentSteps.isEmpty {
+                                sectionHeader("Treatment Steps", count: treatmentSteps.count)
                                 VStack(spacing: 12) {
-                                    ForEach(pendingTreatments, id: \.id) { treatment in
+                                    ForEach(treatmentSteps, id: \.id) { treatment in
                                         TreatmentCardView(
                                             treatment: treatment,
                                             onComplete: { t in await completeTreatment(t) },
+                                            onMarkIncomplete: { t in await markTreatmentIncomplete(t) },
                                             onSkip: { t in await skipTreatment(t) },
                                             onRestore: { t in await restoreTreatment(t) },
-                                            openSwipeTreatmentID: $openSwipeTreatmentID
-                                        )
-                                    }
-                                }
-                            }
-
-                            if !completedTreatments.isEmpty {
-                                sectionHeader("Completed", count: completedTreatments.count)
-                                VStack(spacing: 12) {
-                                    ForEach(completedTreatments, id: \.id) { treatment in
-                                        TreatmentCardView(
-                                            treatment: treatment,
-                                            onComplete: { _ in },
-                                            onSkip: { _ in },
-                                            onRestore: { _ in },
                                             openSwipeTreatmentID: $openSwipeTreatmentID
                                         )
                                     }
@@ -117,6 +103,7 @@ struct TreatmentPlanSheet: View {
                                         TreatmentCardView(
                                             treatment: treatment,
                                             onComplete: { _ in },
+                                            onMarkIncomplete: { t in await markTreatmentIncomplete(t) },
                                             onSkip: { _ in },
                                             onRestore: { t in await restoreTreatment(t) },
                                             openSwipeTreatmentID: $openSwipeTreatmentID
@@ -405,37 +392,60 @@ struct TreatmentPlanSheet: View {
     private func completeTreatment(_ treatment: Treatment) async {
         let minutesToWait = treatment.minutesBeforeNext
 
-        // Request permission before scheduling the first timed notification
-        if minutesToWait > 0 && !NotificationService.shared.isAuthorized {
-            showingPermissionAlert = true
-            // Still mark complete even if they deny — we just won't schedule
-        }
-
         // Mark complete
         viewModel.completeTreatment(treatment)
-        do {
-            try modelContext.save()
-        } catch {
-            viewModel.lastError = error.localizedDescription
-        }
 
         // Find next pending step
         let nextPending = test.treatments
-            .filter { !$0.isCompleted }
+            .filter { !$0.isCompleted && !$0.isSkipped }
             .sorted { $0.sortOrder < $1.sortOrder }
             .first
 
+        var scheduledReminderLabel: String?
+
         if minutesToWait > 0, let next = nextPending {
-            if NotificationService.shared.isAuthorized {
-                await NotificationService.shared.scheduleNextStepReminder(
+            var canScheduleReminder = NotificationService.shared.isAuthorized
+            if !canScheduleReminder {
+                canScheduleReminder = await NotificationService.shared.requestPermission()
+            }
+
+            if canScheduleReminder {
+                let identifier = await NotificationService.shared.scheduleNextStepReminder(
                     nextTreatmentName: next.chemicalName,
                     afterMinutes: minutesToWait
                 )
+                treatment.reminderNotificationIdentifier = identifier
+                scheduledReminderLabel = NotificationService.waitLabel(minutes: minutesToWait)
             }
-            let label = NotificationService.waitLabel(minutes: minutesToWait)
-            toastMessage = ToastMessage.notificationSet(label: label)
-        } else {
-            toastMessage = ToastMessage.treatmentComplete()
+        }
+
+        do {
+            try modelContext.save()
+            if let scheduledReminderLabel {
+                toastMessage = ToastMessage.notificationSet(label: scheduledReminderLabel)
+            } else if minutesToWait > 0, nextPending != nil {
+                toastMessage = ToastMessage(
+                    text: "Reminder not set. Notifications are off.",
+                    icon: "bell.slash",
+                    color: PoolColor.secondaryText
+                )
+            }
+        } catch {
+            viewModel.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func markTreatmentIncomplete(_ treatment: Treatment) async {
+        let reminderCanceled = treatment.reminderNotificationIdentifier != nil
+        viewModel.markTreatmentIncomplete(treatment)
+        do {
+            try modelContext.save()
+            if reminderCanceled {
+                toastMessage = ToastMessage.treatmentIncomplete(reminderCanceled: true)
+            }
+        } catch {
+            viewModel.lastError = error.localizedDescription
         }
     }
 
@@ -444,11 +454,6 @@ struct TreatmentPlanSheet: View {
         viewModel.skipTreatment(treatment)
         do {
             try modelContext.save()
-            toastMessage = ToastMessage(
-                text: "Treatment skipped",
-                icon: "slash.circle",
-                color: PoolColor.statusSlight
-            )
         } catch {
             viewModel.lastError = error.localizedDescription
         }
@@ -459,11 +464,6 @@ struct TreatmentPlanSheet: View {
         viewModel.restoreTreatment(treatment)
         do {
             try modelContext.save()
-            toastMessage = ToastMessage(
-                text: "Treatment restored",
-                icon: "arrow.uturn.left.circle",
-                color: PoolColor.poolTeal
-            )
         } catch {
             viewModel.lastError = error.localizedDescription
         }

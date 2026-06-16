@@ -5,6 +5,7 @@ struct TreatmentCardView: View {
 
     var treatment: Treatment
     var onComplete: @MainActor (Treatment) async -> Void
+    var onMarkIncomplete: @MainActor (Treatment) async -> Void
     var onSkip: @MainActor (Treatment) async -> Void
     var onRestore: @MainActor (Treatment) async -> Void
     @Binding var openSwipeTreatmentID: UUID?
@@ -94,7 +95,7 @@ struct TreatmentCardView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(treatment.isCompleted || treatment.isSkipped ? PoolColor.secondaryText : PoolColor.primaryText)
-                        .strikethrough(treatment.isCompleted || treatment.isSkipped, color: PoolColor.secondaryText)
+                        .strikethrough(treatment.isSkipped, color: PoolColor.secondaryText)
 
                     if !amountString.isEmpty {
                         Text(amountString)
@@ -110,21 +111,30 @@ struct TreatmentCardView: View {
                         .background(urgencyColor.opacity(0.12), in: Capsule())
 
                     if let waitLabel {
-                        Label(waitLabel, systemImage: "clock")
-                            .font(.caption2)
-                            .foregroundStyle(PoolColor.secondaryText)
+                        Label(waitLabel, systemImage: "clock.badge.exclamationmark")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(PoolColor.poolTeal)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
                             .padding(.top, 2)
                     }
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Checkbox — top-right
                 Button {
-                    guard !treatment.isCompleted, !treatment.isSkipped, !isCompleting else { return }
+                    guard !treatment.isSkipped, !isCompleting else { return }
                     isCompleting = true
                     Task {
-                        await onComplete(treatment)
+                        if treatment.isCompleted {
+                            await onMarkIncomplete(treatment)
+                        } else {
+                            await onComplete(treatment)
+                        }
                         isCompleting = false
                     }
                 } label: {
@@ -147,7 +157,7 @@ struct TreatmentCardView: View {
                         }
                     }
                 }
-                .disabled(treatment.isCompleted || treatment.isSkipped)
+                .disabled(treatment.isSkipped)
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)
@@ -300,7 +310,7 @@ struct TreatmentCardView: View {
 
     private var waitLabel: String? {
         guard treatment.minutesBeforeNext > 0, !treatment.isCompleted, !treatment.isSkipped else { return nil }
-        return "Wait \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
+        return "Retest in \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
     }
 }
 
@@ -317,6 +327,7 @@ struct TreatmentCardView: View {
             urgency: .immediate
         ),
         onComplete: { _ in },
+        onMarkIncomplete: { _ in },
         onSkip: { _ in },
         onRestore: { _ in },
         openSwipeTreatmentID: .constant(nil)
@@ -339,6 +350,7 @@ struct TreatmentCardView: View {
     TreatmentCardView(
         treatment: treatment,
         onComplete: { _ in },
+        onMarkIncomplete: { _ in },
         onSkip: { _ in },
         onRestore: { _ in },
         openSwipeTreatmentID: .constant(nil)
