@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreLocation
 import Observation
+import UIKit
 
 struct SettingsView: View {
 
@@ -28,6 +29,33 @@ struct SettingsView: View {
 
     @State private var showingVolumeHelp: Bool = false
     @State private var showingLocationExplanation: Bool = false
+    @State private var originalConfig: PoolConfiguration? = nil
+
+    private var currentConfig: PoolConfiguration {
+        PoolConfiguration(
+            name: poolName.isEmpty ? "My Pool" : poolName,
+            volumeGallons: volumeGallons,
+            poolType: poolType,
+            surfaceType: surfaceType,
+            testMethod: testMethod,
+            isSaltwater: isSaltwater,
+            hasCover: hasCover,
+            chlorinePreference: chlorinePreference,
+            pHIncreaserPreference: pHIncreaserPreference,
+            pHDecreaserPreference: pHDecreaserPreference,
+            alkalinityIncreaserPreference: alkalinityIncreaserPreference,
+            calciumIncreaserPreference: calciumIncreaserPreference,
+            stabilizerPreference: stabilizerPreference,
+            location: location,
+            latitude: latitude,
+            longitude: longitude
+        )
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard let originalConfig else { return false }
+        return currentConfig != originalConfig
+    }
 
     var body: some View {
         NavigationStack {
@@ -39,11 +67,7 @@ struct SettingsView: View {
                         // Pool Settings section
                         sectionCard(header: "Pool Settings") {
                             VStack(spacing: 0) {
-                                volumeRow
-                                rowDivider
-                                pickerRow(label: "Pool Type", selection: $poolType)
-                                rowDivider
-                                pickerRow(label: "Surface", selection: $surfaceType)
+                                poolProfileRow
                                 rowDivider
                                 testingMethodRow
                                 rowDivider
@@ -71,17 +95,6 @@ struct SettingsView: View {
                             }
                         }
 
-                        // Save button
-                        Button(action: save) {
-                            Text("Save Settings")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 17)
-                                .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 16))
-                        }
-
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -95,15 +108,31 @@ struct SettingsView: View {
             .tint(PoolColor.poolTeal)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if PoolConfiguration.isConfigured {
-                        Button("Cancel", role: .cancel) {
-                            dismiss()
-                        }
+                    Button("Save") {
+                        save()
                     }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(hasUnsavedChanges ? PoolColor.poolTeal : PoolColor.secondaryText)
+                    .disabled(!hasUnsavedChanges)
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .accessibilityLabel("Close")
+                    .foregroundStyle(PoolColor.poolTeal)
                 }
             }
             .sheet(isPresented: $showingVolumeHelp) {
-                PoolVolumeHelpView()
+                PoolVolumeHelpView(
+                    poolType: $poolType,
+                    surfaceType: $surfaceType,
+                    volumeGallons: $volumeGallons
+                )
             }
             .alert("Use Your Location?", isPresented: $showingLocationExplanation) {
                 Button("Allow While Using App") {
@@ -276,55 +305,54 @@ struct SettingsView: View {
         .padding(.vertical, 14)
     }
 
-    private var volumeRow: some View {
-        VStack(spacing: 8) {
+    private var poolProfileRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Pool Volume")
+                Text("Pool")
                     .font(.subheadline)
+                    .fontWeight(.semibold)
                     .foregroundStyle(PoolColor.primaryText)
+
+                Spacer()
+
                 Button {
                     showingVolumeHelp = true
                 } label: {
-                    Image(systemName: "info.circle")
+                    Text(volumeGallons > 0 ? "Edit" : "Set Up")
                         .font(.subheadline)
+                        .fontWeight(.semibold)
                         .foregroundStyle(PoolColor.poolTeal)
                 }
                 .buttonStyle(.plain)
-                Spacer()
-                Text("\(Int(volumeGallons).formatted()) gal")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(PoolColor.poolTeal)
-                    .monospacedDigit()
             }
-            HStack(spacing: 10) {
-                Button { volumeGallons = max(1000, volumeGallons - 1000) } label: {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(PoolColor.poolTeal)
-                }
-                ZStack {
-                    Capsule()
-                        .fill(PoolColor.divider)
-                        .frame(height: 8)
-                        .padding(.horizontal, 2)
 
-                    Slider(value: $volumeGallons, in: 1000...100000, step: 500)
-                        .tint(PoolColor.poolTeal)
-                }
-                Button { volumeGallons = min(100000, volumeGallons + 1000) } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(PoolColor.poolTeal)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                poolSummaryItem(label: "Type", value: poolType.displayName)
+                poolSummaryItem(label: "Surface", value: surfaceType.displayName)
+                poolSummaryItem(label: "Volume", value: "\(Int(volumeGallons).formatted()) gallons")
             }
-            Text("Small: ~10K • Medium: 15–20K • Large: 30K+")
-                .font(.caption2)
+
+            Text("Pool type, surface, and gallons are used for treatment amounts.")
+                .font(.caption)
                 .foregroundStyle(PoolColor.secondaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
+    }
+
+    private func poolSummaryItem(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(PoolColor.secondaryText)
+            Spacer()
+            Text(value)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.primaryText)
+                .multilineTextAlignment(.trailing)
+        }
     }
 
     private var locationErrorBinding: Binding<Bool> {
@@ -358,28 +386,11 @@ struct SettingsView: View {
         location = config.location
         latitude = config.latitude
         longitude = config.longitude
+        originalConfig = currentConfig
     }
 
     private func save() {
-        let config = PoolConfiguration(
-            name: poolName.isEmpty ? "My Pool" : poolName,
-            volumeGallons: volumeGallons,
-            poolType: poolType,
-            surfaceType: surfaceType,
-            testMethod: testMethod,
-            isSaltwater: isSaltwater,
-            hasCover: hasCover,
-            chlorinePreference: chlorinePreference,
-            pHIncreaserPreference: pHIncreaserPreference,
-            pHDecreaserPreference: pHDecreaserPreference,
-            alkalinityIncreaserPreference: alkalinityIncreaserPreference,
-            calciumIncreaserPreference: calciumIncreaserPreference,
-            stabilizerPreference: stabilizerPreference,
-            location: location,
-            latitude: latitude,
-            longitude: longitude
-        )
-        viewModel.saveConfig(config)
+        viewModel.saveConfig(currentConfig)
         dismiss()
     }
 }
@@ -426,150 +437,591 @@ extension StabilizerPreference: CustomStringConvertible {
 
 struct PoolVolumeHelpView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedType: PoolType = .inground
+
+    @Binding private var savedPoolType: PoolType
+    @Binding private var savedSurfaceType: SurfaceType
+    @Binding private var savedVolumeGallons: Double
+
+    @State private var poolType: PoolType
+    @State private var surfaceType: SurfaceType
+    @State private var selectedShape: PoolShape = .rectangular
+    @State private var lengthFeet: Double = 0
+    @State private var widthFeet: Double = 0
+    @State private var diameterFeet: Double = 0
+    @State private var largeDiameterFeet: Double = 0
+    @State private var smallDiameterFeet: Double = 0
+    @State private var overallLengthFeet: Double = 0
+    @State private var shallowDepthFeet: Double = 0
+    @State private var deepDepthFeet: Double = 0
+    @State private var waterDepthFeet: Double = 0
+
+    private var effectiveShape: PoolShape {
+        poolType == .inground ? selectedShape : .circular
+    }
+
+    init(
+        poolType: Binding<PoolType>,
+        surfaceType: Binding<SurfaceType>,
+        volumeGallons: Binding<Double>
+    ) {
+        _savedPoolType = poolType
+        _savedSurfaceType = surfaceType
+        _savedVolumeGallons = volumeGallons
+        _poolType = State(initialValue: poolType.wrappedValue)
+        _surfaceType = State(initialValue: surfaceType.wrappedValue)
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 PoolColor.appBackground.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    Picker("Pool Type", selection: $selectedType) {
-                        ForEach(PoolType.allCases) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        poolDetailsCard
 
-                    TabView(selection: $selectedType) {
-                        ForEach(PoolType.allCases) { type in
-                            ScrollView {
-                                volumeContent(for: type)
-                                    .padding(.horizontal, 16)
-                                    .padding(.bottom, 24)
-                            }
-                            .tag(type)
+                        if poolType == .inground {
+                            shapePicker
+                        } else {
+                            fixedShapeCard
                         }
+
+                        measurementCard
+                        inputCard
+                        resultCard
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 104)
+                }
+                .scrollDismissesKeyboard(.interactively)
+
+                saveButton
+            }
+            .navigationTitle("Pool")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .accessibilityLabel("Close")
+                    .foregroundStyle(PoolColor.poolTeal)
                 }
             }
-            .navigationTitle("Measuring Pool Volume")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(PoolColor.poolTeal)
-                }
+            .onAppear {
+                configureInitialShape()
+            }
+            .onChange(of: poolType) { _, _ in
+                configureInitialShape()
             }
         }
     }
 
-    @ViewBuilder
-    private func volumeContent(for type: PoolType) -> some View {
-        VStack(spacing: 16) {
-            // Formula card
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Formula", systemImage: "function")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(PoolColor.poolTeal)
-                Text(formula(for: type))
-                    .font(.system(.subheadline, design: .monospaced))
-                    .foregroundStyle(PoolColor.primaryText)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    private var poolDetailsCard: some View {
+        VStack(spacing: 0) {
+            poolPickerRow(label: "Pool Type", selection: $poolType)
+            Rectangle()
+                .fill(PoolColor.divider)
+                .frame(height: 1)
+                .padding(.leading, 18)
+            poolPickerRow(label: "Surface", selection: $surfaceType)
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
 
-            // Steps
-            VStack(alignment: .leading, spacing: 12) {
-                Label("How to measure", systemImage: "ruler")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(PoolColor.poolTeal)
+    private func poolPickerRow<T: CaseIterable & Identifiable & Hashable & CustomStringConvertible>(
+        label: String,
+        selection: Binding<T>
+    ) -> some View where T.AllCases: RandomAccessCollection {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
 
-                ForEach(Array(steps(for: type).enumerated()), id: \.offset) { index, step in
-                    HStack(alignment: .top, spacing: 12) {
-                        Text("\(index + 1)")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundStyle(Color.white)
-                            .frame(width: 22, height: 22)
-                            .background(PoolColor.poolTeal, in: Circle())
-                        Text(step)
-                            .font(.subheadline)
-                            .foregroundStyle(PoolColor.primaryText)
-                    }
+            Spacer()
+
+            Picker(label, selection: selection) {
+                ForEach(Array(T.allCases), id: \.self) { option in
+                    Text(option.description).tag(option)
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+            .tint(PoolColor.poolTeal)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+    }
 
-            // Tip
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "lightbulb.fill")
-                    .font(.caption)
-                    .foregroundStyle(PoolColor.sunshine)
-                Text(tip(for: type))
+    private var shapePicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pool Shape")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.secondaryText)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+                ForEach(PoolShape.allCases) { shape in
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                            selectedShape = shape
+                        }
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(shape.smallAssetName)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 32)
+                                .accessibilityHidden(true)
+                            Text(shape.displayName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .fontWeight(.semibold)
+                                .foregroundStyle(PoolColor.primaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            selectedShape == shape ? PoolColor.poolTeal.opacity(0.1) : Color.white,
+                            in: RoundedRectangle(cornerRadius: 14)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(selectedShape == shape ? PoolColor.poolTeal : PoolColor.divider, lineWidth: 1.5)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            selectedShapeDiagram
+        }
+    }
+
+    private var fixedShapeCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Circular Pool")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.primaryText)
+                Text(poolType == .spa ? "Most spas and hot tubs are estimated from diameter and average water depth." : "Most above-ground pools use the round-pool volume formula.")
                     .font(.caption)
                     .foregroundStyle(PoolColor.secondaryText)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(PoolColor.sunshine.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(PoolColor.sunshine.opacity(0.3), lineWidth: 1)
-            )
+
+            selectedShapeDiagram
+        }
+        .padding(16)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var selectedShapeDiagram: some View {
+        Image(effectiveShape.assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: .infinity)
+            .padding(12)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(PoolColor.divider, lineWidth: 1)
+            }
+            .accessibilityLabel("\(effectiveShape.displayName) pool measurement diagram")
+    }
+
+    private var measurementCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("How to measure", systemImage: "ruler")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.poolTeal)
+
+            ForEach(Array(effectiveShape.measurementSteps(for: poolType).enumerated()), id: \.offset) { index, step in
+                HStack(alignment: .top, spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(PoolColor.poolTeal, in: Circle())
+                    Text(step)
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var inputCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Measurements")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.secondaryText)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .padding(.bottom, 8)
+
+            ForEach(Array(measurementFields.enumerated()), id: \.element.id) { index, field in
+                measurementRow(field)
+
+                if index < measurementFields.count - 1 {
+                    Rectangle()
+                        .fill(PoolColor.divider)
+                        .frame(height: 1)
+                        .padding(.leading, 18)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var resultCard: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Estimated Volume")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+                Text(calculatedVolume.map { "\(Int($0.rounded()).formatted()) gallons" } ?? "Enter measurements")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(calculatedVolume == nil ? PoolColor.secondaryText : PoolColor.poolTeal)
+                    .monospacedDigit()
+            }
+
+            Spacer()
+
+            Image(systemName: calculatedVolume == nil ? "drop" : "checkmark.circle.fill")
+                .font(.title2)
+                .foregroundStyle(calculatedVolume == nil ? PoolColor.secondaryText : PoolColor.statusIdeal)
+        }
+        .padding(16)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var saveButton: some View {
+        Button {
+            savedPoolType = poolType
+            savedSurfaceType = surfaceType
+            if let calculatedVolume {
+                savedVolumeGallons = calculatedVolume.rounded()
+            }
+            dismiss()
+        } label: {
+            Text("Save")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 17)
+                .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+                .background(
+                    Rectangle()
+                        .fill(Color.white.opacity(0.95))
+                        .ignoresSafeArea(edges: .bottom)
+                )
         }
     }
 
-    private func formula(for type: PoolType) -> String {
-        switch type {
-        case .inground:    return "Length × Width × Avg Depth × 7.5"
-        case .aboveGround: return "Ø² × Depth × 5.9  (round)\nL × W × D × 7.5   (oval/rect)"
-        case .spa:         return "Length × Width × Depth × 7.5"
+    private var measurementFields: [VolumeMeasurementField] {
+        if poolType != .inground {
+            return [.diameter, .waterDepth]
+        }
+
+        switch effectiveShape {
+        case .rectangular, .oval:
+            return [.length, .width, .shallowDepth, .deepDepth]
+        case .oblongKidney:
+            return [.largeDiameter, .smallDiameter, .overallLength, .shallowDepth, .deepDepth]
+        case .circular:
+            return [.diameter, .shallowDepth, .deepDepth]
         }
     }
 
-    private func steps(for type: PoolType) -> [String] {
-        switch type {
-        case .inground:
-            return [
-                "Measure length and width at the widest points in feet.",
-                "Measure depth at shallow and deep ends, then average them.",
-                "Multiply length × width × average depth.",
-                "Multiply by 7.5 to convert cubic feet to gallons."
-            ]
-        case .aboveGround:
-            return [
-                "For round pools, measure the inside diameter in feet.",
-                "Measure the actual water depth (not wall height).",
-                "Round: diameter × diameter × depth × 5.9.",
-                "Oval or rectangular: length × width × depth × 7.5."
-            ]
-        case .spa:
-            return [
-                "Measure interior length, width, and depth in feet.",
-                "For contoured seats, estimate an average depth.",
-                "Multiply L × W × D × 7.5.",
-                "Typical spas hold 250–600 gallons."
-            ]
+    private var calculatedVolume: Double? {
+        let averageDepth: Double
+        if measurementFields.contains(.waterDepth) {
+            guard waterDepthFeet > 0 else { return nil }
+            averageDepth = waterDepthFeet
+        } else {
+            guard shallowDepthFeet > 0, deepDepthFeet > 0 else { return nil }
+            averageDepth = (shallowDepthFeet + deepDepthFeet) / 2
+        }
+
+        let volume: Double
+        switch effectiveShape {
+        case .rectangular:
+            guard lengthFeet > 0, widthFeet > 0 else { return nil }
+            volume = lengthFeet * widthFeet * averageDepth * 7.48
+        case .circular:
+            guard diameterFeet > 0 else { return nil }
+            volume = diameterFeet * diameterFeet * averageDepth * 5.9
+        case .oval:
+            guard lengthFeet > 0, widthFeet > 0 else { return nil }
+            volume = lengthFeet * widthFeet * averageDepth * 5.9
+        case .oblongKidney:
+            guard largeDiameterFeet > 0, smallDiameterFeet > 0, overallLengthFeet > 0 else { return nil }
+            volume = 0.45 * (largeDiameterFeet + smallDiameterFeet) * overallLengthFeet * averageDepth * 7.48
+        }
+
+        guard volume.isFinite, volume >= 100 else { return nil }
+        return min(volume, 200_000)
+    }
+
+    private func measurementRow(_ field: VolumeMeasurementField) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(field.title(for: effectiveShape))
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.primaryText)
+                Text(field.helpText(for: effectiveShape, poolType: poolType))
+                    .font(.caption2)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 6) {
+                SelectAllDecimalTextField(value: binding(for: field))
+                    .frame(width: 72)
+                Text("ft")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func binding(for field: VolumeMeasurementField) -> Binding<Double> {
+        switch field {
+        case .length:
+            return $lengthFeet
+        case .width:
+            return $widthFeet
+        case .diameter:
+            return $diameterFeet
+        case .largeDiameter:
+            return $largeDiameterFeet
+        case .smallDiameter:
+            return $smallDiameterFeet
+        case .overallLength:
+            return $overallLengthFeet
+        case .shallowDepth:
+            return $shallowDepthFeet
+        case .deepDepth:
+            return $deepDepthFeet
+        case .waterDepth:
+            return $waterDepthFeet
         }
     }
 
-    private func tip(for type: PoolType) -> String {
-        switch type {
-        case .inground:    return "Check your pool's original blueprint for an exact volume — often more accurate than measuring."
-        case .aboveGround: return "The pool's spec card or owner's manual usually lists the exact gallon capacity."
-        case .spa:         return "Most spa manuals list capacity precisely. Check the door panel or manufacturer's site."
+    private func configureInitialShape() {
+        selectedShape = poolType == .inground ? .rectangular : .circular
+    }
+}
+
+private enum PoolShape: String, CaseIterable, Identifiable {
+    case rectangular
+    case circular
+    case oval
+    case oblongKidney
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .rectangular: return "Rectangular"
+        case .circular: return "Circular"
+        case .oval: return "Oval"
+        case .oblongKidney: return "Oblong / Kidney"
+        }
+    }
+
+    var assetName: String {
+        switch self {
+        case .rectangular: return "Rectangular Pool"
+        case .circular: return "Circular Pool"
+        case .oval: return "Oval Pool"
+        case .oblongKidney: return "Oblong-Kidney Pool"
+        }
+    }
+
+    var smallAssetName: String {
+        switch self {
+        case .rectangular: return "Rectangular Pool Small"
+        case .circular: return "Circular Pool Small"
+        case .oval: return "Oval Pool Small"
+        case .oblongKidney: return "Oblong-Kidney Pool Small"
+        }
+    }
+
+    func measurementSteps(for poolType: PoolType) -> [String] {
+        if poolType != .inground {
+            return [
+                "Measure the inside diameter across the water from wall to wall.",
+                "Measure actual water depth, not the height of the pool wall.",
+                "Use feet for both measurements. For example, 30 inches is 2.5 feet."
+            ]
+        }
+
+        switch self {
+        case .rectangular:
+            return [
+                "Measure width (A) and length (B) using the labels shown on the diagram.",
+                "Measure shallow and deep water depth at the depth indicator points shown on the diagram.",
+                "Use actual water depth from the waterline to the pool floor."
+            ]
+        case .circular:
+            return [
+                "Measure diameter (A) across the widest point of the water.",
+                "Measure shallow and deep water depth if the pool floor slopes.",
+                "If the depth is uniform, enter the same number for shallow and deep."
+            ]
+        case .oval:
+            return [
+                "Measure width (A) and length (B) using the labels shown on the diagram.",
+                "Measure shallow and deep water depth at the depth indicator points shown on the diagram.",
+                "Use actual water depth from the waterline to the pool floor."
+            ]
+        case .oblongKidney:
+            return [
+                "Measure large diameter (A) and small diameter (B), treating the pool like two connected circles.",
+                "Measure length (C) across the full pool from end to end.",
+                "Measure shallow and deep water depth at the depth indicator points shown on the diagram."
+            ]
+        }
+    }
+}
+
+private enum VolumeMeasurementField: String, Identifiable {
+    case length
+    case width
+    case diameter
+    case largeDiameter
+    case smallDiameter
+    case overallLength
+    case shallowDepth
+    case deepDepth
+    case waterDepth
+
+    var id: String { rawValue }
+
+    func title(for shape: PoolShape) -> String {
+        switch self {
+        case .length: return shape == .oval || shape == .rectangular ? "Length (B)" : "Length"
+        case .width: return shape == .oval || shape == .rectangular ? "Width (A)" : "Width"
+        case .diameter: return "Diameter (A)"
+        case .largeDiameter: return "Large Diameter (A)"
+        case .smallDiameter: return "Small Diameter (B)"
+        case .overallLength: return "Length (C)"
+        case .shallowDepth: return "Shallow End Depth"
+        case .deepDepth: return "Deep End Depth"
+        case .waterDepth: return "Water Depth"
+        }
+    }
+
+    func helpText(for shape: PoolShape, poolType: PoolType) -> String {
+        switch self {
+        case .length:
+            return shape == .oblongKidney ? "Longest overall inside measurement." : "Inside water length, wall to wall."
+        case .width:
+            return shape == .oblongKidney ? "Widest overall inside measurement." : "Inside water width at the widest point."
+        case .diameter:
+            return "Inside water width across the center."
+        case .largeDiameter:
+            return "Inside diameter of the larger rounded end."
+        case .smallDiameter:
+            return "Inside diameter of the smaller rounded end."
+        case .overallLength:
+            return "Full inside length across both rounded ends."
+        case .shallowDepth:
+            return "Measure from waterline to floor at the shallow depth indicator."
+        case .deepDepth:
+            return "Measure from waterline to floor at the deep depth indicator."
+        case .waterDepth:
+            return poolType == .spa ? "Average water depth inside the spa." : "Actual water depth, not wall height."
+        }
+    }
+}
+
+private struct SelectAllDecimalTextField: UIViewRepresentable {
+    @Binding var value: Double
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField(frame: .zero)
+        textField.delegate = context.coordinator
+        textField.keyboardType = .decimalPad
+        textField.textAlignment = .right
+        textField.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        textField.adjustsFontForContentSizeCategory = true
+        textField.textColor = UIColor(PoolColor.primaryText)
+        textField.clearButtonMode = .never
+        textField.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.textDidChange(_:)),
+            for: .editingChanged
+        )
+        return textField
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        let formattedText = Self.format(value)
+        if uiView.text != formattedText, !uiView.isFirstResponder {
+            uiView.text = formattedText
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value)
+    }
+
+    private static func format(_ value: Double) -> String {
+        value == value.rounded()
+            ? "\(Int(value))"
+            : String(format: "%.2f", value).trimmingCharacters(in: CharacterSet(charactersIn: "0")).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        @Binding var value: Double
+
+        init(value: Binding<Double>) {
+            _value = value
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            DispatchQueue.main.async {
+                textField.selectAll(nil)
+            }
+        }
+
+        @objc func textDidChange(_ textField: UITextField) {
+            let text = textField.text ?? ""
+            value = Double(text) ?? 0
         }
     }
 }
@@ -679,5 +1131,9 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
 }
 
 #Preview("Volume Help") {
-    PoolVolumeHelpView()
+    PoolVolumeHelpView(
+        poolType: .constant(.inground),
+        surfaceType: .constant(.plaster),
+        volumeGallons: .constant(15_000)
+    )
 }

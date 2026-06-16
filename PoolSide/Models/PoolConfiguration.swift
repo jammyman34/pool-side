@@ -2,7 +2,7 @@ import Foundation
 
 /// Pool configuration stored in UserDefaults via AppStorage.
 /// Not a SwiftData model — settings are single-instance, not queried.
-struct PoolConfiguration: Codable {
+struct PoolConfiguration: Codable, Equatable {
 
     var name: String = "My Pool"
     var volumeGallons: Double = 15000
