@@ -26,6 +26,7 @@
 		6571B70B1EC96A122198DB26 /* TestDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */; };
 		8CE42F94F26BB1ECC4596E4F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E9A2DCAFE611D5B8D72E73 /* StatusBadge.swift */; };
 		8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40260884F73467DEAD0224AF /* NotificationService.swift */; };
+		9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */; };
 		AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DF5015684F5FE62BCF2E0C /* AddTestView.swift */; };
 		B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */; };
 		BD045FD26E8F2E7894105DE9 /* ToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413760B903EFB0B7EE3867F8 /* ToastView.swift */; };
@@ -53,6 +54,8 @@
 		6ECB4659535BC97B6A35D4D7 /* Treatment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Treatment.swift; sourceTree = "<group>"; };
 		8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDetailView.swift; sourceTree = "<group>"; };
 		9227EFAE07F3F0E9EA12F090 /* TreatmentPlanSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentPlanSheet.swift; sourceTree = "<group>"; };
+		9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
+		9BF358082FE2F10C00853A99 /* PoolSide.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PoolSide.entitlements; sourceTree = "<group>"; };
 		A2B1172BBFB76FCBAB212A92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A7C65FE5D657EB1E72327194 /* TreatmentCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentCardView.swift; sourceTree = "<group>"; };
 		A7FCDD2AFA1595D96CE3CF96 /* PoolViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolViewModel.swift; sourceTree = "<group>"; };
@@ -136,6 +139,7 @@
 		6273ECD5E22D132B76EBF5EF /* PoolSide */ = {
 			isa = PBXGroup;
 			children = (
+				9BF358082FE2F10C00853A99 /* PoolSide.entitlements */,
 				FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */,
 				3130086B3847FD28B0FA7A63 /* ContentView.swift */,
 				A2B1172BBFB76FCBAB212A92 /* Info.plist */,
@@ -179,6 +183,7 @@
 				BCD17832DAFDD11342727FA2 /* FoundationModelsService.swift */,
 				40260884F73467DEAD0224AF /* NotificationService.swift */,
 				AD49876B82B4C8A0A8CAA29F /* RuleBasedService.swift */,
+				9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -282,6 +287,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1E976E6D4D68EE4771BF17E2 /* AIService.swift in Sources */,
+				9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */,
 				AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */,
 				46DF8F5D092C7092A89DFB48 /* ChemicalStatusCard.swift in Sources */,
 				F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */,
@@ -318,8 +324,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_ENTITLEMENTS = PoolSide/PoolSide.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5CWYP72CU8;
 				INFOPLIST_FILE = PoolSide/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -328,6 +337,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -471,9 +481,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_ENTITLEMENTS = PoolSide/PoolSide.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG = YES;
+				DEVELOPMENT_TEAM = 5CWYP72CU8;
 				INFOPLIST_FILE = PoolSide/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -482,6 +495,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_LOC_STRINGS = YES;

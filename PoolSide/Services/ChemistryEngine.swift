@@ -93,10 +93,6 @@ struct ChemistryEngine {
         static let pHHigh       = 7.6...8.0
         static let pHCritical   = 0.0...6.8
 
-        static let freeChlorine        = 1.0...3.0
-        static let freeChlorineSlight  = 0.5...1.0
-        static let freeChlorineHigh    = 3.0...5.0
-
         static let totalAlkalinity       = 80.0...120.0
         static let totalAlkalinityLow    = 60.0...80.0
         static let totalAlkalinityHigh   = 120.0...150.0
@@ -128,14 +124,62 @@ struct ChemistryEngine {
     }
 
     func freeChlorineStatus(_ value: Double) -> ChemicalStatus {
+        freeChlorineStatus(value, cyanuricAcid: nil)
+    }
+
+    func freeChlorineStatus(_ value: Double, cyanuricAcid: Double?) -> ChemicalStatus {
+        let range = freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
+        let minimum = freeChlorineMinimum(cyanuricAcid: cyanuricAcid)
+        let slightLow = max(0, minimum * 0.75)
+        let high = max(range.upperBound + 2, range.upperBound * 1.4)
+        let criticalHigh = max(high + 4, range.upperBound * 2)
+
         switch value {
-        case Ranges.freeChlorine: return .ideal
-        case 0.5..<1.0:          return .slightlyLow
-        case 3.0..<5.0:          return .slightlyHigh
-        case 0.0..<0.5:          return .low
-        case 5.0..<10.0:         return .high
-        default:                  return .critical
+        case range:
+            return .ideal
+        case minimum..<range.lowerBound:
+            return .slightlyLow
+        case range.upperBound..<high:
+            return .slightlyHigh
+        case slightLow..<minimum:
+            return .low
+        case 0..<slightLow:
+            return .critical
+        case high..<criticalHigh:
+            return .high
+        default:
+            return .critical
         }
+    }
+
+    func freeChlorineTargetRange(cyanuricAcid: Double?) -> ClosedRange<Double> {
+        guard let cya = cyanuricAcid, cya >= 20 else {
+            return 1.0...3.0
+        }
+
+        let minimum = freeChlorineMinimum(cyanuricAcid: cya)
+        let target = max(minimum + 1.5, cya * 0.10)
+        let upper = min(max(target + 2, minimum + 3), 10)
+        return target...upper
+    }
+
+    func freeChlorineIdealRangeLabel(cyanuricAcid: Double?) -> String {
+        let range = freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
+        return "\(formatRangeBound(range.lowerBound)) – \(formatRangeBound(range.upperBound)) ppm"
+    }
+
+    private func formatRangeBound(_ value: Double) -> String {
+        value == value.rounded()
+            ? "\(Int(value))"
+            : String(format: "%.1f", value)
+    }
+
+    private func freeChlorineMinimum(cyanuricAcid: Double?) -> Double {
+        guard let cya = cyanuricAcid, cya >= 20 else {
+            return 1.0
+        }
+
+        return max(1.0, (cya * 0.075).rounded(toPlaces: 1))
     }
 
     func totalAlkalinityStatus(_ value: Double) -> ChemicalStatus {
@@ -203,8 +247,8 @@ struct ChemistryEngine {
             key: "freeChlorine",
             value: test.freeChlorine,
             unit: "ppm",
-            status: freeChlorineStatus(test.freeChlorine),
-            idealRange: "1 – 3 ppm",
+            status: freeChlorineStatus(test.freeChlorine, cyanuricAcid: test.cyanuricAcid),
+            idealRange: freeChlorineIdealRangeLabel(cyanuricAcid: test.cyanuricAcid),
             trend: clTrend
         ))
 
@@ -257,6 +301,168 @@ struct ChemistryEngine {
         return readings
     }
 
+    // MARK: - Overall Score
+
+    func overallScore(
+        for test: PoolTest,
+        previousTest: PoolTest? = nil,
+        config: PoolConfiguration = .current
+    ) -> Int {
+        let readings = allReadings(for: test, previousTest: previousTest, config: config)
+        guard !readings.isEmpty else { return 0 }
+
+        var penalty = readings.reduce(0.0) { total, reading in
+            total + scorePenalty(for: reading, test: test, previousTest: previousTest, config: config)
+        }
+
+        penalty += combinedChlorinePenalty(for: test)
+        penalty += visualIndicatorPenalty(for: test)
+
+        return Int(max(0, min(100, 100 - penalty)).rounded())
+    }
+
+    private func scorePenalty(
+        for reading: ChemicalReading,
+        test: PoolTest,
+        previousTest: PoolTest?,
+        config: PoolConfiguration
+    ) -> Double {
+        var penalty: Double
+
+        switch reading.status {
+        case .ideal, .testing:
+            penalty = 0
+        case .slightlyLow, .slightlyHigh:
+            penalty = slightPenalty(for: reading.key)
+        case .low, .high:
+            penalty = offRangePenalty(for: reading.key)
+        case .critical:
+            penalty = criticalPenalty(for: reading.key)
+        }
+
+        guard penalty > 0 else { return 0 }
+
+        if let trend = reading.trend {
+            switch trend {
+            case .rising where reading.status == .slightlyLow || reading.status == .low:
+                penalty *= 0.85
+            case .falling where reading.status == .slightlyHigh || reading.status == .high:
+                penalty *= 0.85
+            case .falling where reading.status == .slightlyLow || reading.status == .low:
+                penalty *= 1.15
+            case .rising where reading.status == .slightlyHigh || reading.status == .high:
+                penalty *= 1.15
+            case .stable:
+                break
+            default:
+                break
+            }
+        }
+
+        if shouldTreatAsLikelyTestingVariance(reading: reading, test: test, previousTest: previousTest, config: config) {
+            penalty *= 0.3
+        }
+
+        if reading.key == "freeChlorine",
+           (config.testMethod == .testStrips || test.testMethod == .testStrips),
+           test.totalChlorine + 0.3 < test.freeChlorine {
+            penalty *= 0.6
+        }
+
+        return penalty
+    }
+
+    private func slightPenalty(for key: String) -> Double {
+        switch key {
+        case "pH": return 10
+        case "freeChlorine": return 12
+        case "totalAlkalinity": return 6
+        case "cyanuricAcid": return 6
+        case "calciumHardness": return 4
+        case "saltLevel": return 6
+        default: return 5
+        }
+    }
+
+    private func offRangePenalty(for key: String) -> Double {
+        switch key {
+        case "pH": return 22
+        case "freeChlorine": return 24
+        case "totalAlkalinity": return 14
+        case "cyanuricAcid": return 16
+        case "calciumHardness": return 10
+        case "saltLevel": return 14
+        default: return 14
+        }
+    }
+
+    private func criticalPenalty(for key: String) -> Double {
+        switch key {
+        case "pH": return 40
+        case "freeChlorine": return 45
+        case "totalAlkalinity": return 28
+        case "cyanuricAcid": return 35
+        case "calciumHardness": return 20
+        case "saltLevel": return 28
+        default: return 30
+        }
+    }
+
+    private func shouldTreatAsLikelyTestingVariance(
+        reading: ChemicalReading,
+        test: PoolTest,
+        previousTest: PoolTest?,
+        config: PoolConfiguration
+    ) -> Bool {
+        guard config.testMethod == .testStrips || test.testMethod == .testStrips else { return false }
+        guard let previousTest else { return false }
+
+        switch reading.key {
+        case "cyanuricAcid":
+            return abs(test.cyanuricAcid - previousTest.cyanuricAcid) >= 10
+                && reading.status == .slightlyLow
+        case "totalAlkalinity":
+            return abs(test.totalAlkalinity - previousTest.totalAlkalinity) <= 10
+                && (reading.status == .slightlyLow || reading.status == .slightlyHigh)
+        default:
+            return false
+        }
+    }
+
+    private func combinedChlorinePenalty(for test: PoolTest) -> Double {
+        if test.totalChlorine + 0.3 < test.freeChlorine {
+            return 0
+        }
+
+        switch test.combinedChlorine {
+        case 1.0...:
+            return 25
+        case 0.5..<1.0:
+            return 12
+        default:
+            return 0
+        }
+    }
+
+    private func visualIndicatorPenalty(for test: PoolTest) -> Double {
+        test.visualIndicators.reduce(0.0) { total, rawValue in
+            guard let indicator = VisualIndicator(rawValue: rawValue) else { return total }
+
+            switch indicator {
+            case .greenWater, .algaeSpots:
+                return total + 25
+            case .cloudyWater:
+                return total + 12
+            case .strongChlorineSmell:
+                return total + 10
+            case .foam, .poorCirculation:
+                return total + 8
+            case .scaling, .staining:
+                return total + 6
+            }
+        }
+    }
+
     // MARK: - Rule-Based Treatments
 
     func ruleTreatments(for test: PoolTest, config: PoolConfiguration = .current) -> [TreatmentTemplate] {
@@ -264,7 +470,7 @@ struct ChemistryEngine {
         var templates: [TreatmentTemplate] = []
 
         for reading in readings where reading.status != .ideal && reading.status != .testing {
-            if let template = treatmentTemplate(for: reading, config: config) {
+            if let template = treatmentTemplate(for: reading, test: test, config: config) {
                 templates.append(template)
             }
         }
@@ -351,7 +557,7 @@ struct ChemistryEngine {
 
     // MARK: - Treatment Templates
 
-    private func treatmentTemplate(for reading: ChemicalReading, config: PoolConfiguration) -> TreatmentTemplate? {
+    private func treatmentTemplate(for reading: ChemicalReading, test: PoolTest, config: PoolConfiguration) -> TreatmentTemplate? {
         let volume = config.volumeGallons
         let kGal = volume / 1000
 
@@ -394,19 +600,21 @@ struct ChemistryEngine {
             }
 
         case "freeChlorine":
-            if reading.value < 1.0 {
-                let ppmIncrease = max(0, 2.0 - reading.value)
+            let targetRange = freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
+            if reading.value < targetRange.lowerBound {
+                let target = targetRange.lowerBound
+                let ppmIncrease = max(0, target - reading.value)
                 let product = chlorineProduct(config.chlorinePreference, volume: volume, ppmIncrease: ppmIncrease)
                 return TreatmentTemplate(
                     chemicalName: product.name,
-                    actionDescription: "Raise free chlorine to safe levels",
+                    actionDescription: "Raise free chlorine to \(freeChlorineIdealRangeLabel(cyanuricAcid: test.cyanuricAcid))",
                     amount: product.amount,
                     unit: product.unit,
                     instructions: product.instructions,
                     targetParameter: "freeChlorine",
                     urgency: reading.status.treatmentUrgency ?? .recommended,
                     expectedEffectParameter: "freeChlorine",
-                    expectedDelta: 2.0 - reading.value,
+                    expectedDelta: target - reading.value,
                     effectDelayHours: 1,
                     effectDurationHours: 24,
                     doNotRepeatHours: 4

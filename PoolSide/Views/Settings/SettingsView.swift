@@ -28,7 +28,6 @@ struct SettingsView: View {
     @State private var locationService = PoolLocationService()
 
     @State private var showingVolumeHelp: Bool = false
-    @State private var showingLocationExplanation: Bool = false
     @State private var originalConfig: PoolConfiguration? = nil
 
     private var currentConfig: PoolConfiguration {
@@ -133,14 +132,6 @@ struct SettingsView: View {
                     surfaceType: $surfaceType,
                     volumeGallons: $volumeGallons
                 )
-            }
-            .alert("Use Your Location?", isPresented: $showingLocationExplanation) {
-                Button("Allow While Using App") {
-                    locationService.requestWhenInUseLocation()
-                }
-                Button("Not Now", role: .cancel) { }
-            } message: {
-                Text("Pool Side uses your location only while the app is open so future treatment guidance can account for local weather, sun exposure, and pool-cover timing. You can keep typing your location manually instead.")
             }
             .alert("Location Unavailable", isPresented: locationErrorBinding) {
                 Button("OK", role: .cancel) {
@@ -253,7 +244,7 @@ struct SettingsView: View {
                     .textInputAutocapitalization(.words)
 
                 Button {
-                    showingLocationExplanation = true
+                    locationService.requestWhenInUseLocation()
                 } label: {
                     Image(systemName: locationService.isLocating ? "location.circle" : "location.fill")
                         .font(.subheadline)
@@ -454,6 +445,7 @@ struct PoolVolumeHelpView: View {
     @State private var shallowDepthFeet: Double = 0
     @State private var deepDepthFeet: Double = 0
     @State private var waterDepthFeet: Double = 0
+    @State private var focusedFieldID: String?
 
     private var effectiveShape: PoolShape {
         poolType == .inground ? selectedShape : .circular
@@ -476,25 +468,36 @@ struct PoolVolumeHelpView: View {
             ZStack(alignment: .bottom) {
                 PoolColor.appBackground.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        poolDetailsCard
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            poolDetailsCard
 
-                        if poolType == .inground {
-                            shapePicker
-                        } else {
-                            fixedShapeCard
+                            if poolType == .inground {
+                                shapePicker
+                            } else {
+                                fixedShapeCard
+                            }
+
+                            measurementCard
+                            inputCard
+                            resultCard
                         }
-
-                        measurementCard
-                        inputCard
-                        resultCard
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 104)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-                    .padding(.bottom, 104)
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: focusedFieldID) { _, newID in
+                        guard let newID else { return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(280))
+                            withAnimation(.easeOut(duration: 0.25)) {
+                                proxy.scrollTo(newID, anchor: .center)
+                            }
+                        }
+                    }
                 }
-                .scrollDismissesKeyboard(.interactively)
 
                 saveButton
             }
@@ -804,8 +807,11 @@ struct PoolVolumeHelpView: View {
             Spacer(minLength: 12)
 
             HStack(spacing: 6) {
-                SelectAllDecimalTextField(value: binding(for: field))
-                    .frame(width: 72)
+                SelectAllDecimalTextField(
+                    value: binding(for: field),
+                    onBeginEditing: { focusedFieldID = field.id }
+                )
+                .frame(width: 72)
                 Text("ft")
                     .font(.caption)
                     .foregroundStyle(PoolColor.secondaryText)
@@ -815,6 +821,7 @@ struct PoolVolumeHelpView: View {
             .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 10))
         }
         .padding(.vertical, 10)
+        .id(field.id)
     }
 
     private func binding(for field: VolumeMeasurementField) -> Binding<Double> {
@@ -971,6 +978,7 @@ private enum VolumeMeasurementField: String, Identifiable {
 
 private struct SelectAllDecimalTextField: UIViewRepresentable {
     @Binding var value: Double
+    var onBeginEditing: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> UITextField {
         let textField = UITextField(frame: .zero)
@@ -990,6 +998,8 @@ private struct SelectAllDecimalTextField: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextField, context: Context) {
+        context.coordinator.onBeginEditing = onBeginEditing
+
         let formattedText = Self.format(value)
         if uiView.text != formattedText, !uiView.isFirstResponder {
             uiView.text = formattedText
@@ -997,7 +1007,7 @@ private struct SelectAllDecimalTextField: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(value: $value)
+        Coordinator(value: $value, onBeginEditing: onBeginEditing)
     }
 
     private static func format(_ value: Double) -> String {
@@ -1008,15 +1018,24 @@ private struct SelectAllDecimalTextField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         @Binding var value: Double
+        var onBeginEditing: (() -> Void)?
 
-        init(value: Binding<Double>) {
+        init(value: Binding<Double>, onBeginEditing: (() -> Void)?) {
             _value = value
+            self.onBeginEditing = onBeginEditing
         }
 
         func textFieldDidBeginEditing(_ textField: UITextField) {
-            DispatchQueue.main.async {
-                textField.selectAll(nil)
+            let current = textField.text ?? ""
+            if current.isEmpty || Double(current) == 0 {
+                textField.text = ""
+                if value != 0 { value = 0 }
+            } else {
+                DispatchQueue.main.async {
+                    textField.selectAll(nil)
+                }
             }
+            onBeginEditing?()
         }
 
         @objc func textDidChange(_ textField: UITextField) {

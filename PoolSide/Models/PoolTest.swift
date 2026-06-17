@@ -125,12 +125,9 @@ final class PoolTest {
         set { testMethodRaw = newValue.rawValue }
     }
 
-    /// Overall pool health score 0–100 based on how many parameters are in ideal range
+    /// Overall pool health score 0–100 based on weighted chemistry risk.
     var overallScore: Int {
         let engine = ChemistryEngine()
-        let readings = engine.allReadings(for: self)
-        let idealCount = readings.filter { $0.status == .ideal }.count
-        guard !readings.isEmpty else { return 0 }
-        return Int(Double(idealCount) / Double(readings.count) * 100)
+        return engine.overallScore(for: self, config: .current)
     }
 }

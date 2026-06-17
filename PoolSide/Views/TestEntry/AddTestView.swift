@@ -140,8 +140,8 @@ struct AddTestView: View {
                                     }
                                 }
 
-                                divider
-                                resetChemicalOrderButton
+//                                divider
+//                                resetChemicalOrderButton
                             }
                             .animation(.spring(response: 0.28, dampingFraction: 0.86), value: chemicalOrder)
 
@@ -580,14 +580,15 @@ struct AddTestView: View {
                 width: width
             )
         case .freeChlorine:
+            let chlorineRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
             chemicalDragPreview(
                 field: field,
                 label: "Free Chlorine (ppm)",
                 value: freeChlorine,
                 range: 0...10,
-                idealRange: "1 – 3 ppm",
-                goodRange: 1...3,
-                meterColor: meterColor(for: chemicalStatus(for: field, value: freeChlorine, goodRange: 1...3, fullRange: 0...10)),
+                idealRange: ChemistryEngine().freeChlorineIdealRangeLabel(cyanuricAcid: cyanuricAcid),
+                goodRange: chlorineRange,
+                meterColor: meterColor(for: chemicalStatus(for: field, value: freeChlorine, goodRange: chlorineRange, fullRange: 0...10)),
                 width: width
             )
         case .totalChlorine:
@@ -682,6 +683,7 @@ struct AddTestView: View {
                 showUnit: false
             )
         case .freeChlorine:
+            let chlorineRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
             chemRow(
                 field: field,
                 icon: "Free Chlorine",
@@ -689,8 +691,8 @@ struct AddTestView: View {
                 value: $freeChlorine,
                 range: 0...10,
                 step: 0.5,
-                idealRange: "1 – 3 ppm",
-                goodRange: 1...3
+                idealRange: ChemistryEngine().freeChlorineIdealRangeLabel(cyanuricAcid: cyanuricAcid),
+                goodRange: chlorineRange
             )
         case .totalChlorine:
             chemRow(
@@ -783,7 +785,7 @@ struct AddTestView: View {
         case .pH:
             return engine.pHStatus(value)
         case .freeChlorine:
-            return engine.freeChlorineStatus(value)
+            return engine.freeChlorineStatus(value, cyanuricAcid: cyanuricAcid)
         case .totalAlkalinity:
             return engine.totalAlkalinityStatus(value)
         case .calciumHardness:
