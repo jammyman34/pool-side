@@ -572,11 +572,11 @@ struct AddTestView: View {
                 field: field,
                 label: "pH",
                 value: pH,
-                range: 6.8...8.4,
-                idealRange: "7.2 – 7.6",
-                goodRange: 7.2...7.6,
+                range: 6.2...8.4,
+                idealRange: "7.4 – 7.6",
+                goodRange: 7.2...7.8,
                 format: "%.1f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: pH, goodRange: 7.2...7.6, fullRange: 6.8...8.4)),
+                meterColor: meterColor(for: chemicalStatus(for: field, value: pH, goodRange: 7.2...7.8, fullRange: 6.2...8.4)),
                 width: width
             )
         case .freeChlorine:
@@ -592,13 +592,13 @@ struct AddTestView: View {
                 width: width
             )
         case .totalChlorine:
-            let goodRange = max(0, freeChlorine - 0.5)...min(10, freeChlorine + 0.5)
+            let goodRange = freeChlorine...min(10, freeChlorine + 0.5)
             chemicalDragPreview(
                 field: field,
                 label: "Total Chlorine (ppm)",
                 value: totalChlorine,
                 range: 0...10,
-                idealRange: "within 0.5 ppm of Free Cl",
+                idealRange: "equal to Free Cl",
                 goodRange: goodRange,
                 meterColor: meterColor(for: chemicalStatus(for: field, value: totalChlorine, goodRange: goodRange, fullRange: 0...10)),
                 width: width
@@ -608,23 +608,23 @@ struct AddTestView: View {
                 field: field,
                 label: "Total Alkalinity (ppm)",
                 value: totalAlkalinity,
-                range: 40...240,
-                idealRange: "80 – 120 ppm",
+                range: 0...240,
+                idealRange: "80 – 100 ppm",
                 goodRange: 80...120,
                 format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: totalAlkalinity, goodRange: 80...120, fullRange: 40...240)),
+                meterColor: meterColor(for: chemicalStatus(for: field, value: totalAlkalinity, goodRange: 80...120, fullRange: 0...240)),
                 width: width
             )
         case .calciumHardness:
             chemicalDragPreview(
                 field: field,
-                label: "Calcium Hardness (ppm)",
+                label: "Total Hardness (ppm)",
                 value: calciumHardness,
-                range: 100...500,
-                idealRange: "200 – 400 ppm",
-                goodRange: 200...400,
+                range: 0...1000,
+                idealRange: "250 – 400 ppm",
+                goodRange: 200...500,
                 format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: calciumHardness, goodRange: 200...400, fullRange: 100...500)),
+                meterColor: meterColor(for: chemicalStatus(for: field, value: calciumHardness, goodRange: 200...500, fullRange: 0...1000)),
                 width: width
             )
         case .cyanuricAcid:
@@ -632,11 +632,11 @@ struct AddTestView: View {
                 field: field,
                 label: "Cyanuric Acid (ppm)",
                 value: cyanuricAcid,
-                range: 0...100,
+                range: 0...300,
                 idealRange: "30 – 50 ppm",
                 goodRange: 30...50,
                 format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: cyanuricAcid, goodRange: 30...50, fullRange: 0...100)),
+                meterColor: meterColor(for: chemicalStatus(for: field, value: cyanuricAcid, goodRange: 30...50, fullRange: 0...300)),
                 width: width
             )
         case .temperature:
@@ -675,10 +675,10 @@ struct AddTestView: View {
                 icon: "pH",
                 label: "pH",
                 value: $pH,
-                range: 6.8...8.4,
+                range: 6.2...8.4,
                 step: 0.1,
-                idealRange: "7.2 – 7.6",
-                goodRange: 7.2...7.6,
+                idealRange: "7.4 – 7.6",
+                goodRange: 7.2...7.8,
                 format: "%.1f",
                 showUnit: false
             )
@@ -702,8 +702,8 @@ struct AddTestView: View {
                 value: $totalChlorine,
                 range: 0...10,
                 step: 0.5,
-                idealRange: "within 0.5 ppm of Free Cl",
-                goodRange: max(0, freeChlorine - 0.5)...min(10, freeChlorine + 0.5)
+                idealRange: "equal to Free Cl",
+                goodRange: freeChlorine...min(10, freeChlorine + 0.5)
             )
         case .totalAlkalinity:
             chemRow(
@@ -711,9 +711,9 @@ struct AddTestView: View {
                 icon: "Alkalinity",
                 label: "Total Alkalinity (ppm)",
                 value: $totalAlkalinity,
-                range: 40...240,
+                range: 0...240,
                 step: 5,
-                idealRange: "80 – 120 ppm",
+                idealRange: "80 – 100 ppm",
                 goodRange: 80...120,
                 format: "%.0f"
             )
@@ -721,12 +721,12 @@ struct AddTestView: View {
             chemRow(
                 field: field,
                 icon: "Hardness",
-                label: "Calcium Hardness (ppm)",
+                label: "Total Hardness (ppm)",
                 value: $calciumHardness,
-                range: 100...500,
+                range: 0...1000,
                 step: 10,
-                idealRange: "200 – 400 ppm",
-                goodRange: 200...400,
+                idealRange: "250 – 400 ppm",
+                goodRange: 200...500,
                 format: "%.0f"
             )
         case .cyanuricAcid:
@@ -735,7 +735,7 @@ struct AddTestView: View {
                 icon: "CYA",
                 label: "Cyanuric Acid (ppm)",
                 value: $cyanuricAcid,
-                range: 0...100,
+                range: 0...300,
                 step: 5,
                 idealRange: "30 – 50 ppm",
                 goodRange: 30...50,
@@ -783,19 +783,39 @@ struct AddTestView: View {
 
         switch field {
         case .pH:
-            return engine.pHStatus(value)
+            // UI strip-aligned zones: full 6.2-8.4, good 7.2-7.8, ideal 7.4-7.6
+            // Color mapping via rangedStatus using the provided goodRange/fullRange from caller
+            return rangedStatus(value: value, goodRange: 7.2...7.8, fullRange: 6.2...8.4)
+
         case .freeChlorine:
+            // Keep dynamic by CYA, but color is still driven by engine which already adapts.
             return engine.freeChlorineStatus(value, cyanuricAcid: cyanuricAcid)
+
+        case .totalChlorine:
+            // UI good band: FC ... FC + 0.5 (ideal when equal to FC). Do not show shock messaging here.
+            let fc = freeChlorine
+            let tcGood = fc...min(10, fc + 0.5)
+            return rangedStatus(value: value, goodRange: tcGood, fullRange: 0...10)
+
         case .totalAlkalinity:
-            return engine.totalAlkalinityStatus(value)
+            // UI: full 0-240, good 80-120, ideal 80-100
+            return rangedStatus(value: value, goodRange: 80...120, fullRange: 0...240)
+
         case .calciumHardness:
-            return engine.calciumHardnessStatus(value, surface: viewModel.poolConfig.surfaceType)
+            // UI (Total Hardness): full 0-1000, good 200-500, ideal 250-400
+            return rangedStatus(value: value, goodRange: 200...500, fullRange: 0...1000)
+
         case .cyanuricAcid:
-            return engine.cyanuricAcidStatus(value)
+            // UI: full 0-300, good 30-50
+            return rangedStatus(value: value, goodRange: 30...50, fullRange: 0...300)
+
         case .saltLevel:
+            // Keep existing engine-based status
             return engine.saltStatus(value)
-        case .totalChlorine, .temperature:
-            return rangedStatus(value: value, goodRange: goodRange, fullRange: fullRange)
+
+        case .temperature:
+            // Keep existing ranged behavior (78-88 good within 50-105 full)
+            return rangedStatus(value: value, goodRange: 78...88, fullRange: 50...105)
         }
     }
 
@@ -1132,7 +1152,7 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
         case .totalAlkalinity:
             return "Total Alkalinity"
         case .calciumHardness:
-            return "Calcium Hardness"
+            return "Total Hardness"
         case .cyanuricAcid:
             return "Cyanuric Acid"
         case .temperature:
@@ -1338,3 +1358,4 @@ private struct ChemicalMeterBackground: View {
         .environment(PoolViewModel())
         .modelContainer(for: [PoolTest.self, Treatment.self], inMemory: true)
 }
+
