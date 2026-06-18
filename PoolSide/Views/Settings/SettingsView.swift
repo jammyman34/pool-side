@@ -30,6 +30,9 @@ struct SettingsView: View {
     @State private var showingVolumeHelp: Bool = false
     @State private var originalConfig: PoolConfiguration? = nil
 
+    @State private var showLocationToast: Bool = false
+    @State private var locationToastMessage: String = ""
+
     private var currentConfig: PoolConfiguration {
         PoolConfiguration(
             name: poolName.isEmpty ? "My Pool" : poolName,
@@ -99,6 +102,27 @@ struct SettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 48)
                 }
+
+                if showLocationToast {
+                    VStack {
+                        HStack(spacing: 10) {
+                            Image(systemName: locationService.isLocating ? "location.circle" : "checkmark.circle.fill")
+                                .foregroundStyle(locationService.isLocating ? PoolColor.poolTeal : PoolColor.statusIdeal)
+                            Text(locationToastMessage)
+                                .font(.subheadline)
+                                .foregroundStyle(PoolColor.primaryText)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white, in: Capsule())
+                        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                        .padding(.top, 12)
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.25, dampingFraction: 0.9), value: showLocationToast)
+                    .padding(.horizontal, 16)
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -147,6 +171,26 @@ struct SettingsView: View {
             location = newValue
             latitude = locationService.latitude
             longitude = locationService.longitude
+        }
+        .onChange(of: locationService.isLocating) { _, locating in
+            if locating {
+                locationToastMessage = "Requesting current location…"
+                withAnimation { showLocationToast = true }
+            } else if showLocationToast && locationService.errorMessage == nil && !locationService.resolvedLocationText.isEmpty {
+                locationToastMessage = "Location updated"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    withAnimation { showLocationToast = false }
+                }
+            }
+        }
+        .onChange(of: locationService.errorMessage) { _, newError in
+            if let msg = newError, !msg.isEmpty {
+                locationToastMessage = msg
+                withAnimation { showLocationToast = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation { showLocationToast = false }
+                }
+            }
         }
     }
 
@@ -244,6 +288,10 @@ struct SettingsView: View {
                     .textInputAutocapitalization(.words)
 
                 Button {
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                    locationToastMessage = "Requesting current location…"
+                    withAnimation { showLocationToast = true }
                     locationService.requestWhenInUseLocation()
                 } label: {
                     Image(systemName: locationService.isLocating ? "location.circle" : "location.fill")
@@ -1068,30 +1116,38 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
     }
 
     func requestWhenInUseLocation() {
+        print("[Location] Request when-in-use — current auth: \(manager.authorizationStatus.rawValue)")
         errorMessage = nil
         isLocating = true
 
         switch manager.authorizationStatus {
         case .notDetermined:
+            print("[Location] Requesting authorization")
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse, .authorizedAlways:
+            print("[Location] Authorized — requesting one-time location")
             manager.requestLocation()
         case .denied, .restricted:
+            print("[Location] Authorization denied/restricted")
             isLocating = false
             errorMessage = "Location access is off for Pool Side. You can still type your location manually."
         @unknown default:
+            print("[Location] Unknown authorization state")
             isLocating = false
             errorMessage = "Location is unavailable right now."
         }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        print("[Location] Authorization changed: \(manager.authorizationStatus.rawValue)")
         authorizationStatus = manager.authorizationStatus
 
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
+            print("[Location] Now authorized — requesting location")
             manager.requestLocation()
         case .denied, .restricted:
+            print("[Location] Now denied/restricted")
             isLocating = false
             errorMessage = "Location access is off for Pool Side. You can still type your location manually."
         case .notDetermined:
@@ -1102,6 +1158,7 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        print("[Location] didUpdateLocations count=\(locations.count)")
         guard let location = locations.last else {
             isLocating = false
             return
@@ -1109,6 +1166,7 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
 
         latitude = location.coordinate.latitude
         longitude = location.coordinate.longitude
+        print(String(format: "[Location] Coordinates resolved: %.5f, %.5f", location.coordinate.latitude, location.coordinate.longitude))
 
         geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, error in
             guard let service = self else { return }
@@ -1124,11 +1182,13 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
                     service.resolvedLocationText = resolved.isEmpty
                         ? String(format: "%.3f, %.3f", location.coordinate.latitude, location.coordinate.longitude)
                         : resolved
+                    print("[Location] Reverse geocoded: \(resolved)")
                 } else {
                     service.resolvedLocationText = String(format: "%.3f, %.3f", location.coordinate.latitude, location.coordinate.longitude)
                     if error != nil {
                         service.errorMessage = "Could not name this location, so coordinates were saved instead."
                     }
+                    print("[Location] Reverse geocode failed — using coordinates")
                 }
 
                 service.isLocating = false
@@ -1137,6 +1197,7 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("[Location] didFailWithError: \(error.localizedDescription)")
         isLocating = false
         errorMessage = "Could not get your current location. You can still type it manually."
     }

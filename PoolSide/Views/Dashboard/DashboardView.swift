@@ -14,6 +14,10 @@ struct DashboardView: View {
     @State private var swipedTestID: UUID? = nil
     @State private var welcomeMessage = DashboardWelcomeMessage.random()
     @State private var weather = PoolWeatherService()
+    @State private var showingRefreshToast = false
+    @State private var refreshToastMessage = ""
+    @State private var refreshToastIsError = false
+    @State private var isRefreshingWeather = false
 
     var latestTest: PoolTest? { tests.first }
 
@@ -46,6 +50,70 @@ struct DashboardView: View {
 
                         Spacer(minLength: 100)
                     }
+                }
+                .refreshable {
+                    print("[Weather] User-initiated pull-to-refresh")
+                    await MainActor.run { isRefreshingWeather = true }
+                    await refreshWeatherIfPossible(force: true)
+                    await MainActor.run {
+                        if weather.lastRefreshSucceeded {
+                            refreshToastMessage = "Weather updated"
+                            refreshToastIsError = false
+                        } else {
+                            refreshToastMessage = weather.lastErrorMessage ?? "Weather update failed"
+                            refreshToastIsError = true
+                        }
+                        withAnimation { showingRefreshToast = true }
+                        let dismissDelay: TimeInterval = refreshToastIsError ? 5.0 : 1.4
+                        DispatchQueue.main.asyncAfter(deadline: .now() + dismissDelay) {
+                            withAnimation { showingRefreshToast = false }
+                        }
+                        isRefreshingWeather = false
+                    }
+                }
+
+                if isRefreshingWeather {
+                    VStack {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(PoolColor.primaryText)
+                            Text("Updating weather…")
+                                .font(.subheadline)
+                                .foregroundStyle(PoolColor.primaryText)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white, in: Capsule())
+                        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+                        .padding(.top, 12)
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: isRefreshingWeather)
+                }
+
+                if showingRefreshToast {
+                    VStack {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: refreshToastIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .foregroundStyle(refreshToastIsError ? PoolColor.statusOffRange : PoolColor.statusIdeal)
+                            Text(refreshToastMessage)
+                                .font(.subheadline)
+                                .foregroundStyle(PoolColor.primaryText)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                        .padding(.top, 12)
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.25, dampingFraction: 0.9), value: showingRefreshToast)
+                    .padding(.horizontal, 16)
                 }
             }
             .navigationBarHidden(true)
@@ -383,9 +451,13 @@ struct DashboardView: View {
 
     private var greetingLineText: String {
         if let category = weather.category, let high = weather.highTemperatureFahrenheit {
-            return "\(greetingText) \(category.shortDescription) H\(high)°F"
+            let line = "\(greetingText) \(category.shortDescription) H\(high)°F"
+            print("[Weather] Greeting with forecast: \(line)")
+            return line
         }
-        return "\(greetingText) It's a great day for a pool day!"
+        let fallback = "\(greetingText) It's a great day for a pool day!"
+        print("[Weather] Greeting fallback (no forecast): lat=\(viewModel.poolConfig.latitude?.description ?? "nil"), lon=\(viewModel.poolConfig.longitude?.description ?? "nil")")
+        return fallback
     }
 
     private var heroAssetName: String {
@@ -398,16 +470,41 @@ struct DashboardView: View {
         return "\(lat),\(lon)"
     }
 
-    private func refreshWeatherIfPossible() async {
-        guard
-            let latitude = viewModel.poolConfig.latitude,
-            let longitude = viewModel.poolConfig.longitude
-        else {
-            print("[Weather] Skipping refresh — saved coordinates are nil. location=\"\(viewModel.poolConfig.location)\"")
+    private func refreshWeatherIfPossible(force: Bool = false) async {
+        let loc = viewModel.poolConfig.location
+        let latStr = viewModel.poolConfig.latitude?.description ?? "nil"
+        let lonStr = viewModel.poolConfig.longitude?.description ?? "nil"
+
+        print("\n===== WEATHER REFRESH BEGIN =====")
+        print("[Weather] Config snapshot: location=\(loc), lat=\(latStr), lon=\(lonStr), force=\(force)")
+
+        guard let latitude = viewModel.poolConfig.latitude, let longitude = viewModel.poolConfig.longitude else {
+            print("[Weather] Decision: SKIP — coordinates are nil (cannot query WeatherKit)")
+            print("===== WEATHER REFRESH END =====\n")
             return
         }
 
-        await weather.refresh(latitude: latitude, longitude: longitude)
+        // Cache decision is made inside PoolWeatherService.shouldSkipRefresh; we log before and after.
+        print("[Weather] Decision: REQUEST — calling WeatherKit for lat=\(String(format: "%.6f", latitude)), lon=\(String(format: "%.6f", longitude))")
+        await weather.refresh(latitude: latitude, longitude: longitude, force: force)
+
+        let hasForecast = (weather.category != nil && weather.highTemperatureFahrenheit != nil)
+        let categoryDesc = weather.category?.rawValue ?? "nil"
+        let highStr = weather.highTemperatureFahrenheit.map { String($0) } ?? "nil"
+        print("[Weather] Result snapshot: hasForecast=\(hasForecast), category=\(categoryDesc), highF=\(highStr)")
+
+        // Greeting preview
+        if hasForecast {
+            let preview = "\(greetingText) \(weather.category?.shortDescription ?? "?") H\(weather.highTemperatureFahrenheit ?? 0)°F"
+            print("[Weather] Greeting preview: \(preview)")
+        } else {
+            print("[Weather] Greeting preview: \(greetingText) It's a great day for a pool day!")
+        }
+
+        // Clipboard-ready summary
+        let summary = "WEATHER SUMMARY — location=\(loc), lat=\(latStr), lon=\(lonStr), requested=true, hasForecast=\(hasForecast), category=\(categoryDesc), highF=\(highStr)"
+        print(summary)
+        print("===== WEATHER REFRESH END =====\n")
     }
 
     private func scoreLabel(_ score: Int) -> String {
