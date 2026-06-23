@@ -47,8 +47,14 @@ struct AIRecommendationRequest: @unchecked Sendable {
         if !currentTest.notes.isEmpty {
             parts.append("  Notes: \(currentTest.notes)")
         }
-        if !currentTest.visualIndicators.isEmpty {
-            parts.append("  Visual Indicators: \(currentTest.visualIndicators.joined(separator: ", "))")
+        let indicators = currentTest.visualIndicators.compactMap(VisualIndicator.init(rawValue:))
+        let positives = indicators.filter { $0.isPositive }
+        let issues = indicators.filter { !$0.isPositive }
+        if !positives.isEmpty {
+            parts.append("  Positive Signs: \(positives.map(\.rawValue).joined(separator: ", "))")
+        }
+        if !issues.isEmpty {
+            parts.append("  Issues Noted: \(issues.map(\.rawValue).joined(separator: ", "))")
         }
 
         let historyToShow = recentHistory.prefix(7)

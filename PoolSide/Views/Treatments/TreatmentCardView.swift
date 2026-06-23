@@ -10,13 +10,22 @@ struct TreatmentCardView: View {
     var onRestore: @MainActor (Treatment) async -> Void
     @Binding var openSwipeTreatmentID: UUID?
 
+    @Environment(\.modelContext) private var modelContext
+    @Environment(PoolViewModel.self) private var viewModel
+
     @State private var expanded: Bool = false
     @State private var isCompleting: Bool = false
     @State private var dragOffset: CGFloat = 0
     @State private var isSkipOpen: Bool = false
     @State private var isRestoreOpen: Bool = false
+    @State private var showingProductPicker: Bool = false
 
     private let actionWidth: CGFloat = 92
+
+    private var swappableCategory: ChemicalProductCategory? {
+        guard !treatment.isCompleted, !treatment.isSkipped else { return nil }
+        return treatment.productCategory
+    }
 
     private var urgencyColor: Color {
         if treatment.isSkipped { return PoolColor.statusSlight }
@@ -77,6 +86,80 @@ struct TreatmentCardView: View {
                 closeSwipeActions(clearOpenTreatment: false)
             }
         }
+        .sheet(isPresented: $showingProductPicker) {
+            if let category = swappableCategory {
+                ChemicalProductPickerSheet(
+                    category: category,
+                    initialSelection: treatment.chemicalName,
+                    onApply: { newSelection, saveAsDefault in
+                        applyProductSwap(category: category, selection: newSelection, saveAsDefault: saveAsDefault)
+                    }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chemicalNameView: some View {
+        if let category = swappableCategory {
+            Button {
+                if isSkipOpen || isRestoreOpen {
+                    closeSwipeActions(clearOpenTreatment: true)
+                }
+                showingProductPicker = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(treatment.chemicalName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(PoolColor.primaryText)
+                        .multilineTextAlignment(.leading)
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(PoolColor.poolTeal)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Switch to a different \(category.sheetTitle.lowercased()) product")
+        } else {
+            Text(treatment.chemicalName)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(treatment.isCompleted || treatment.isSkipped ? PoolColor.secondaryText : PoolColor.primaryText)
+                .strikethrough(treatment.isSkipped, color: PoolColor.secondaryText)
+        }
+    }
+
+    private func applyProductSwap(
+        category: ChemicalProductCategory,
+        selection: String,
+        saveAsDefault: Bool
+    ) {
+        // Don't propose a recomputed template against the saved config if the user only
+        // wants this swap one-time — derive against an updated copy for the recompute math,
+        // and only persist if saveAsDefault is on.
+        let updatedConfig = category.configApplying(selection: selection, to: viewModel.poolConfig)
+        guard let test = treatment.poolTest else { return }
+
+        let engine = ChemistryEngine()
+        guard let newTemplate = engine.proposedTreatmentTemplate(
+            forTargetParameter: treatment.targetParameter,
+            test: test,
+            config: updatedConfig
+        ) else { return }
+
+        treatment.chemicalName = newTemplate.chemicalName
+        treatment.amount = newTemplate.amount
+        treatment.unit = newTemplate.unit
+        treatment.instructions = newTemplate.instructions
+        treatment.actionDescription = newTemplate.actionDescription
+
+        try? modelContext.save()
+
+        if saveAsDefault {
+            viewModel.saveConfig(updatedConfig)
+        }
     }
 
     private var cardContent: some View {
@@ -91,11 +174,7 @@ struct TreatmentCardView: View {
 
                 // Name + amount + urgency badge
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(treatment.chemicalName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(treatment.isCompleted || treatment.isSkipped ? PoolColor.secondaryText : PoolColor.primaryText)
-                        .strikethrough(treatment.isSkipped, color: PoolColor.secondaryText)
+                    chemicalNameView
 
                     if !amountString.isEmpty {
                         Text(amountString)
@@ -314,6 +393,104 @@ struct TreatmentCardView: View {
     }
 }
 
+// MARK: - Product Picker Sheet
+
+struct ChemicalProductPickerSheet: View {
+
+    let category: ChemicalProductCategory
+    let initialSelection: String
+    let onApply: (String, Bool) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: String
+    @State private var saveAsDefault: Bool = false
+    @State private var sheetHeight: CGFloat = 320
+
+    init(
+        category: ChemicalProductCategory,
+        initialSelection: String,
+        onApply: @escaping (String, Bool) -> Void
+    ) {
+        self.category = category
+        self.initialSelection = initialSelection
+        self.onApply = onApply
+        _selection = State(initialValue: initialSelection)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Product")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(PoolColor.primaryText)
+
+                    HStack {
+                        Picker("Product", selection: $selection) {
+                            ForEach(category.optionDisplayNames, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(PoolColor.poolTeal)
+                        .labelsHidden()
+
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                Toggle("Use this as my default for future logs", isOn: $saveAsDefault.animation())
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.primaryText)
+                    .tint(PoolColor.poolTeal)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: ChemicalProductSheetHeightKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            )
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(category.sheetTitle)
+                        .font(.headline)
+                        .foregroundStyle(PoolColor.primaryText)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        onApply(selection, saveAsDefault)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.poolTeal)
+                }
+            }
+        }
+        .onPreferenceChange(ChemicalProductSheetHeightKey.self) { value in
+            // Include nav bar (~56pt) when sizing the sheet.
+            sheetHeight = value + 56
+        }
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(PoolColor.sand)
+    }
+}
+
+private struct ChemicalProductSheetHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - Previews
 
 #Preview("Pending — Immediate") {
@@ -334,6 +511,7 @@ struct TreatmentCardView: View {
     )
     .padding()
     .background(PoolColor.appBackground)
+    .environment(PoolViewModel())
 }
 
 #Preview("Completed") {
@@ -357,4 +535,5 @@ struct TreatmentCardView: View {
     )
         .padding()
         .background(PoolColor.appBackground)
+        .environment(PoolViewModel())
 }

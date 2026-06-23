@@ -2,6 +2,9 @@ import Foundation
 import SwiftData
 
 enum VisualIndicator: String, CaseIterable, Identifiable {
+    case crystalClear = "Crystal Clear"
+    case pleasantSmell = "Pleasant Smell"
+    case smoothWalls = "Smooth Walls"
     case greenWater = "Green Water"
     case cloudyWater = "Cloudy Water"
     case algaeSpots = "Algae Spots"
@@ -15,6 +18,12 @@ enum VisualIndicator: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .crystalClear:
+            return "sparkles"
+        case .pleasantSmell:
+            return "wind"
+        case .smoothWalls:
+            return "checkmark.seal.fill"
         case .greenWater:
             return "drop.fill"
         case .cloudyWater:
@@ -31,6 +40,28 @@ enum VisualIndicator: String, CaseIterable, Identifiable {
             return "paintbrush.fill"
         case .poorCirculation:
             return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    /// `true` when this indicator describes healthy water rather than a problem.
+    /// Positive indicators carry no penalty in the chemistry engine.
+    var isPositive: Bool {
+        switch self {
+        case .crystalClear, .pleasantSmell, .smoothWalls:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Indicators whose label is too long for the two-column badge grid.
+    /// These render full-width at the bottom of the visual indicators card.
+    var requiresFullWidthBadge: Bool {
+        switch self {
+        case .strongChlorineSmell:
+            return true
+        default:
+            return false
         }
     }
 }
@@ -69,6 +100,13 @@ final class PoolTest {
 
     // MARK: - Meta
     var testMethodRaw: String = TestMethod.testStrips.rawValue
+    var liquidDropKitBrandRaw: String?
+    /// Taylor K-2006 inputs (only populated when method=liquidDropKit + brand=taylorK2006FASDPD)
+    var taylorSampleSizeRaw: String?
+    var taylorFCDrops: Int?
+    var taylorCCDrops: Int?
+    var taylorTADrops: Int?
+    var taylorCHDrops: Int?
     var notes: String
     var visualIndicators: [String] = []
 
@@ -92,6 +130,7 @@ final class PoolTest {
         temperatureFahrenheit: Double? = nil,
         saltLevel: Double? = nil,
         testMethod: TestMethod = .testStrips,
+        liquidDropKitBrand: LiquidDropKitBrand? = nil,
         notes: String = "",
         visualIndicators: [String] = [],
         aiAssessment: String? = nil
@@ -107,6 +146,7 @@ final class PoolTest {
         self.temperatureFahrenheit = temperatureFahrenheit
         self.saltLevel = saltLevel
         self.testMethodRaw = testMethod.rawValue
+        self.liquidDropKitBrandRaw = liquidDropKitBrand?.rawValue
         self.notes = notes
         self.visualIndicators = visualIndicators
         self.aiAssessment = aiAssessment
@@ -123,6 +163,16 @@ final class PoolTest {
     var testMethod: TestMethod {
         get { TestMethod(rawValue: testMethodRaw) ?? .testStrips }
         set { testMethodRaw = newValue.rawValue }
+    }
+
+    var liquidDropKitBrand: LiquidDropKitBrand? {
+        get { liquidDropKitBrandRaw.flatMap(LiquidDropKitBrand.init(rawValue:)) }
+        set { liquidDropKitBrandRaw = newValue?.rawValue }
+    }
+
+    var taylorSampleSize: TaylorSampleSize? {
+        get { taylorSampleSizeRaw.flatMap(TaylorSampleSize.init(rawValue:)) }
+        set { taylorSampleSizeRaw = newValue?.rawValue }
     }
 
     /// Overall pool health score 0–100 based on weighted chemistry risk.

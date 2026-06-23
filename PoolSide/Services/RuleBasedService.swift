@@ -59,8 +59,14 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             parts.append("\(count) parameter\(count == 1 ? "" : "s") \(count == 1 ? "is" : "are") outside ideal range.")
         }
 
-        if !test.visualIndicators.isEmpty {
-            parts.append("Visual indicators noted: \(test.visualIndicators.joined(separator: ", ")).")
+        let indicators = test.visualIndicators.compactMap(VisualIndicator.init(rawValue:))
+        let positives = indicators.filter { $0.isPositive }
+        let issues = indicators.filter { !$0.isPositive }
+        if !positives.isEmpty {
+            parts.append("Positive signs observed: \(positives.map(\.rawValue).joined(separator: ", ")).")
+        }
+        if !issues.isEmpty {
+            parts.append("Issues noted: \(issues.map(\.rawValue).joined(separator: ", ")).")
         }
 
         // Check for history trends
@@ -81,7 +87,10 @@ final class RuleBasedService: AIService, @unchecked Sendable {
     private func visualIndicatorTreatments(for test: PoolTest) -> [TreatmentTemplate] {
         var treatments: [TreatmentTemplate] = []
         let indicators = Set(test.visualIndicators)
+        let hasCrystalClear = indicators.contains(VisualIndicator.crystalClear.rawValue)
 
+        // Algae/green water still triggers a shock even if the user marked Crystal Clear too —
+        // visible algae is hard to misobserve and the chemistry impact is severe.
         if indicators.contains(VisualIndicator.greenWater.rawValue) || indicators.contains(VisualIndicator.algaeSpots.rawValue) {
             treatments.append(TreatmentTemplate(
                 chemicalName: "Chlorine Shock",
@@ -96,7 +105,8 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             ))
         }
 
-        if indicators.contains(VisualIndicator.cloudyWater.rawValue) {
+        // Clarifier only when cloudy and NOT contradicted by Crystal Clear.
+        if indicators.contains(VisualIndicator.cloudyWater.rawValue) && !hasCrystalClear {
             treatments.append(TreatmentTemplate(
                 chemicalName: "Clarifier",
                 actionDescription: "Improve water clarity",

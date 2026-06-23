@@ -9,6 +9,7 @@ struct PoolConfiguration: Codable, Equatable {
     var poolType: PoolType = .inground
     var surfaceType: SurfaceType = .plaster
     var testMethod: TestMethod = .testStrips
+    var liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD
     var isSaltwater: Bool = false
     var hasCover: Bool = false
     var chlorinePreference: ChlorinePreference = .calHypo
@@ -27,6 +28,7 @@ struct PoolConfiguration: Codable, Equatable {
         poolType: PoolType = .inground,
         surfaceType: SurfaceType = .plaster,
         testMethod: TestMethod = .testStrips,
+        liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD,
         isSaltwater: Bool = false,
         hasCover: Bool = false,
         chlorinePreference: ChlorinePreference = .calHypo,
@@ -44,6 +46,7 @@ struct PoolConfiguration: Codable, Equatable {
         self.poolType = poolType
         self.surfaceType = surfaceType
         self.testMethod = testMethod
+        self.liquidDropKitBrand = liquidDropKitBrand
         self.isSaltwater = isSaltwater
         self.hasCover = hasCover
         self.chlorinePreference = chlorinePreference
@@ -64,6 +67,7 @@ struct PoolConfiguration: Codable, Equatable {
         poolType = try container.decodeIfPresent(PoolType.self, forKey: .poolType) ?? .inground
         surfaceType = try container.decodeIfPresent(SurfaceType.self, forKey: .surfaceType) ?? .plaster
         testMethod = try container.decodeIfPresent(TestMethod.self, forKey: .testMethod) ?? .testStrips
+        liquidDropKitBrand = try container.decodeIfPresent(LiquidDropKitBrand.self, forKey: .liquidDropKitBrand) ?? .taylorK2006FASDPD
         isSaltwater = try container.decodeIfPresent(Bool.self, forKey: .isSaltwater) ?? false
         hasCover = try container.decodeIfPresent(Bool.self, forKey: .hasCover) ?? false
         chlorinePreference = try container.decodeIfPresent(ChlorinePreference.self, forKey: .chlorinePreference) ?? .calHypo
@@ -182,6 +186,33 @@ enum TestMethod: String, CaseIterable, Codable, Identifiable {
 
     var shouldSuppressOptionalTreatments: Bool {
         self == .testStrips
+    }
+}
+
+enum LiquidDropKitBrand: String, CaseIterable, Codable, Identifiable {
+    case taylorK2006FASDPD = "Taylor K-2006 FAS-DPD"
+    case hachColorQ = "Hach ColorQ"
+    case jblProColorimeter = "JBL Pro Colorimeter"
+    case hannaChecker = "Hanna Checker"
+
+    var id: String { rawValue }
+}
+
+/// Sample-volume options for the Taylor K-2006 FAS-DPD chlorine titration.
+/// 25 mL: 1 drop = 0.2 ppm. 10 mL: 1 drop = 0.5 ppm.
+enum TaylorSampleSize: String, CaseIterable, Codable, Identifiable {
+    case twentyFiveMl = "25mL"
+    case tenMl = "10mL"
+
+    var id: String { rawValue }
+
+    var displayLabel: String { rawValue }
+
+    var ppmPerDrop: Double {
+        switch self {
+        case .twentyFiveMl: return 0.2
+        case .tenMl: return 0.5
+        }
     }
 }
 

@@ -459,6 +459,8 @@ struct ChemistryEngine {
                 return total + 8
             case .scaling, .staining:
                 return total + 6
+            case .crystalClear, .pleasantSmell, .smoothWalls:
+                return total
             }
         }
     }
@@ -556,6 +558,19 @@ struct ChemistryEngine {
     }
 
     // MARK: - Treatment Templates
+
+    /// Recomputes a single treatment template for the given target parameter under the
+    /// provided config. Used when the user swaps to a different chemical product so the
+    /// dosing math reflects the new product's concentration.
+    func proposedTreatmentTemplate(
+        forTargetParameter targetParameter: String,
+        test: PoolTest,
+        config: PoolConfiguration
+    ) -> TreatmentTemplate? {
+        let readings = allReadings(for: test, config: config)
+        guard let reading = readings.first(where: { $0.key == targetParameter }) else { return nil }
+        return treatmentTemplate(for: reading, test: test, config: config)
+    }
 
     private func treatmentTemplate(for reading: ChemicalReading, test: PoolTest, config: PoolConfiguration) -> TreatmentTemplate? {
         let volume = config.volumeGallons

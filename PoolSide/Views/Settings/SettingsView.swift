@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var poolType: PoolType = .inground
     @State private var surfaceType: SurfaceType = .plaster
     @State private var testMethod: TestMethod = .testStrips
+    @State private var liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD
     @State private var isSaltwater: Bool = false
     @State private var hasCover: Bool = false
     @State private var chlorinePreference: ChlorinePreference = .calHypo
@@ -40,6 +41,7 @@ struct SettingsView: View {
             poolType: poolType,
             surfaceType: surfaceType,
             testMethod: testMethod,
+            liquidDropKitBrand: liquidDropKitBrand,
             isSaltwater: isSaltwater,
             hasCover: hasCover,
             chlorinePreference: chlorinePreference,
@@ -306,17 +308,45 @@ struct SettingsView: View {
 
     private var testingMethodRow: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("Testing Method")
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
+
             HStack {
-                Text("Testing Method")
-                    .font(.subheadline)
-                    .foregroundStyle(PoolColor.primaryText)
-                Spacer()
                 Picker("Testing Method", selection: $testMethod) {
                     ForEach(TestMethod.allCases) { method in
                         Text(method.displayName).tag(method)
                     }
                 }
+                .pickerStyle(.menu)
                 .tint(PoolColor.poolTeal)
+                .labelsHidden()
+
+                Spacer(minLength: 0)
+            }
+
+            if testMethod == .liquidDropKit {
+                Text("Brand")
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.primaryText)
+                    .padding(.top, 4)
+
+                HStack {
+                    Picker("Liquid Drop Kit Brand", selection: $liquidDropKitBrand) {
+                        ForEach(LiquidDropKitBrand.allCases) { brand in
+                            HStack {
+                                brand.icon
+                                Text(brand.rawValue)
+                            }
+                            .tag(brand)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(PoolColor.poolTeal)
+                    .labelsHidden()
+
+                    Spacer(minLength: 0)
+                }
             }
 
             if let note = testMethod.confidenceNote {
@@ -414,6 +444,7 @@ struct SettingsView: View {
         poolType = config.poolType
         surfaceType = config.surfaceType
         testMethod = config.testMethod
+        liquidDropKitBrand = config.liquidDropKitBrand
         isSaltwater = config.isSaltwater
         hasCover = config.hasCover
         chlorinePreference = config.chlorinePreference
