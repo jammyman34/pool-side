@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 @main
 struct PoolSideApp: App {
@@ -15,6 +16,18 @@ struct PoolSideApp: App {
             fatalError("Could not create ModelContainer: \(error)")
         }
     }()
+
+    init() {
+        configureSegmentedControlAppearance()
+    }
+
+    private func configureSegmentedControlAppearance() {
+        let teal = UIColor(named: "PoolTeal") ?? UIColor.systemTeal
+        let proxy = UISegmentedControl.appearance()
+        proxy.selectedSegmentTintColor = teal
+        proxy.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
+        proxy.setTitleTextAttributes([.foregroundColor: UIColor.black], for: .normal)
+    }
 
     var body: some Scene {
         WindowGroup {

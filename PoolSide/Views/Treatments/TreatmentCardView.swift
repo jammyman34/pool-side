@@ -33,6 +33,7 @@ struct TreatmentCardView: View {
         case .immediate:   return PoolColor.statusCritical
         case .recommended: return PoolColor.statusOffRange
         case .optional:    return PoolColor.statusSlight
+        case .advisory:    return PoolColor.secondaryText
         }
     }
 
@@ -52,7 +53,7 @@ struct TreatmentCardView: View {
         let amt = treatment.amount
         let unit = treatment.unit
         guard amt > 0 else { return "" }
-        let formatted = amt == amt.rounded() ? "\(Int(amt))" : String(format: "%.2g", amt)
+        let formatted = amt.formattedTreatmentAmount
         return unit.isEmpty ? formatted : "\(formatted) \(unit)"
     }
 

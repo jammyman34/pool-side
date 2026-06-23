@@ -205,12 +205,14 @@ enum TreatmentUrgency: String, CaseIterable, Codable {
     case immediate   = "immediate"   // Critical — act now
     case recommended = "recommended" // Low/High — take action
     case optional    = "optional"    // Slightly off — minor adjustment
+    case advisory    = "advisory"    // Monitor / avoid overcorrection
 
     var displayName: String {
         switch self {
         case .immediate:   return "Act Now"
         case .recommended: return "Recommended"
         case .optional:    return "Optional"
+        case .advisory:    return "Advisory"
         }
     }
 
@@ -219,6 +221,7 @@ enum TreatmentUrgency: String, CaseIterable, Codable {
         case .immediate:   return 0
         case .recommended: return 1
         case .optional:    return 2
+        case .advisory:    return 3
         }
     }
 }

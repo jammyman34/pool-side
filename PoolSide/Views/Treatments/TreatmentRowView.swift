@@ -13,6 +13,7 @@ struct TreatmentRowView: View {
         case .immediate:   return PoolColor.statusCritical
         case .recommended: return PoolColor.statusOffRange
         case .optional:    return PoolColor.statusSlight
+        case .advisory:    return PoolColor.secondaryText
         }
     }
 
@@ -120,9 +121,7 @@ struct TreatmentRowView: View {
     }
 
     private var formattedAmount: String {
-        treatment.amount.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", treatment.amount)
-            : String(format: "%.1f", treatment.amount)
+        treatment.amount.formattedTreatmentAmount
     }
 
     private var urgencyPill: some View {

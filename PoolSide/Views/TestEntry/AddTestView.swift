@@ -688,30 +688,13 @@ struct AddTestView: View {
     }
 
     private var taylorSampleSizeSelector: some View {
-        HStack(spacing: 4) {
+        Picker("Sample Size", selection: $taylorSampleSize) {
             ForEach(TaylorSampleSize.allCases) { size in
-                let isSelected = taylorSampleSize == size
-                Button {
-                    taylorSampleSize = size
-                } label: {
-                    Text(size.displayLabel)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(isSelected ? .white : PoolColor.primaryText)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            isSelected ? PoolColor.poolTeal : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                Text(size.displayLabel).tag(size)
             }
         }
-        .padding(3)
-        .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 10))
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     private func taylorDropsStepper(prompt: String, drops: Binding<Int?>) -> some View {

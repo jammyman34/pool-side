@@ -14,7 +14,7 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             config: request.poolConfig,
             recentHistory: request.recentHistory
         )
-        treatments.append(contentsOf: visualIndicatorTreatments(for: request.currentTest))
+        treatments.append(contentsOf: visualIndicatorTreatments(for: request.currentTest, config: request.poolConfig))
         let assessment = buildAssessment(for: request, treatments: treatments)
         return AIRecommendationResponse(treatments: treatments, assessmentText: assessment)
     }
@@ -84,7 +84,7 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         return parts.joined(separator: " ")
     }
 
-    private func visualIndicatorTreatments(for test: PoolTest) -> [TreatmentTemplate] {
+    private func visualIndicatorTreatments(for test: PoolTest, config: PoolConfiguration) -> [TreatmentTemplate] {
         var treatments: [TreatmentTemplate] = []
         let indicators = Set(test.visualIndicators)
         let hasCrystalClear = indicators.contains(VisualIndicator.crystalClear.rawValue)
@@ -92,12 +92,15 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         // Algae/green water still triggers a shock even if the user marked Crystal Clear too —
         // visible algae is hard to misobserve and the chemistry impact is severe.
         if indicators.contains(VisualIndicator.greenWater.rawValue) || indicators.contains(VisualIndicator.algaeSpots.rawValue) {
+            let slamTarget = min(max(test.cyanuricAcid * 0.40, 10), 30)
+            let ppmIncrease = max(0, slamTarget - test.freeChlorine)
+            let gallons = (ppmIncrease * config.volumeGallons / 10000 / 10).roundedLiquidChlorineDose()
             treatments.append(TreatmentTemplate(
-                chemicalName: "Chlorine Shock",
-                actionDescription: "Shock pool to address visible algae",
-                amount: 1,
-                unit: "dose per label",
-                instructions: "Brush affected surfaces, run the pump continuously, and add chlorine shock according to the product label for your pool volume. Retest chlorine and pH after circulation clears.",
+                chemicalName: "Liquid Chlorine 10%",
+                actionDescription: "Raise chlorine to algae recovery level based on CYA",
+                amount: gallons,
+                unit: "gal",
+                instructions: "Brush affected surfaces, run the pump continuously, and raise FC toward about \(Int(slamTarget.rounded())) ppm for the current CYA. Avoid dichlor or trichlor during algae recovery when CYA is already elevated. Retest FC and CC frequently.",
                 targetParameter: "visualIndicators",
                 urgency: .immediate,
                 minutesBeforeNext: 480,
@@ -105,14 +108,14 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             ))
         }
 
-        // Clarifier only when cloudy and NOT contradicted by Crystal Clear.
+        // Diagnose cloudy water with sanitation and filtration before adding clarifier.
         if indicators.contains(VisualIndicator.cloudyWater.rawValue) && !hasCrystalClear {
             treatments.append(TreatmentTemplate(
-                chemicalName: "Clarifier",
-                actionDescription: "Improve water clarity",
-                amount: 1,
-                unit: "dose per label",
-                instructions: "Clean or backwash the filter, run circulation, and add clarifier according to the label. Avoid adding more clarifier than directed.",
+                chemicalName: "Filter and Retest Cloudy Water",
+                actionDescription: "Cloudiness usually needs circulation, filtration, and sanitizer verification first",
+                amount: 0,
+                unit: "",
+                instructions: "Clean or backwash the filter, run circulation continuously, brush the pool, and verify FC/CC after circulation. Use clarifier only after sanitizer is in range and filtration has had time to work.",
                 targetParameter: "visualIndicators",
                 urgency: .recommended,
                 minutesBeforeNext: 0,
