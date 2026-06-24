@@ -33,6 +33,7 @@ struct SettingsView: View {
 
     @State private var showLocationToast: Bool = false
     @State private var locationToastMessage: String = ""
+    @State private var showingFeedback: Bool = false
 
     private var currentConfig: PoolConfiguration {
         PoolConfiguration(
@@ -99,6 +100,8 @@ struct SettingsView: View {
                             }
                         }
 
+                        feedbackCard
+                        versionFooter
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -158,6 +161,9 @@ struct SettingsView: View {
                     surfaceType: $surfaceType,
                     volumeGallons: $volumeGallons
                 )
+            }
+            .sheet(isPresented: $showingFeedback) {
+                FeedbackSheet(recipientEmail: "justinmandell@gmail.com")
             }
             .alert("Location Unavailable", isPresented: locationErrorBinding) {
                 Button("OK", role: .cancel) {
@@ -278,6 +284,58 @@ struct SettingsView: View {
             .fill(PoolColor.divider)
             .frame(height: 1)
             .padding(.leading, 18)
+    }
+
+    private var feedbackButton: some View {
+        Button {
+            showingFeedback = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "envelope.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.poolTeal)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Send Feedback")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(PoolColor.primaryText)
+                    Text("Share issues, ideas, or chemistry recommendations.")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText.opacity(0.7))
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var feedbackCard: some View {
+        feedbackButton
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+            .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var versionFooter: some View {
+        Text("Version \(appVersion)")
+            .font(.caption)
+            .foregroundStyle(PoolColor.secondaryText)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
     }
 
     private var locationRow: some View {
@@ -501,6 +559,196 @@ extension CalciumIncreaserPreference: CustomStringConvertible {
 
 extension StabilizerPreference: CustomStringConvertible {
     public var description: String { displayName }
+}
+
+// MARK: - Feedback Sheet
+
+struct FeedbackSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    let recipientEmail: String
+
+    @State private var name: String = ""
+    @State private var contactEmail: String = ""
+    @State private var message: String = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case name
+        case email
+        case message
+    }
+
+    private var canSend: Bool {
+        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                PoolColor.appBackground.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Your feedback helps make Pool Side more accurate and useful.")
+                                .font(.subheadline)
+                                .foregroundStyle(PoolColor.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            feedbackTextField(
+                                title: "First name",
+                                placeholder: "Optional",
+                                text: $name,
+                                field: .name
+                            )
+                            .textContentType(.givenName)
+                            .textInputAutocapitalization(.words)
+
+                            feedbackTextField(
+                                title: "Email",
+                                placeholder: "Optional, but helpful if I need to reply",
+                                text: $contactEmail,
+                                field: .email
+                            )
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                            messageField
+                        }
+                        .padding(16)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 112)
+                }
+                .scrollDismissesKeyboard(.interactively)
+
+                sendButton
+            }
+            .navigationTitle("Feedback")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled(focusedField != nil)
+    }
+
+    private func feedbackTextField(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        field: Field
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.secondaryText)
+
+            TextField(placeholder, text: text)
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
+                .tint(PoolColor.poolTeal)
+                .focused($focusedField, equals: field)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(focusedField == field ? PoolColor.poolTeal.opacity(0.55) : PoolColor.divider, lineWidth: 1)
+                )
+        }
+    }
+
+    private var messageField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Message")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.secondaryText)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $message)
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.primaryText)
+                    .tint(PoolColor.poolTeal)
+                    .focused($focusedField, equals: .message)
+                    .frame(minHeight: 160)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+
+                if message.isEmpty {
+                    Text("Tell me what happened or what would make the app better.")
+                        .font(.subheadline)
+                        .foregroundStyle(PoolColor.secondaryText.opacity(0.75))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 14)
+                        .allowsHitTesting(false)
+                }
+            }
+            .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(focusedField == .message ? PoolColor.poolTeal.opacity(0.55) : PoolColor.divider, lineWidth: 1)
+            )
+        }
+    }
+
+    private var sendButton: some View {
+        Button {
+            sendFeedback()
+        } label: {
+            Text("Send Feedback")
+                .font(.headline)
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(canSend ? PoolColor.poolTeal : PoolColor.secondaryText.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
+        }
+        .disabled(!canSend)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+    }
+
+    private func sendFeedback() {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = recipientEmail
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Pool Side Feedback"),
+            URLQueryItem(name: "body", value: emailBody)
+        ]
+
+        guard let url = components.url else { return }
+        openURL(url)
+        dismiss()
+    }
+
+    private var emailBody: String {
+        """
+        Name: \(name.trimmingCharacters(in: .whitespacesAndNewlines))
+        Contact email: \(contactEmail.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        Message:
+        \(message.trimmingCharacters(in: .whitespacesAndNewlines))
+        """
+    }
 }
 
 // MARK: - Pool Volume Help Sheet
@@ -833,7 +1081,7 @@ struct PoolVolumeHelpView: View {
 
         switch effectiveShape {
         case .rectangular, .oval:
-            return [.length, .width, .shallowDepth, .deepDepth]
+            return [.width, .length, .shallowDepth, .deepDepth]
         case .oblongKidney:
             return [.largeDiameter, .smallDiameter, .overallLength, .shallowDepth, .deepDepth]
         case .circular:

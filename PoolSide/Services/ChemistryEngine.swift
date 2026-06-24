@@ -130,17 +130,18 @@ struct ChemistryEngine {
     func freeChlorineStatus(_ value: Double, cyanuricAcid: Double?) -> ChemicalStatus {
         let range = freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
         let minimum = freeChlorineMinimum(cyanuricAcid: cyanuricAcid)
+        let maintenanceFloor = max(0, minimum - 0.5)
         let veryLow = max(0, minimum * 0.5)
         let shockLevel = freeChlorineShockLevel(cyanuricAcid: cyanuricAcid)
 
         switch value {
         case range:
             return .ideal
-        case minimum..<range.lowerBound:
+        case maintenanceFloor..<range.lowerBound:
             return .slightlyLow
         case range.upperBound..<shockLevel:
             return .high
-        case veryLow..<minimum:
+        case veryLow..<maintenanceFloor:
             return .low
         case 0..<veryLow:
             return .critical
@@ -190,8 +191,7 @@ struct ChemistryEngine {
 
     private func freeChlorineTargetMidpoint(cyanuricAcid: Double?) -> Double {
         let range = freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
-        let minimum = freeChlorineMinimum(cyanuricAcid: cyanuricAcid)
-        return (minimum + range.upperBound) / 2
+        return (range.lowerBound + range.upperBound) / 2
     }
 
     private func freeChlorineShockLevel(cyanuricAcid: Double?) -> Double {
@@ -208,7 +208,7 @@ struct ChemistryEngine {
         case 70.0..<80.0:           return .slightlyLow
         case 120.0...140.0:         return .slightlyHigh
         case 50.0..<70.0:           return .low
-        case 140.0...180.0:         return .high
+        case 140.0..<200.0:         return .slightlyHigh
         default:                     return .critical
         }
     }
@@ -234,9 +234,9 @@ struct ChemistryEngine {
 
     func cyanuricAcidStatus(_ value: Double) -> ChemicalStatus {
         switch value {
-        case 30.0...70.0:          return .ideal
+        case 30.0...50.0:          return .ideal
         case 15.0..<30.0:          return .slightlyLow
-        case 70.0...90.0:          return .slightlyHigh
+        case 50.0...90.0:          return .slightlyHigh
         case 0.0..<15.0:           return .low
         case 90.0...110.0:         return .high
         default:                    return .critical
@@ -309,7 +309,7 @@ struct ChemistryEngine {
             value: test.cyanuricAcid,
             unit: "ppm",
             status: cyanuricAcidStatus(test.cyanuricAcid),
-            idealRange: "30 – 70 ppm",
+            idealRange: "30 – 50 ppm ideal; 50 – 80 manageable",
             trend: caTrend
         ))
 
@@ -346,7 +346,15 @@ struct ChemistryEngine {
         penalty += combinedChlorinePenalty(for: test)
         penalty += visualIndicatorPenalty(for: test)
 
-        return Int(max(0, min(100, 100 - penalty)).rounded())
+        var score = max(0, min(100, 100 - penalty))
+        if isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) {
+            score = max(score, 70)
+        }
+        if !allowsScoreBelowSixty(test, previousTest: previousTest, recentHistory: [], config: config) {
+            score = max(score, 60)
+        }
+
+        return Int(score.rounded())
     }
 
     private func scorePenalty(
@@ -404,23 +412,28 @@ struct ChemistryEngine {
 
         case "freeChlorine":
             let minimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+            let maintenanceFloor = max(0, minimum - 0.5)
             let isProblemWater = hasVisibleAlgae(test) || hasCloudyWater(test)
             if test.freeChlorine < minimum * 0.5 { return isProblemWater ? 42 : 30 }
-            if test.freeChlorine < minimum { return isProblemWater ? 32 : 24 }
-            if test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound { return 16 }
-            return 7
+            if test.freeChlorine < maintenanceFloor { return isProblemWater ? 32 : 22 }
+            if test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound {
+                return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 10 : 14
+            }
+            return 3
 
         case "totalAlkalinity":
             if test.totalAlkalinity > 140 {
-                if test.pH >= 7.6 || isPHRising(current: test, previousTest: previousTest) { return 10 }
-                if test.pH <= 7.4 && !hasVisibleAlgae(test) && !hasCloudyWater(test) { return 1 }
-                return isClearAndSafe(test, config: config) ? 1 : 4
+                if test.totalAlkalinity >= 200 { return 12 }
+                if test.pH >= 7.6 || isPHRising(current: test, previousTest: previousTest) || hasScaling(test) { return 10 }
+                if test.pH <= 7.4 && !hasVisibleAlgae(test) && !hasCloudyWater(test) { return 3 }
+                return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 6 : 8
             }
             return 4
 
         case "cyanuricAcid":
             if test.cyanuricAcid > 90 { return 16 }
-            if test.cyanuricAcid > 70 { return isClearAndSafe(test, config: config) ? 3 : 8 }
+            if test.cyanuricAcid >= 80 { return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 8 : 12 }
+            if test.cyanuricAcid > 50 { return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 6 : 8 }
             if test.cyanuricAcid < 15 { return 12 }
             return 4
 
@@ -504,7 +517,45 @@ struct ChemistryEngine {
             && test.pH >= 7.2
             && test.pH <= 7.8
             && test.combinedChlorine <= 0.5
-            && test.freeChlorine >= fcMinimum
+            && test.freeChlorine >= fcMinimum - 0.5
+    }
+
+    private func isStablePoolContext(
+        _ test: PoolTest,
+        previousTest: PoolTest?,
+        recentHistory: [PoolTest],
+        config: PoolConfiguration
+    ) -> Bool {
+        let fcMinimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+        return !hasVisibleAlgae(test)
+            && !hasCloudyWater(test)
+            && test.pH >= 7.2
+            && test.pH <= 7.8
+            && test.combinedChlorine <= 0.5
+            && test.freeChlorine >= fcMinimum - 0.5
+            && calciumAcceptableRange(surface: config.surfaceType).contains(test.calciumHardness)
+            && !hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
+    }
+
+    private func allowsScoreBelowSixty(
+        _ test: PoolTest,
+        previousTest: PoolTest?,
+        recentHistory: [PoolTest],
+        config: PoolConfiguration
+    ) -> Bool {
+        let fcMinimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+        let majorScalingOrCorrosion = hasScaling(test)
+            || test.calciumHardness < calciumAcceptableRange(surface: config.surfaceType).lowerBound - 50
+            || (test.calciumHardness > calciumAcceptableRange(surface: config.surfaceType).upperBound && test.pH >= 7.8)
+
+        return test.freeChlorine < fcMinimum - 0.5
+            || test.pH < 7.0
+            || test.pH > 8.0
+            || test.combinedChlorine > 0.5
+            || hasCloudyWater(test)
+            || hasVisibleAlgae(test)
+            || hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
+            || majorScalingOrCorrosion
     }
 
     private func calciumAcceptableRange(surface: SurfaceType) -> ClosedRange<Double> {
@@ -524,7 +575,7 @@ struct ChemistryEngine {
         switch test.combinedChlorine {
         case 1.0...:
             return 25
-        case 0.5...1.0:
+        case 0.5...1.0 where test.combinedChlorine > 0.5:
             return 10
         default:
             return 0
@@ -808,12 +859,12 @@ struct ChemistryEngine {
                 )
                 return TreatmentTemplate(
                     chemicalName: product.name,
-                    actionDescription: "Raise free chlorine toward \(formatRangeBound(target)) ppm",
+                    actionDescription: chlorineActionDescription(for: test, target: target, recentHistory: recentHistory, config: config),
                     amount: product.amount,
                     unit: product.unit,
                     instructions: chlorineInstructions(for: product, test: test),
                     targetParameter: "freeChlorine",
-                    urgency: chlorineTreatmentUrgency(for: test, target: target, recentHistory: recentHistory),
+                    urgency: chlorineTreatmentUrgency(for: test, target: target, recentHistory: recentHistory, config: config),
                     expectedEffectParameter: "freeChlorine",
                     expectedDelta: target - reading.value,
                     effectDelayHours: 1,
@@ -854,7 +905,7 @@ struct ChemistryEngine {
                     effectDurationHours: 48,
                     doNotRepeatHours: 24
                 )
-            } else if reading.value > 140 && (test.pH >= 7.6 || isPHRising(current: test, previousTest: previousTest)) {
+            } else if reading.value >= 200 || (reading.value > 140 && (test.pH >= 7.6 || isPHRising(current: test, previousTest: previousTest) || hasScaling(test))) {
                 let flOz = kGal * 0.8 * ((reading.value - 120) / 10)
                 return TreatmentTemplate(
                     chemicalName: "pH Decreaser / Muriatic Acid",
@@ -972,7 +1023,7 @@ struct ChemistryEngine {
                     effectDurationHours: 168,
                     doNotRepeatHours: 168
                 )
-            } else if reading.value > 90 {
+            } else if reading.value >= 90 {
                 return TreatmentTemplate(
                     chemicalName: "Partial Water Replacement",
                     actionDescription: "Dilute very high CYA so chlorine can be maintained",
@@ -980,7 +1031,7 @@ struct ChemistryEngine {
                     unit: "gallons to drain/refill",
                     instructions: "Drain 30% of pool water, refill with fresh water, and retest CYA after circulation. Avoid dichlor and trichlor; CYA cannot be chemically removed.",
                     targetParameter: "cyanuricAcid",
-                    urgency: reading.status.treatmentUrgency ?? .recommended,
+                    urgency: .recommended,
                     expectedEffectParameter: "cyanuricAcid",
                     expectedDelta: 0,
                     effectDelayHours: 24,
@@ -1050,6 +1101,7 @@ struct ChemistryEngine {
             || test.combinedChlorine > 0.5
             || (hasFoam(test) && test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid))
             || hasRapidChlorineLoss(current: test, recentHistory: recentHistory)
+            || hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
     }
 
     private func hasRapidChlorineLoss(current test: PoolTest, recentHistory: [PoolTest]) -> Bool {
@@ -1063,7 +1115,24 @@ struct ChemistryEngine {
         return completedRecentChlorine && drop >= 2.0 && test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
     }
 
+    private func hasRepeatedFailedChlorineCorrections(current test: PoolTest, recentHistory: [PoolTest]) -> Bool {
+        let completedChlorineDoses = recentHistory
+            .prefix(5)
+            .flatMap { $0.treatments }
+            .filter { $0.isCompleted && !$0.isSkipped && $0.targetParameter == "freeChlorine" }
+            .count
+
+        return completedChlorineDoses >= 2
+            && test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
+    }
+
     private func preferredChlorinePreference(for test: PoolTest, config: PoolConfiguration) -> ChlorinePreference {
+        if test.cyanuricAcid >= 40 {
+            if config.chlorinePreference == .liquidChlorine10 || config.chlorinePreference == .liquidChlorine12_5 {
+                return config.chlorinePreference
+            }
+        }
+
         if test.cyanuricAcid >= 60 {
             if config.chlorinePreference == .liquidChlorine10 || config.chlorinePreference == .liquidChlorine12_5 {
                 return config.chlorinePreference
@@ -1085,15 +1154,41 @@ struct ChemistryEngine {
         return config.chlorinePreference
     }
 
-    private func chlorineTreatmentUrgency(for test: PoolTest, target: Double, recentHistory: [PoolTest]) -> TreatmentUrgency {
+    private func chlorineActionDescription(
+        for test: PoolTest,
+        target: Double,
+        recentHistory: [PoolTest],
+        config: PoolConfiguration
+    ) -> String {
+        let urgency = chlorineTreatmentUrgency(for: test, target: target, recentHistory: recentHistory, config: config)
+        if urgency == .optional {
+            return "Maintenance top-off toward \(formatRangeBound(target)) ppm"
+        }
+        if target >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
+            return "Raise free chlorine to recovery level based on CYA"
+        }
+        return "Raise free chlorine toward \(formatRangeBound(target)) ppm"
+    }
+
+    private func chlorineTreatmentUrgency(for test: PoolTest, target: Double, recentHistory: [PoolTest], config: PoolConfiguration) -> TreatmentUrgency {
         let minimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+        let maintenanceFloor = max(0, minimum - 0.5)
         if hasVisibleAlgae(test) || hasCloudyWater(test) || target >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
             return .immediate
         }
-        if hasRapidChlorineLoss(current: test, recentHistory: recentHistory) || test.freeChlorine < minimum {
+        if hasRapidChlorineLoss(current: test, recentHistory: recentHistory) || hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory) {
             return .recommended
         }
-        return .recommended
+        if test.freeChlorine < minimum * 0.5 {
+            return .immediate
+        }
+        if test.freeChlorine < maintenanceFloor {
+            return .recommended
+        }
+        if isStablePoolContext(test, previousTest: recentHistory.first, recentHistory: recentHistory, config: config) {
+            return .optional
+        }
+        return .optional
     }
 
     private func chlorineInstructions(for product: ChemicalProduct, test: PoolTest) -> String {
@@ -1166,7 +1261,10 @@ struct ChemistryEngine {
             ))
         }
 
-        if config.hasCover && (test.freeChlorine < targetRange.upperBound || test.combinedChlorine > 0.2) {
+        if config.hasCover
+            || test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+            || hasFoam(test)
+            || hasStrongChlorineSmell(test) {
             templates.append(TreatmentTemplate(
                 chemicalName: "Open Cover for Gas Exchange",
                 actionDescription: "Covered pools can accumulate chloramines and organics when FC runs low.",
@@ -1178,7 +1276,7 @@ struct ChemistryEngine {
             ))
         }
 
-        if test.cyanuricAcid >= 60 && test.cyanuricAcid <= 90 {
+        if test.cyanuricAcid >= 50 && test.cyanuricAcid < 90 {
             templates.append(TreatmentTemplate(
                 chemicalName: "Manage Elevated CYA",
                 actionDescription: "CYA is manageable, but FC must run higher.",

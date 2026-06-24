@@ -26,10 +26,15 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         let readings = engine.allReadings(for: test, config: request.poolConfig)
 
         let criticals = readings.filter { $0.status == .critical }
-        let outOfRange = readings.filter { $0.status != .ideal && $0.status != .testing }
+        let actionTreatments = treatments.filter { $0.urgency == .immediate || $0.urgency == .recommended }
+        let optionalTreatments = treatments.filter { $0.urgency == .optional }
+        let advisoryTreatments = treatments.filter { $0.urgency == .advisory }
 
-        if criticals.isEmpty && outOfRange.isEmpty {
+        if criticals.isEmpty && actionTreatments.isEmpty && optionalTreatments.isEmpty {
             var balanced = "Pool chemistry is well balanced. All parameters are within ideal ranges — no treatments needed."
+            if !advisoryTreatments.isEmpty {
+                balanced = "Pool chemistry is stable. No urgent treatments are needed; review the advisories for maintenance guidance."
+            }
             if let testingNote = request.poolConfig.testMethod.confidenceNote {
                 balanced += " \(testingNote)"
             }
@@ -51,12 +56,20 @@ final class RuleBasedService: AIService, @unchecked Sendable {
 
         if !criticals.isEmpty {
             let names = criticals.map { $0.parameter }.joined(separator: " and ")
-            parts.append("⚠️ \(names) \(criticals.count == 1 ? "is" : "are") at critical levels requiring immediate attention.")
+            parts.append("\(names) \(criticals.count == 1 ? "is" : "are") at critical levels requiring immediate attention.")
         }
 
-        if !outOfRange.isEmpty {
-            let count = outOfRange.count
-            parts.append("\(count) parameter\(count == 1 ? "" : "s") \(count == 1 ? "is" : "are") outside ideal range.")
+        if !actionTreatments.isEmpty {
+            let count = actionTreatments.count
+            parts.append("\(count) treatment\(count == 1 ? "" : "s") should be handled based on current risk.")
+        }
+
+        if !optionalTreatments.isEmpty {
+            parts.append("Optional maintenance can fine-tune the water, but it is not an emergency.")
+        }
+
+        if !advisoryTreatments.isEmpty {
+            parts.append("Advisories are informational and do not necessarily require adding chemicals.")
         }
 
         let indicators = test.visualIndicators.compactMap(VisualIndicator.init(rawValue:))
@@ -79,7 +92,7 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             }
         }
 
-        parts.append("\(treatments.count) treatment\(treatments.count == 1 ? "" : "s") recommended.")
+        parts.append("\(treatments.count) card\(treatments.count == 1 ? "" : "s") generated.")
 
         return parts.joined(separator: " ")
     }

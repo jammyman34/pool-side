@@ -67,7 +67,7 @@ enum PoolWeatherCategory: String, Sendable {
     }
 }
 
-/// Fetches the day's forecast from WeatherKit and exposes a summary the dashboard can read.
+/// Fetches the day's forecast and exposes a summary the dashboard can read.
 @MainActor
 @Observable
 final class PoolWeatherService {
@@ -77,6 +77,9 @@ final class PoolWeatherService {
 
     /// Today's expected high temperature, in degrees Fahrenheit.
     var highTemperatureFahrenheit: Int?
+
+    /// Current or nearest-hour temperature, in degrees Fahrenheit.
+    var currentTemperatureFahrenheit: Int?
 
     /// Set when the most recent refresh failed. Cleared on a successful refresh.
     var lastErrorMessage: String?
@@ -90,18 +93,39 @@ final class PoolWeatherService {
     private var lastFetchedAt: Date?
 
     private let service = WeatherService.shared
+    private let session: URLSession
     private let logger = Logger(subsystem: "com.poolside.app", category: "Weather")
+    private let prefersNWSPrimary = true
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
 
     /// Returns `true` when the service has produced a usable forecast.
     var hasForecast: Bool {
-        category != nil && highTemperatureFahrenheit != nil
+        category != nil && currentTemperatureFahrenheit != nil && highTemperatureFahrenheit != nil
     }
 
-    /// - Parameter force: When `true`, bypass the freshness/location cache and always hit WeatherKit.
+    /// - Parameter force: When `true`, bypass the freshness/location cache and always refresh weather.
     func refresh(latitude: Double, longitude: Double, force: Bool = false) async {
         if !force, shouldSkipRefresh(latitude: latitude, longitude: longitude) {
             lastRefreshSucceeded = hasForecast
             return
+        }
+
+        if prefersNWSPrimary {
+            do {
+                let nwsForecast = try await fetchNWSForecast(latitude: latitude, longitude: longitude)
+                apply(forecast: nwsForecast, latitude: latitude, longitude: longitude)
+                logger.info("NWS response: \(nwsForecast.category.rawValue, privacy: .public), high \(nwsForecast.highTemperatureFahrenheit)°F")
+                print("[Weather] NWS succeeded: \(nwsForecast.category.shortDescription), high \(nwsForecast.highTemperatureFahrenheit)°F")
+                return
+            } catch {
+                let nwsDetail = Self.diagnosticDescription(for: error)
+                logger.error("NWS primary fetch failed: \(nwsDetail, privacy: .public) — \(String(describing: error), privacy: .public)")
+                print("[Weather] NWS primary failed: \(nwsDetail)")
+                print("[Weather] Falling back to WeatherKit")
+            }
         }
 
         logger.info("Requesting WeatherKit forecast for \(latitude, privacy: .public), \(longitude, privacy: .public)")
@@ -120,21 +144,46 @@ final class PoolWeatherService {
 
             logger.debug("Parsed condition=\(condition.rawValue, privacy: .public), highF=\(highF, privacy: .public)")
 
-            category = PoolWeatherCategory.from(condition)
-            highTemperatureFahrenheit = Int(highF.rounded())
-            lastFetchedCoordinate = (latitude, longitude)
-            lastFetchedAt = Date()
-            lastErrorMessage = nil
-            lastRefreshSucceeded = true
+            apply(
+                forecast: NWSForecastSummary(
+                    category: PoolWeatherCategory.from(condition),
+                    currentTemperatureFahrenheit: Int(current.temperature.converted(to: .fahrenheit).value.rounded()),
+                    highTemperatureFahrenheit: Int(highF.rounded())
+                ),
+                latitude: latitude,
+                longitude: longitude
+            )
             logger.info("WeatherKit response: \(condition.rawValue, privacy: .public), high \(self.highTemperatureFahrenheit ?? -1)°F")
         } catch {
-            let detail = Self.diagnosticDescription(for: error)
-            lastErrorMessage = detail
-            lastRefreshSucceeded = false
-            logger.error("WeatherKit fetch failed: \(detail, privacy: .public) — \(String(describing: error), privacy: .public)")
-            print("[Weather] WeatherKit fetch failed: \(detail)")
+            let weatherKitDetail = Self.diagnosticDescription(for: error)
+            logger.error("WeatherKit fetch failed: \(weatherKitDetail, privacy: .public) — \(String(describing: error), privacy: .public)")
+            print("[Weather] WeatherKit fetch failed: \(weatherKitDetail)")
             print("[Weather] Raw error: \(String(describing: error))")
+
+            do {
+                let nwsForecast = try await fetchNWSForecast(latitude: latitude, longitude: longitude)
+                apply(forecast: nwsForecast, latitude: latitude, longitude: longitude)
+                logger.info("NWS fallback response: \(nwsForecast.category.rawValue, privacy: .public), high \(nwsForecast.highTemperatureFahrenheit)°F")
+                print("[Weather] NWS fallback succeeded: \(nwsForecast.category.shortDescription), high \(nwsForecast.highTemperatureFahrenheit)°F")
+            } catch {
+                let nwsDetail = Self.diagnosticDescription(for: error)
+                lastErrorMessage = "WeatherKit failed: \(weatherKitDetail) NWS fallback failed: \(nwsDetail)"
+                lastRefreshSucceeded = false
+                logger.error("NWS fallback failed: \(nwsDetail, privacy: .public) — \(String(describing: error), privacy: .public)")
+                print("[Weather] NWS fallback failed: \(nwsDetail)")
+                print("[Weather] Raw NWS error: \(String(describing: error))")
+            }
         }
+    }
+
+    private func apply(forecast: NWSForecastSummary, latitude: Double, longitude: Double) {
+        category = forecast.category
+        currentTemperatureFahrenheit = forecast.currentTemperatureFahrenheit
+        highTemperatureFahrenheit = forecast.highTemperatureFahrenheit
+        lastFetchedCoordinate = (latitude, longitude)
+        lastFetchedAt = Date()
+        lastErrorMessage = nil
+        lastRefreshSucceeded = true
     }
 
     private func shouldSkipRefresh(latitude: Double, longitude: Double) -> Bool {
@@ -153,6 +202,76 @@ final class PoolWeatherService {
             print("[Weather] Skipping refresh — cached forecast is fresh and location unchanged")
         }
         return skip
+    }
+
+    private func fetchNWSForecast(latitude: Double, longitude: Double) async throws -> NWSForecastSummary {
+        let coordinatePath = "\(String(format: "%.4f", latitude)),\(String(format: "%.4f", longitude))"
+        guard let pointsURL = URL(string: "https://api.weather.gov/points/\(coordinatePath)") else {
+            throw NWSError.invalidURL
+        }
+
+        print("[Weather] Requesting NWS points metadata for \(coordinatePath)")
+        var pointsRequest = URLRequest(url: pointsURL)
+        pointsRequest.setValue("PoolSide weather fallback (support: developer@example.com)", forHTTPHeaderField: "User-Agent")
+        pointsRequest.setValue("application/geo+json", forHTTPHeaderField: "Accept")
+
+        let points: NWSPointsResponse = try await decodeNWSResponse(NWSPointsResponse.self, from: pointsRequest)
+
+        guard let forecastURL = URL(string: points.properties.forecast) else {
+            throw NWSError.invalidForecastURL
+        }
+
+        print("[Weather] Requesting NWS daily forecast: \(forecastURL.absoluteString)")
+        var forecastRequest = URLRequest(url: forecastURL)
+        forecastRequest.setValue("PoolSide weather fallback (support: developer@example.com)", forHTTPHeaderField: "User-Agent")
+        forecastRequest.setValue("application/geo+json", forHTTPHeaderField: "Accept")
+
+        let forecast: NWSForecastResponse = try await decodeNWSResponse(NWSForecastResponse.self, from: forecastRequest)
+        guard let period = forecast.properties.periods.first(where: \.isDaytime) ?? forecast.properties.periods.first else {
+            throw NWSError.emptyForecast
+        }
+
+        let currentTemperature = try await fetchNWSCurrentTemperature(from: points.properties.forecastHourly)
+
+        return NWSForecastSummary(
+            category: PoolWeatherCategory.fromNWSForecast(period.shortForecast),
+            currentTemperatureFahrenheit: currentTemperature,
+            highTemperatureFahrenheit: period.temperature
+        )
+    }
+
+    private func fetchNWSCurrentTemperature(from hourlyForecast: String) async throws -> Int {
+        guard let hourlyURL = URL(string: hourlyForecast) else {
+            throw NWSError.invalidForecastURL
+        }
+
+        print("[Weather] Requesting NWS hourly forecast: \(hourlyURL.absoluteString)")
+        var request = URLRequest(url: hourlyURL)
+        request.setValue("PoolSide weather fallback (support: developer@example.com)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/geo+json", forHTTPHeaderField: "Accept")
+
+        let forecast: NWSForecastResponse = try await decodeNWSResponse(NWSForecastResponse.self, from: request)
+        guard let currentPeriod = forecast.properties.periods.first else {
+            throw NWSError.emptyForecast
+        }
+
+        return currentPeriod.temperature
+    }
+
+    private func decodeNWSResponse<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NWSError.invalidResponse
+        }
+
+        guard 200..<300 ~= httpResponse.statusCode else {
+            if httpResponse.statusCode == 404 {
+                throw NWSError.unsupportedLocation
+            }
+            throw NWSError.httpStatus(httpResponse.statusCode)
+        }
+
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     /// Builds a short, human-readable description of a WeatherKit error suitable for a toast.
@@ -178,5 +297,107 @@ final class PoolWeatherService {
         }
 
         return "\(ns.domain) \(ns.code): \(ns.localizedDescription)"
+    }
+}
+
+private struct NWSForecastSummary {
+    let category: PoolWeatherCategory
+    let currentTemperatureFahrenheit: Int
+    let highTemperatureFahrenheit: Int
+}
+
+private struct NWSPointsResponse: Decodable {
+    let properties: Properties
+
+    struct Properties: Decodable {
+        let forecast: String
+        let forecastHourly: String
+    }
+}
+
+private struct NWSForecastResponse: Decodable {
+    let properties: Properties
+
+    struct Properties: Decodable {
+        let periods: [Period]
+    }
+
+    struct Period: Decodable {
+        let isDaytime: Bool
+        let temperature: Int
+        let shortForecast: String
+    }
+}
+
+private enum NWSError: LocalizedError {
+    case invalidURL
+    case invalidForecastURL
+    case invalidResponse
+    case unsupportedLocation
+    case httpStatus(Int)
+    case emptyForecast
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "NWS fallback could not build a valid points URL."
+        case .invalidForecastURL:
+            return "NWS fallback returned an invalid forecast URL."
+        case .invalidResponse:
+            return "NWS fallback returned an invalid response."
+        case .unsupportedLocation:
+            return "NWS fallback only supports US locations."
+        case .httpStatus(let statusCode):
+            return "NWS fallback returned HTTP \(statusCode)."
+        case .emptyForecast:
+            return "NWS fallback returned no forecast periods."
+        }
+    }
+}
+
+private extension PoolWeatherCategory {
+    static func fromNWSForecast(_ shortForecast: String) -> PoolWeatherCategory {
+        let text = shortForecast.lowercased()
+
+        if text.contains("thunder") || text.contains("t-storm") || text.contains("storm") {
+            return .thunderstorm
+        }
+
+        if text.contains("snow") || text.contains("sleet") || text.contains("wintry") || text.contains("ice") {
+            return .snow
+        }
+
+        if text.contains("rain") || text.contains("showers") {
+            if text.contains("slight") || text.contains("chance") || text.contains("drizzle") {
+                return .lightRain
+            }
+            return .rain
+        }
+
+        if text.contains("overcast") || text.contains("cloudy") {
+            if text.contains("partly") {
+                return .partlySunny
+            }
+            if text.contains("mostly") {
+                return .partlyCloudy
+            }
+            return .cloudy
+        }
+
+        if text.contains("fog") || text.contains("haze") || text.contains("smoke") {
+            return .cloudy
+        }
+
+        if text.contains("sunny") || text.contains("clear") {
+            if text.contains("partly") {
+                return .partlySunny
+            }
+            if text.contains("mostly") {
+                return .sunny
+            }
+            return .sunny
+        }
+
+        return .sunny
     }
 }

@@ -416,8 +416,11 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             Image("Test Data Hero")
                 .resizable()
-                .scaledToFit()
-                .frame(height: 140)
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .frame(height: 240)
+                .scaleEffect(0.9)
+                .clipped()
 
             VStack(spacing: 6) {
                 Text("Log your first test")
@@ -430,7 +433,7 @@ struct DashboardView: View {
             }
 
         }
-        .padding(24)
+        .padding(16)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
     }
@@ -450,8 +453,8 @@ struct DashboardView: View {
     }
 
     private var greetingLineText: String {
-        if let category = weather.category, let high = weather.highTemperatureFahrenheit {
-            let line = "\(greetingText) \(category.shortDescription) H\(high)°F"
+        if let category = weather.category, let current = weather.currentTemperatureFahrenheit, let high = weather.highTemperatureFahrenheit {
+            let line = "\(greetingText) \(category.shortDescription) C\(current)℉ (H\(high)℉)"
             print("[Weather] Greeting with forecast: \(line)")
             return line
         }
@@ -485,24 +488,25 @@ struct DashboardView: View {
         }
 
         // Cache decision is made inside PoolWeatherService.shouldSkipRefresh; we log before and after.
-        print("[Weather] Decision: REQUEST — calling WeatherKit for lat=\(String(format: "%.6f", latitude)), lon=\(String(format: "%.6f", longitude))")
+        print("[Weather] Decision: REQUEST — refreshing weather for lat=\(String(format: "%.6f", latitude)), lon=\(String(format: "%.6f", longitude))")
         await weather.refresh(latitude: latitude, longitude: longitude, force: force)
 
         let hasForecast = (weather.category != nil && weather.highTemperatureFahrenheit != nil)
         let categoryDesc = weather.category?.rawValue ?? "nil"
+        let currentStr = weather.currentTemperatureFahrenheit.map { String($0) } ?? "nil"
         let highStr = weather.highTemperatureFahrenheit.map { String($0) } ?? "nil"
-        print("[Weather] Result snapshot: hasForecast=\(hasForecast), category=\(categoryDesc), highF=\(highStr)")
+        print("[Weather] Result snapshot: hasForecast=\(hasForecast), category=\(categoryDesc), currentF=\(currentStr), highF=\(highStr)")
 
         // Greeting preview
         if hasForecast {
-            let preview = "\(greetingText) \(weather.category?.shortDescription ?? "?") H\(weather.highTemperatureFahrenheit ?? 0)°F"
+            let preview = "\(greetingText) \(weather.category?.shortDescription ?? "?") C\(weather.currentTemperatureFahrenheit ?? 0)℉ (H\(weather.highTemperatureFahrenheit ?? 0)℉)"
             print("[Weather] Greeting preview: \(preview)")
         } else {
             print("[Weather] Greeting preview: \(greetingText) It's a great day for a pool day!")
         }
 
         // Clipboard-ready summary
-        let summary = "WEATHER SUMMARY — location=\(loc), lat=\(latStr), lon=\(lonStr), requested=true, hasForecast=\(hasForecast), category=\(categoryDesc), highF=\(highStr)"
+        let summary = "WEATHER SUMMARY — location=\(loc), lat=\(latStr), lon=\(lonStr), requested=true, hasForecast=\(hasForecast), category=\(categoryDesc), currentF=\(currentStr), highF=\(highStr)"
         print(summary)
         print("===== WEATHER REFRESH END =====\n")
     }
