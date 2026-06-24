@@ -140,7 +140,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 Text(greetingLineText)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(PoolColor.secondaryText)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
@@ -175,9 +175,11 @@ struct DashboardView: View {
                         .frame(width: 162, height: 160)
                         .offset(x: 24, y: 0)
                         .allowsHitTesting(false)
+                        .padding(.top, -24)
                 }
-                .frame(height: latestTest == nil ? 164 : 148)
+                .frame(height: latestTest == nil ? 112 : 112)
                 .zIndex(0)
+//                .border(.red, width: 0.5)
 
             if let test = latestTest {
                 HStack(spacing: 5) {
@@ -201,19 +203,19 @@ struct DashboardView: View {
             let score = score(for: test)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Your pool looks")
-                    .font(.system(size: 39, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(PoolColor.primaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
 
                 Text(scoreLabel(score).lowercased() + "!")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(status == .ideal ? PoolColor.poolTeal : status.color)
                     .lineLimit(1)
             }
         } else {
             Text(welcomeMessage)
-                .font(.system(size: 39, weight: .bold, design: .rounded))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
                 .foregroundStyle(PoolColor.primaryText)
                 .lineLimit(3)
                 .minimumScaleFactor(0.86)

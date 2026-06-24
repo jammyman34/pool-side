@@ -479,6 +479,15 @@ struct ChemistryEngine {
         return test.pH - previousTest.pH >= 0.2
     }
 
+    private func shouldTreatHighAlkalinityWithAcid(_ alkalinity: Double, test: PoolTest, previousTest: PoolTest?) -> Bool {
+        guard alkalinity > 140 else { return false }
+        if test.pH <= 7.4 { return false }
+        if test.pH >= 7.6 { return true }
+        if isPHRising(current: test, previousTest: previousTest) { return true }
+        if hasScaling(test) { return true }
+        return alkalinity >= 200 && test.pH >= 7.5
+    }
+
     private func hasIndicator(_ indicator: VisualIndicator, in test: PoolTest) -> Bool {
         test.visualIndicators.contains(indicator.rawValue)
     }
@@ -629,7 +638,7 @@ struct ChemistryEngine {
         templates.append(contentsOf: advisoryTemplates(for: test, previousTest: previousTest, config: config))
 
         // Sort by practical risk instead of by textbook chemical dependency.
-        var sorted = templates.sorted {
+        var sorted = suppressAcidTreatmentsWhenPHIsLowNormal(templates, for: test).sorted {
             if $0.sequencePriority == $1.sequencePriority {
                 return $0.urgency.sortOrder < $1.urgency.sortOrder
             }
@@ -654,6 +663,7 @@ struct ChemistryEngine {
         templates = suppressRecentlyCompletedEffects(templates, recentHistory: recentHistory)
         templates = suppressChlorineDuringMixingWindow(templates, recentHistory: recentHistory)
         templates = suppressLowConfidenceOptionalTreatments(templates, config: config)
+        templates = suppressAcidTreatmentsWhenPHIsLowNormal(templates, for: test)
 
         for i in 0..<templates.count {
             templates[i].sortOrder = i
@@ -761,6 +771,17 @@ struct ChemistryEngine {
         return templates.filter { $0.urgency != .optional }
     }
 
+    private func suppressAcidTreatmentsWhenPHIsLowNormal(
+        _ templates: [TreatmentTemplate],
+        for test: PoolTest
+    ) -> [TreatmentTemplate] {
+        guard test.pH <= 7.4, !hasScaling(test) else {
+            return templates
+        }
+
+        return templates.filter { !$0.isAcidTreatment }
+    }
+
     // MARK: - Treatment Templates
 
     /// Recomputes a single treatment template for the given target parameter under the
@@ -773,7 +794,10 @@ struct ChemistryEngine {
     ) -> TreatmentTemplate? {
         let readings = allReadings(for: test, config: config)
         guard let reading = readings.first(where: { $0.key == targetParameter }) else { return nil }
-        return treatmentTemplate(for: reading, test: test, previousTest: nil, recentHistory: [], config: config)
+        guard let template = treatmentTemplate(for: reading, test: test, previousTest: nil, recentHistory: [], config: config) else {
+            return nil
+        }
+        return suppressAcidTreatmentsWhenPHIsLowNormal([template], for: test).first
     }
 
     private func treatmentTemplate(
@@ -905,13 +929,14 @@ struct ChemistryEngine {
                     effectDurationHours: 48,
                     doNotRepeatHours: 24
                 )
-            } else if reading.value >= 200 || (reading.value > 140 && (test.pH >= 7.6 || isPHRising(current: test, previousTest: previousTest) || hasScaling(test))) {
+            } else if shouldTreatHighAlkalinityWithAcid(reading.value, test: test, previousTest: previousTest) {
                 let flOz = kGal * 0.8 * ((reading.value - 120) / 10)
+                let acidDose = practicalLiquidAcidDose(fluidOunces: flOz)
                 return TreatmentTemplate(
                     chemicalName: "pH Decreaser / Muriatic Acid",
                     actionDescription: "Lower TA only because pH is high or drifting upward",
-                    amount: flOz.rounded(toPlaces: 1),
-                    unit: "fl oz",
+                    amount: acidDose.amount,
+                    unit: acidDose.unit,
                     instructions: "Use the acid/aeration process: add acid carefully, circulate, then aerate to raise pH without restoring TA. Do not repeat until pH and TA are retested.",
                     targetParameter: "totalAlkalinity",
                     urgency: .optional,
@@ -923,7 +948,7 @@ struct ChemistryEngine {
                 )
             } else {
                 return TreatmentTemplate(
-                    chemicalName: "Monitor Total Alkalinity",
+                    chemicalName: "Monitor Elevated Alkalinity",
                     actionDescription: "TA is elevated, but pH does not currently justify acid.",
                     amount: 0,
                     unit: "",
@@ -1385,10 +1410,11 @@ struct ChemistryEngine {
     private func pHDecreaserProduct(_ preference: PHDecreaserPreference, ounces: Double) -> ChemicalProduct {
         switch preference {
         case .muriaticAcid:
+            let dose = practicalLiquidAcidDose(fluidOunces: ounces)
             return ChemicalProduct(
                 name: "pH Decreaser / Muriatic Acid",
-                amount: (ounces / 32).rounded(toPlaces: 1),
-                unit: "qt",
+                amount: dose.amount,
+                unit: dose.unit,
                 instructions: "Add slowly to the deep end with the pump running. Never pre-mix with other chemicals. Retest pH in 4 hours."
             )
         case .dryAcid:
@@ -1399,6 +1425,20 @@ struct ChemistryEngine {
                 instructions: "Pre-dissolve in a bucket of pool water and add slowly with the pump running. Retest pH in 4 hours."
             )
         }
+    }
+
+    private func practicalLiquidAcidDose(fluidOunces: Double) -> (amount: Double, unit: String) {
+        let ounces = max(0, fluidOunces)
+
+        if ounces < 32 {
+            return (ounces.rounded(toPlaces: ounces < 10 ? 1 : 0), "fl oz")
+        }
+
+        if ounces < 128 {
+            return (((ounces / 32) * 2).rounded() / 2, "qt")
+        }
+
+        return ((ounces / 128).rounded(toPlaces: 1), "gal")
     }
 
     private func stabilizerProduct(_ preference: StabilizerPreference, pounds: Double) -> ChemicalProduct {
@@ -1478,6 +1518,15 @@ struct TreatmentTemplate {
 
     func isSafeToRepeat(despite activeTreatment: Treatment) -> Bool {
         targetParameter != "cyanuricAcid"
+    }
+
+    var isAcidTreatment: Bool {
+        let name = chemicalName.lowercased()
+        return name.contains("muriatic acid")
+            || name.contains("dry acid")
+            || name.contains("ph decreaser")
+            || (targetParameter == "pH" && expectedDelta < 0)
+            || (targetParameter == "totalAlkalinity" && expectedDelta < 0 && name.contains("acid"))
     }
 
     func toTreatment(linkedTo test: PoolTest) -> Treatment {

@@ -3,7 +3,15 @@ import SwiftData
 
 struct TreatmentCardView: View {
 
+    enum Presentation {
+        case card
+        case row
+    }
+
     var treatment: Treatment
+    var allowsActions: Bool = true
+    var presentation: Presentation = .card
+    var showsDivider: Bool = true
     var onComplete: @MainActor (Treatment) async -> Void
     var onMarkIncomplete: @MainActor (Treatment) async -> Void
     var onSkip: @MainActor (Treatment) async -> Void
@@ -23,7 +31,7 @@ struct TreatmentCardView: View {
     private let actionWidth: CGFloat = 92
 
     private var swappableCategory: ChemicalProductCategory? {
-        guard !treatment.isCompleted, !treatment.isSkipped else { return nil }
+        guard allowsActions, !treatment.isCompleted, !treatment.isSkipped else { return nil }
         return treatment.productCategory
     }
 
@@ -42,6 +50,7 @@ struct TreatmentCardView: View {
     }
 
     private var cardOffset: CGFloat {
+        guard allowsActions else { return 0 }
         if dragOffset < 0 { return max(dragOffset, -actionWidth) }
         if dragOffset > 0 { return min(dragOffset, actionWidth) }
         if isSkipOpen { return -actionWidth }
@@ -59,10 +68,10 @@ struct TreatmentCardView: View {
 
     var body: some View {
         ZStack {
-            if treatment.isSkipped && cardOffset > 0 {
+            if allowsActions && treatment.isSkipped && cardOffset > 0 {
                 restoreAction
                     .zIndex(1)
-            } else if !treatment.isCompleted && cardOffset < 0 {
+            } else if allowsActions && !treatment.isCompleted && cardOffset < 0 {
                 skipAction
                     .zIndex(1)
             }
@@ -76,7 +85,7 @@ struct TreatmentCardView: View {
                         closeSwipeActions(clearOpenTreatment: true)
                     }
                 }
-                .gesture(skipGesture)
+                .conditionalSimultaneousGesture(skipGesture, enabled: allowsActions && !treatment.isCompleted)
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isSkipOpen)
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isRestoreOpen)
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
@@ -98,6 +107,10 @@ struct TreatmentCardView: View {
                 )
             }
         }
+    }
+
+    private var usesCardChrome: Bool {
+        presentation == .card
     }
 
     @ViewBuilder
@@ -207,7 +220,7 @@ struct TreatmentCardView: View {
 
                 // Checkbox — top-right
                 Button {
-                    guard !treatment.isSkipped, !isCompleting else { return }
+                    guard allowsActions, !treatment.isSkipped, !isCompleting else { return }
                     isCompleting = true
                     Task {
                         if treatment.isCompleted {
@@ -218,22 +231,24 @@ struct TreatmentCardView: View {
                         isCompleting = false
                     }
                 } label: {
-                    ZStack {
-                        if isCompleting {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                                .frame(width: 26, height: 26)
-                        } else if treatment.isCompleted {
-                            Circle()
-                                .fill(PoolColor.statusIdeal)
-                                .frame(width: 26, height: 26)
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                        } else {
-                            Circle()
-                                .stroke(PoolColor.divider, lineWidth: 2)
-                                .frame(width: 26, height: 26)
+                    if allowsActions {
+                        ZStack {
+                            if isCompleting {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .frame(width: 26, height: 26)
+                            } else if treatment.isCompleted {
+                                Circle()
+                                    .fill(PoolColor.statusIdeal)
+                                    .frame(width: 26, height: 26)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white)
+                            } else {
+                                Circle()
+                                    .stroke(PoolColor.divider, lineWidth: 2)
+                                    .frame(width: 26, height: 26)
+                            }
                         }
                     }
                 }
@@ -254,10 +269,6 @@ struct TreatmentCardView: View {
 
             // "How to apply" expandable
             if !treatment.instructions.isEmpty {
-                Divider()
-                    .overlay(PoolColor.divider)
-                    .padding(.horizontal, 18)
-
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         expanded.toggle()
@@ -273,7 +284,7 @@ struct TreatmentCardView: View {
                             .font(.caption2)
                             .foregroundStyle(PoolColor.poolTeal)
                     }
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 42)
                     .padding(.vertical, 10)
                 }
 
@@ -281,14 +292,29 @@ struct TreatmentCardView: View {
                     Text(treatment.instructions)
                         .font(.caption)
                         .foregroundStyle(PoolColor.secondaryText)
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 14)
+                        .padding(.horizontal, 42)
+                        .padding(.bottom, 12)
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if showsDivider {
+                    Rectangle()
+                        .fill(PoolColor.poolTeal.opacity(0.3))
+                        .frame(height: 1)
+                        .padding(.horizontal, 18)
                 }
             }
         }
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(treatment.isCompleted || treatment.isSkipped ? 0.02 : 0.06), radius: 8, y: 2)
+        .background(usesCardChrome ? Color.white : Color.clear, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(usesCardChrome && !allowsActions ? PoolColor.poolTeal.opacity(0.18) : Color.clear, lineWidth: 1)
+        )
+        .shadow(
+            color: .black.opacity(usesCardChrome ? (treatment.isCompleted || treatment.isSkipped ? 0.02 : 0.06) : 0),
+            radius: usesCardChrome ? 8 : 0,
+            y: usesCardChrome ? 2 : 0
+        )
         .opacity(treatment.isCompleted ? 0.65 : 1)
     }
 
@@ -343,10 +369,11 @@ struct TreatmentCardView: View {
     }
 
     private var skipGesture: some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 18)
             .onChanged { value in
+                guard allowsActions else { return }
                 guard !treatment.isCompleted else { return }
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                guard isHorizontalSwipe(value.translation) else { return }
 
                 if treatment.isSkipped {
                     let baseOffset = isRestoreOpen ? actionWidth : 0
@@ -357,11 +384,15 @@ struct TreatmentCardView: View {
                 }
             }
             .onEnded { value in
+                guard allowsActions else {
+                    dragOffset = 0
+                    return
+                }
                 guard !treatment.isCompleted else {
                     dragOffset = 0
                     return
                 }
-                guard abs(value.translation.width) > abs(value.translation.height) else {
+                guard isHorizontalSwipe(value.translation) else {
                     dragOffset = 0
                     return
                 }
@@ -377,6 +408,10 @@ struct TreatmentCardView: View {
             }
     }
 
+    private func isHorizontalSwipe(_ translation: CGSize) -> Bool {
+        abs(translation.width) > abs(translation.height) * 1.35
+    }
+
     private func closeSwipeActions(clearOpenTreatment: Bool) {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
             isSkipOpen = false
@@ -389,7 +424,7 @@ struct TreatmentCardView: View {
     }
 
     private var waitLabel: String? {
-        guard treatment.minutesBeforeNext > 0, !treatment.isCompleted, !treatment.isSkipped else { return nil }
+        guard allowsActions, treatment.minutesBeforeNext > 0, !treatment.isCompleted, !treatment.isSkipped else { return nil }
         return "Retest in \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
     }
 }
@@ -489,6 +524,17 @@ private struct ChemicalProductSheetHeightKey: PreferenceKey {
     static var defaultValue: CGFloat { 0 }
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func conditionalSimultaneousGesture<G: Gesture>(_ gesture: G, enabled: Bool) -> some View {
+        if enabled {
+            simultaneousGesture(gesture)
+        } else {
+            self
+        }
     }
 }
 
