@@ -484,7 +484,7 @@ struct DashboardView: View {
         print("[Weather] Config snapshot: location=\(loc), lat=\(latStr), lon=\(lonStr), force=\(force)")
 
         guard let latitude = viewModel.poolConfig.latitude, let longitude = viewModel.poolConfig.longitude else {
-            print("[Weather] Decision: SKIP — coordinates are nil (cannot query WeatherKit)")
+            print("[Weather] Decision: SKIP — coordinates are nil (cannot query weather provider)")
             print("===== WEATHER REFRESH END =====\n")
             return
         }

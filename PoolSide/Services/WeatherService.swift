@@ -96,6 +96,7 @@ final class PoolWeatherService {
     private let session: URLSession
     private let logger = Logger(subsystem: "com.poolside.app", category: "Weather")
     private let prefersNWSPrimary = true
+    private let nwsUserAgent = "PoolSide/1.0 (justinmandell@gmail.com)"
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -124,7 +125,8 @@ final class PoolWeatherService {
                 let nwsDetail = Self.diagnosticDescription(for: error)
                 logger.error("NWS primary fetch failed: \(nwsDetail, privacy: .public) — \(String(describing: error), privacy: .public)")
                 print("[Weather] NWS primary failed: \(nwsDetail)")
-                print("[Weather] Falling back to WeatherKit")
+                preserveExistingForecastOrFail()
+                return
             }
         }
 
@@ -167,8 +169,7 @@ final class PoolWeatherService {
                 print("[Weather] NWS fallback succeeded: \(nwsForecast.category.shortDescription), high \(nwsForecast.highTemperatureFahrenheit)°F")
             } catch {
                 let nwsDetail = Self.diagnosticDescription(for: error)
-                lastErrorMessage = "WeatherKit failed: \(weatherKitDetail) NWS fallback failed: \(nwsDetail)"
-                lastRefreshSucceeded = false
+                preserveExistingForecastOrFail()
                 logger.error("NWS fallback failed: \(nwsDetail, privacy: .public) — \(String(describing: error), privacy: .public)")
                 print("[Weather] NWS fallback failed: \(nwsDetail)")
                 print("[Weather] Raw NWS error: \(String(describing: error))")
@@ -184,6 +185,17 @@ final class PoolWeatherService {
         lastFetchedAt = Date()
         lastErrorMessage = nil
         lastRefreshSucceeded = true
+    }
+
+    private func preserveExistingForecastOrFail() {
+        if hasForecast {
+            lastErrorMessage = nil
+            lastRefreshSucceeded = true
+            print("[Weather] Keeping existing forecast after refresh failure")
+        } else {
+            lastErrorMessage = "Weather update failed. Please try again."
+            lastRefreshSucceeded = false
+        }
     }
 
     private func shouldSkipRefresh(latitude: Double, longitude: Double) -> Bool {
@@ -212,7 +224,7 @@ final class PoolWeatherService {
 
         print("[Weather] Requesting NWS points metadata for \(coordinatePath)")
         var pointsRequest = URLRequest(url: pointsURL)
-        pointsRequest.setValue("PoolSide weather fallback (support: developer@example.com)", forHTTPHeaderField: "User-Agent")
+        pointsRequest.setValue(nwsUserAgent, forHTTPHeaderField: "User-Agent")
         pointsRequest.setValue("application/geo+json", forHTTPHeaderField: "Accept")
 
         let points: NWSPointsResponse = try await decodeNWSResponse(NWSPointsResponse.self, from: pointsRequest)
@@ -223,7 +235,7 @@ final class PoolWeatherService {
 
         print("[Weather] Requesting NWS daily forecast: \(forecastURL.absoluteString)")
         var forecastRequest = URLRequest(url: forecastURL)
-        forecastRequest.setValue("PoolSide weather fallback (support: developer@example.com)", forHTTPHeaderField: "User-Agent")
+        forecastRequest.setValue(nwsUserAgent, forHTTPHeaderField: "User-Agent")
         forecastRequest.setValue("application/geo+json", forHTTPHeaderField: "Accept")
 
         let forecast: NWSForecastResponse = try await decodeNWSResponse(NWSForecastResponse.self, from: forecastRequest)
@@ -247,7 +259,7 @@ final class PoolWeatherService {
 
         print("[Weather] Requesting NWS hourly forecast: \(hourlyURL.absoluteString)")
         var request = URLRequest(url: hourlyURL)
-        request.setValue("PoolSide weather fallback (support: developer@example.com)", forHTTPHeaderField: "User-Agent")
+        request.setValue(nwsUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/geo+json", forHTTPHeaderField: "Accept")
 
         let forecast: NWSForecastResponse = try await decodeNWSResponse(NWSForecastResponse.self, from: request)
