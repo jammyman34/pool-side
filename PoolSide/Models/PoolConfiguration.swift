@@ -166,8 +166,21 @@ enum TestMethod: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .testStrips: return "Test Strips"
         case .liquidDropKit: return "Liquid Drop Test Kit"
-        case .digitalTester: return "Digital Tester"
+        case .digitalTester: return "Digital Meter / Photometer"
         case .poolStore: return "Pool Store Test"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .testStrips:
+            return "testtube.2"
+        case .liquidDropKit:
+            return "drop.fill"
+        case .digitalTester:
+            return "wave.3.forward"
+        case .poolStore:
+            return "building.2"
         }
     }
 
@@ -178,7 +191,7 @@ enum TestMethod: String, CaseIterable, Codable, Identifiable {
         case .liquidDropKit:
             return "Liquid drop tests are usually more consistent than strips, but clean tubes and exact drop counts still matter."
         case .digitalTester:
-            return "Digital testers are generally consistent when calibrated and stored correctly."
+            return "Digital meters and photometers are generally consistent when calibrated, cleaned, and stored correctly."
         case .poolStore:
             return "Pool store tests are useful reference points, but the app still compares them against your treatment history before recommending more chemicals."
         }
@@ -187,15 +200,66 @@ enum TestMethod: String, CaseIterable, Codable, Identifiable {
     var shouldSuppressOptionalTreatments: Bool {
         self == .testStrips
     }
+
+    var usesBrandPicker: Bool {
+        self == .liquidDropKit || self == .digitalTester
+    }
 }
 
 enum LiquidDropKitBrand: String, CaseIterable, Codable, Identifiable {
     case taylorK2006FASDPD = "Taylor K-2006 FAS-DPD"
+    case taylorK2005 = "Taylor K-2005"
     case hachColorQ = "Hach ColorQ"
     case jblProColorimeter = "JBL Pro Colorimeter"
     case hannaChecker = "Hanna Checker"
+    case poolLab = "PoolLab"
+    case otherLiquidDropKit = "other_liquid_drop_kit"
+    case otherDigitalMeter = "other_digital_meter"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .taylorK2006FASDPD:
+            return "Taylor K-2006 / K-2006-SALT"
+        case .taylorK2005:
+            return "Taylor K-2005"
+        case .hachColorQ:
+            return "Hach ColorQ"
+        case .jblProColorimeter:
+            return "JBL Pro Colorimeter"
+        case .hannaChecker:
+            return "Hanna Checker"
+        case .poolLab:
+            return "PoolLab"
+        case .otherLiquidDropKit, .otherDigitalMeter:
+            return "Other"
+        }
+    }
+
+    static func options(for testMethod: TestMethod) -> [LiquidDropKitBrand] {
+        switch testMethod {
+        case .liquidDropKit:
+            return [.taylorK2006FASDPD, .taylorK2005, .otherLiquidDropKit]
+        case .digitalTester:
+            return [.hachColorQ, .hannaChecker, .poolLab, .otherDigitalMeter]
+        default:
+            return []
+        }
+    }
+
+    static func defaultBrand(for testMethod: TestMethod) -> LiquidDropKitBrand {
+        switch testMethod {
+        case .digitalTester:
+            return .hachColorQ
+        default:
+            return .taylorK2006FASDPD
+        }
+    }
+
+    func isAvailable(for testMethod: TestMethod) -> Bool {
+        Self.options(for: testMethod).contains(self)
+    }
 }
 
 /// Sample-volume options for the Taylor K-2006 FAS-DPD chlorine titration.

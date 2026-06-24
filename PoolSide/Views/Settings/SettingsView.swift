@@ -373,7 +373,8 @@ struct SettingsView: View {
             HStack {
                 Picker("Testing Method", selection: $testMethod) {
                     ForEach(TestMethod.allCases) { method in
-                        Text(method.displayName).tag(method)
+                        Label(method.displayName, systemImage: method.systemImageName)
+                            .tag(method)
                     }
                 }
                 .pickerStyle(.menu)
@@ -383,18 +384,19 @@ struct SettingsView: View {
                 Spacer(minLength: 0)
             }
 
-            if testMethod == .liquidDropKit {
+            if testMethod == .liquidDropKit || testMethod == .digitalTester {
                 Text("Brand")
                     .font(.subheadline)
                     .foregroundStyle(PoolColor.primaryText)
                     .padding(.top, 4)
 
                 HStack {
-                    Picker("Liquid Drop Kit Brand", selection: $liquidDropKitBrand) {
-                        ForEach(LiquidDropKitBrand.allCases) { brand in
-                            HStack {
+                    Picker("\(testMethod.displayName) Brand", selection: $liquidDropKitBrand) {
+                        ForEach(LiquidDropKitBrand.options(for: testMethod)) { brand in
+                            Label {
+                                Text(brand.displayName)
+                            } icon: {
                                 brand.icon
-                                Text(brand.rawValue)
                             }
                             .tag(brand)
                         }
@@ -412,6 +414,11 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(PoolColor.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onChange(of: testMethod) { _, newValue in
+            if !liquidDropKitBrand.isAvailable(for: newValue) {
+                liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: newValue)
             }
         }
         .padding(.horizontal, 18)
@@ -503,6 +510,7 @@ struct SettingsView: View {
         surfaceType = config.surfaceType
         testMethod = config.testMethod
         liquidDropKitBrand = config.liquidDropKitBrand
+        normalizeBrandForCurrentMethod()
         isSaltwater = config.isSaltwater
         hasCover = config.hasCover
         chlorinePreference = config.chlorinePreference
@@ -517,7 +525,14 @@ struct SettingsView: View {
         originalConfig = currentConfig
     }
 
+    private func normalizeBrandForCurrentMethod() {
+        if !liquidDropKitBrand.isAvailable(for: testMethod) {
+            liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
+        }
+    }
+
     private func save() {
+        normalizeBrandForCurrentMethod()
         viewModel.saveConfig(currentConfig)
         dismiss()
     }
