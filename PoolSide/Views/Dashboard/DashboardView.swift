@@ -13,6 +13,11 @@ struct DashboardView: View {
     @State private var editRoute: DashboardEditRoute? = nil
     @State private var swipedTestID: UUID? = nil
     @State private var welcomeMessage = DashboardWelcomeMessage.random()
+    @State private var weather = PoolWeatherService()
+    @State private var showingRefreshToast = false
+    @State private var refreshToastMessage = ""
+    @State private var refreshToastIsError = false
+    @State private var isRefreshingWeather = false
 
     var latestTest: PoolTest? { tests.first }
 
@@ -46,8 +51,75 @@ struct DashboardView: View {
                         Spacer(minLength: 100)
                     }
                 }
+                .refreshable {
+                    print("[Weather] User-initiated pull-to-refresh")
+                    await MainActor.run { isRefreshingWeather = true }
+                    await refreshWeatherIfPossible(force: true)
+                    await MainActor.run {
+                        if weather.lastRefreshSucceeded {
+                            refreshToastMessage = "Weather updated"
+                            refreshToastIsError = false
+                        } else {
+                            refreshToastMessage = weather.lastErrorMessage ?? "Weather update failed"
+                            refreshToastIsError = true
+                        }
+                        withAnimation { showingRefreshToast = true }
+                        let dismissDelay: TimeInterval = refreshToastIsError ? 5.0 : 1.4
+                        DispatchQueue.main.asyncAfter(deadline: .now() + dismissDelay) {
+                            withAnimation { showingRefreshToast = false }
+                        }
+                        isRefreshingWeather = false
+                    }
+                }
+
+                if isRefreshingWeather {
+                    VStack {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(PoolColor.primaryText)
+                            Text("Updating weather…")
+                                .font(.subheadline)
+                                .foregroundStyle(PoolColor.primaryText)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white, in: Capsule())
+                        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+                        .padding(.top, 12)
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: isRefreshingWeather)
+                }
+
+                if showingRefreshToast {
+                    VStack {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: refreshToastIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .foregroundStyle(refreshToastIsError ? PoolColor.statusOffRange : PoolColor.statusIdeal)
+                            Text(refreshToastMessage)
+                                .font(.subheadline)
+                                .foregroundStyle(PoolColor.primaryText)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+                        .padding(.top, 12)
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.25, dampingFraction: 0.9), value: showingRefreshToast)
+                    .padding(.horizontal, 16)
+                }
             }
             .navigationBarHidden(true)
+            .task(id: weatherTaskID) {
+                await refreshWeatherIfPossible()
+            }
             // Full history sheet
             .sheet(isPresented: $showingHistory) {
                 HistoryView()
@@ -67,9 +139,11 @@ struct DashboardView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                Text(greetingText)
+                Text(greetingLineText)
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(PoolColor.secondaryText)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
 
                 Spacer()
 
@@ -94,7 +168,7 @@ struct DashboardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, 112)
                 .background(alignment: .topTrailing) {
-                    Image("Dashboard Hero")
+                    Image(heroAssetName)
                         .resizable()
                         .scaledToFit()
                         .scaleEffect(1.9)
@@ -124,6 +198,7 @@ struct DashboardView: View {
     private var heroTitle: some View {
         if let test = latestTest {
             let status = viewModel.overallStatus(for: test)
+            let score = score(for: test)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Your pool looks")
                     .font(.system(size: 39, weight: .bold, design: .rounded))
@@ -131,7 +206,7 @@ struct DashboardView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
 
-                Text(scoreLabel(test.overallScore).lowercased() + "!")
+                Text(scoreLabel(score).lowercased() + "!")
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .foregroundStyle(status == .ideal ? PoolColor.poolTeal : status.color)
                     .lineLimit(1)
@@ -148,15 +223,17 @@ struct DashboardView: View {
     // MARK: - Score Card
 
     private func scoreCard(test: PoolTest) -> some View {
-        HStack(alignment: .center, spacing: 18) {
+        let score = score(for: test)
+
+        return HStack(alignment: .center, spacing: 18) {
             VStack(spacing: 8) {
-                ScoreRing(score: test.overallScore, size: 118)
+                ScoreRing(score: score, size: 118)
                 Text("Pool Score")
                     .font(.caption)
                     .foregroundStyle(PoolColor.secondaryText)
-                Text(scoreLabel(test.overallScore))
+                Text(scoreLabel(score))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(scoreColor(test.overallScore))
+                    .foregroundStyle(scoreColor(score))
             }
             .frame(width: 134)
 
@@ -268,7 +345,9 @@ struct DashboardView: View {
     }
 
     private func recentTestRow(_ test: PoolTest) -> some View {
-        HStack(spacing: 14) {
+        let score = score(for: test)
+
+        return HStack(spacing: 14) {
             // Date
             VStack(alignment: .leading, spacing: 1) {
                 Text(shortDate(test.date))
@@ -285,20 +364,20 @@ struct DashboardView: View {
             // Score circle
             ZStack {
                 Circle()
-                    .stroke(scoreColor(test.overallScore).opacity(0.2), lineWidth: 2)
+                    .stroke(scoreColor(score).opacity(0.2), lineWidth: 2)
                 Circle()
-                    .fill(scoreColor(test.overallScore).opacity(0.1))
-                Text("\(test.overallScore)")
+                    .fill(scoreColor(score).opacity(0.1))
+                Text("\(score)")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(scoreColor(test.overallScore))
+                    .foregroundStyle(scoreColor(score))
             }
             .frame(width: 40, height: 40)
 
             // Status label
-            Text(scoreLabel(test.overallScore))
+            Text(scoreLabel(score))
                 .font(.subheadline)
                 .fontWeight(.medium)
-                .foregroundStyle(scoreColor(test.overallScore))
+                .foregroundStyle(scoreColor(score))
                 .frame(width: 100, alignment: .leading)
 
             Image(systemName: "chevron.right")
@@ -307,6 +386,13 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+    }
+
+    private func score(for test: PoolTest) -> Int {
+        viewModel.overallScore(
+            for: test,
+            previousTest: viewModel.previousTest(before: test, in: tests)
+        )
     }
 
     private func deleteTest(_ test: PoolTest) {
@@ -330,8 +416,11 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             Image("Test Data Hero")
                 .resizable()
-                .scaledToFit()
-                .frame(height: 140)
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .frame(height: 240)
+                .scaleEffect(0.9)
+                .clipped()
 
             VStack(spacing: 6) {
                 Text("Log your first test")
@@ -344,7 +433,7 @@ struct DashboardView: View {
             }
 
         }
-        .padding(24)
+        .padding(16)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
     }
@@ -363,13 +452,72 @@ struct DashboardView: View {
         }
     }
 
+    private var greetingLineText: String {
+        if let category = weather.category, let current = weather.currentTemperatureFahrenheit, let high = weather.highTemperatureFahrenheit {
+            let line = "\(greetingText) \(category.shortDescription) C\(current)℉ (H\(high)℉)"
+            print("[Weather] Greeting with forecast: \(line)")
+            return line
+        }
+        let fallback = "\(greetingText) It's a great day for a pool day!"
+        print("[Weather] Greeting fallback (no forecast): lat=\(viewModel.poolConfig.latitude?.description ?? "nil"), lon=\(viewModel.poolConfig.longitude?.description ?? "nil")")
+        return fallback
+    }
+
+    private var heroAssetName: String {
+        weather.category?.heroAssetName ?? "Sunny Hero"
+    }
+
+    private var weatherTaskID: String {
+        let lat = viewModel.poolConfig.latitude.map { String(format: "%.3f", $0) } ?? "nil"
+        let lon = viewModel.poolConfig.longitude.map { String(format: "%.3f", $0) } ?? "nil"
+        return "\(lat),\(lon)"
+    }
+
+    private func refreshWeatherIfPossible(force: Bool = false) async {
+        let loc = viewModel.poolConfig.location
+        let latStr = viewModel.poolConfig.latitude?.description ?? "nil"
+        let lonStr = viewModel.poolConfig.longitude?.description ?? "nil"
+
+        print("\n===== WEATHER REFRESH BEGIN =====")
+        print("[Weather] Config snapshot: location=\(loc), lat=\(latStr), lon=\(lonStr), force=\(force)")
+
+        guard let latitude = viewModel.poolConfig.latitude, let longitude = viewModel.poolConfig.longitude else {
+            print("[Weather] Decision: SKIP — coordinates are nil (cannot query WeatherKit)")
+            print("===== WEATHER REFRESH END =====\n")
+            return
+        }
+
+        // Cache decision is made inside PoolWeatherService.shouldSkipRefresh; we log before and after.
+        print("[Weather] Decision: REQUEST — refreshing weather for lat=\(String(format: "%.6f", latitude)), lon=\(String(format: "%.6f", longitude))")
+        await weather.refresh(latitude: latitude, longitude: longitude, force: force)
+
+        let hasForecast = (weather.category != nil && weather.highTemperatureFahrenheit != nil)
+        let categoryDesc = weather.category?.rawValue ?? "nil"
+        let currentStr = weather.currentTemperatureFahrenheit.map { String($0) } ?? "nil"
+        let highStr = weather.highTemperatureFahrenheit.map { String($0) } ?? "nil"
+        print("[Weather] Result snapshot: hasForecast=\(hasForecast), category=\(categoryDesc), currentF=\(currentStr), highF=\(highStr)")
+
+        // Greeting preview
+        if hasForecast {
+            let preview = "\(greetingText) \(weather.category?.shortDescription ?? "?") C\(weather.currentTemperatureFahrenheit ?? 0)℉ (H\(weather.highTemperatureFahrenheit ?? 0)℉)"
+            print("[Weather] Greeting preview: \(preview)")
+        } else {
+            print("[Weather] Greeting preview: \(greetingText) It's a great day for a pool day!")
+        }
+
+        // Clipboard-ready summary
+        let summary = "WEATHER SUMMARY — location=\(loc), lat=\(latStr), lon=\(lonStr), requested=true, hasForecast=\(hasForecast), category=\(categoryDesc), currentF=\(currentStr), highF=\(highStr)"
+        print(summary)
+        print("===== WEATHER REFRESH END =====\n")
+    }
+
     private func scoreLabel(_ score: Int) -> String {
         switch score {
         case 90...100: return "Great"
         case 75..<90:  return "Good"
         case 60..<75:  return "Alright"
         case 40..<60:  return "Not Great"
-        default:       return "Critical"
+        default:       return "Real Bad"
         }
     }
 
@@ -427,7 +575,7 @@ private enum DashboardWelcomeMessage {
         "Let's get your\nwater dialed in.",
         "Clear water\nstarts here.",
         "Pool care,\nmade simple.",
-        "Ready for a\nquick water check?",
+        "Quick water check time?",
         "Your pool plan\nstarts here.",
         "Fresh readings,\nbetter swims.",
         "Time to tune up\nthe water.",

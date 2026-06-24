@@ -96,11 +96,11 @@ struct RangeBar: View {
 
     private var range: (min: Double, max: Double, idealMin: Double, idealMax: Double) {
         switch parameter {
-        case "pH":              return (6.5, 8.5, 7.2, 7.6)
-        case "freeChlorine":    return (0, 6, 1, 3)
+        case "pH":              return (6.5, 8.5, 7.2, 7.8)
+        case "freeChlorine":    return (0, 12, 3, 8)
         case "totalAlkalinity": return (40, 180, 80, 120)
-        case "calciumHardness": return (100, 600, 200, 400)
-        case "cyanuricAcid":    return (0, 120, 30, 50)
+        case "calciumHardness": return (100, 600, 200, 450)
+        case "cyanuricAcid":    return (0, 120, 30, 70)
         case "saltLevel":       return (1500, 5000, 2700, 3400)
         default:                return (0, 100, 30, 70)
         }

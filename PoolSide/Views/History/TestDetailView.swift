@@ -66,7 +66,7 @@ struct TestDetailView: View {
 
     private var headerCard: some View {
         HStack(spacing: 16) {
-            ScoreRing(score: test.overallScore, size: 68)
+            ScoreRing(score: viewModel.overallScore(for: test), size: 68)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(test.date.fullDisplay)

@@ -53,6 +53,17 @@ final class PoolViewModel {
         return .ideal
     }
 
+    func overallScore(for test: PoolTest, previousTest: PoolTest? = nil) -> Int {
+        chemistryEngine.overallScore(for: test, previousTest: previousTest, config: poolConfig)
+    }
+
+    func previousTest(before test: PoolTest, in tests: [PoolTest]) -> PoolTest? {
+        tests
+            .filter { $0.id != test.id && $0.date < test.date }
+            .sorted { $0.date > $1.date }
+            .first
+    }
+
     // MARK: - Generate Recommendations
 
     @MainActor
@@ -183,7 +194,7 @@ final class PoolViewModel {
     private func parameterStatus(parameter: String, value: Double, engine: ChemistryEngine) -> ChemicalStatus {
         switch parameter {
         case "pH":              return engine.pHStatus(value)
-        case "freeChlorine":    return engine.freeChlorineStatus(value)
+            case "freeChlorine":    return engine.freeChlorineStatus(value, cyanuricAcid: nil)
         case "totalAlkalinity": return engine.totalAlkalinityStatus(value)
         default:                return .testing
         }

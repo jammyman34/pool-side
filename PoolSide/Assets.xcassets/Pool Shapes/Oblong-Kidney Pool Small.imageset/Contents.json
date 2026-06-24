@@ -1,0 +1,23 @@
+{
+  "images" : [
+    {
+      "filename" : "Oblong Kidney Pool-sm.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "filename" : "Oblong Kidney Pool-sm 1.png",
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "filename" : "Oblong Kidney Pool-sm 2.png",
+      "idiom" : "universal",
+      "scale" : "3x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

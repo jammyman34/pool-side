@@ -112,18 +112,107 @@ final class Treatment {
     }
 }
 
+// MARK: - Product Swap
+
+/// Categories of swappable chemical products tied to a Treatment.
+/// Used by the in-plan product picker; only categories with ≥2 options are listed.
+enum ChemicalProductCategory: String, CaseIterable, Identifiable {
+    case chlorine
+    case pHIncreaser
+    case pHDecreaser
+    case stabilizer
+
+    var id: String { rawValue }
+
+    var sheetTitle: String {
+        switch self {
+        case .chlorine: return "Chlorine"
+        case .pHIncreaser: return "pH Increaser"
+        case .pHDecreaser: return "pH Decreaser"
+        case .stabilizer: return "Stabilizer"
+        }
+    }
+
+    var optionDisplayNames: [String] {
+        switch self {
+        case .chlorine: return ChlorinePreference.allCases.map(\.displayName)
+        case .pHIncreaser: return PHIncreaserPreference.allCases.map(\.displayName)
+        case .pHDecreaser: return PHDecreaserPreference.allCases.map(\.displayName)
+        case .stabilizer: return StabilizerPreference.allCases.map(\.displayName)
+        }
+    }
+
+    func currentSelection(from config: PoolConfiguration) -> String {
+        switch self {
+        case .chlorine: return config.chlorinePreference.displayName
+        case .pHIncreaser: return config.pHIncreaserPreference.displayName
+        case .pHDecreaser: return config.pHDecreaserPreference.displayName
+        case .stabilizer: return config.stabilizerPreference.displayName
+        }
+    }
+
+    func configApplying(selection: String, to config: PoolConfiguration) -> PoolConfiguration {
+        var updated = config
+        switch self {
+        case .chlorine:
+            if let value = ChlorinePreference.allCases.first(where: { $0.displayName == selection }) {
+                updated.chlorinePreference = value
+            }
+        case .pHIncreaser:
+            if let value = PHIncreaserPreference.allCases.first(where: { $0.displayName == selection }) {
+                updated.pHIncreaserPreference = value
+            }
+        case .pHDecreaser:
+            if let value = PHDecreaserPreference.allCases.first(where: { $0.displayName == selection }) {
+                updated.pHDecreaserPreference = value
+            }
+        case .stabilizer:
+            if let value = StabilizerPreference.allCases.first(where: { $0.displayName == selection }) {
+                updated.stabilizerPreference = value
+            }
+        }
+        return updated
+    }
+}
+
+extension Treatment {
+    /// Returns the swappable product category for this treatment, or nil when
+    /// no alternative products exist (hardcoded treatments, visual indicators,
+    /// or single-option categories like alkalinity / calcium increasers).
+    var productCategory: ChemicalProductCategory? {
+        switch targetParameter {
+        case "freeChlorine":
+            return ChlorinePreference.allCases.contains(where: { $0.displayName == chemicalName }) ? .chlorine : nil
+        case "pH":
+            if PHIncreaserPreference.allCases.contains(where: { $0.displayName == chemicalName }) {
+                return .pHIncreaser
+            }
+            if PHDecreaserPreference.allCases.contains(where: { $0.displayName == chemicalName }) {
+                return .pHDecreaser
+            }
+            return nil
+        case "cyanuricAcid":
+            return StabilizerPreference.allCases.contains(where: { $0.displayName == chemicalName }) ? .stabilizer : nil
+        default:
+            return nil
+        }
+    }
+}
+
 // MARK: - TreatmentUrgency
 
 enum TreatmentUrgency: String, CaseIterable, Codable {
     case immediate   = "immediate"   // Critical — act now
     case recommended = "recommended" // Low/High — take action
     case optional    = "optional"    // Slightly off — minor adjustment
+    case advisory    = "advisory"    // Monitor / avoid overcorrection
 
     var displayName: String {
         switch self {
         case .immediate:   return "Act Now"
         case .recommended: return "Recommended"
         case .optional:    return "Optional"
+        case .advisory:    return "Advisory"
         }
     }
 
@@ -132,6 +221,7 @@ enum TreatmentUrgency: String, CaseIterable, Codable {
         case .immediate:   return 0
         case .recommended: return 1
         case .optional:    return 2
+        case .advisory:    return 3
         }
     }
 }

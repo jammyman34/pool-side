@@ -17,24 +17,38 @@ struct InsightsView: View {
             ZStack {
                 PoolColor.appBackground.ignoresSafeArea()
 
-                if tests.isEmpty {
-                    emptyState
-                } else {
-                    ScrollView {
-                        VStack(spacing: 20) {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        heroTitle
+
+                        if tests.isEmpty {
+                            emptyState
+                        } else {
                             testFrequencyCard
                             poolScoreCard
                             chemicalBalanceCard
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .padding(.bottom, 100)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 100)
                 }
             }
             .navigationTitle("Insights")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(PoolColor.appBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
         }
+        .environment(\.colorScheme, .light)
+    }
+
+    private var heroTitle: some View {
+        Text("Insights")
+            .font(.largeTitle)
+            .fontWeight(.bold)
+            .foregroundStyle(PoolColor.primaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Test Frequency Bar Chart
@@ -265,8 +279,13 @@ struct InsightsView: View {
     }
 
     private func poolScoreData() -> [ScorePoint] {
-        Array(last30DaysTests.prefix(20).reversed()).map {
-            ScorePoint(date: $0.date, score: $0.overallScore)
+        let chronologicalTests = Array(last30DaysTests.prefix(20).reversed())
+        return chronologicalTests.enumerated().map { index, test in
+            let previousTest = index > 0 ? chronologicalTests[index - 1] : nil
+            return ScorePoint(
+                date: test.date,
+                score: viewModel.overallScore(for: test, previousTest: previousTest)
+            )
         }
     }
 

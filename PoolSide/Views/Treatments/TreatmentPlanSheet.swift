@@ -369,7 +369,8 @@ struct TreatmentPlanSheet: View {
         - Cyanuric Acid: \(test.cyanuricAcid.formatted()) ppm
         - Calcium Hardness: \(test.calciumHardness.formatted()) ppm
         - Notes: \(test.notes.isEmpty ? "None" : test.notes)
-        - Visual indicators: \(test.visualIndicators.isEmpty ? "None" : test.visualIndicators.joined(separator: ", "))
+        - Positive signs: \(positiveIndicatorList(for: test))
+        - Issues noted: \(issueIndicatorList(for: test))
 
         Proposed Plan:
         \(treatmentLines)
@@ -377,6 +378,22 @@ struct TreatmentPlanSheet: View {
         App Assessment:
         \(test.aiAssessment ?? "None")
         """
+    }
+
+    private func positiveIndicatorList(for test: PoolTest) -> String {
+        let names = test.visualIndicators
+            .compactMap(VisualIndicator.init(rawValue:))
+            .filter { $0.isPositive }
+            .map(\.rawValue)
+        return names.isEmpty ? "None" : names.joined(separator: ", ")
+    }
+
+    private func issueIndicatorList(for test: PoolTest) -> String {
+        let names = test.visualIndicators
+            .compactMap(VisualIndicator.init(rawValue:))
+            .filter { !$0.isPositive }
+            .map(\.rawValue)
+        return names.isEmpty ? "None" : names.joined(separator: ", ")
     }
 
     private static let promptDateFormatter: DateFormatter = {
