@@ -347,11 +347,8 @@ struct ChemistryEngine {
         penalty += visualIndicatorPenalty(for: test)
 
         var score = max(0, min(100, 100 - penalty))
-        if isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) {
-            score = max(score, 70)
-        }
-        if !allowsScoreBelowSixty(test, previousTest: previousTest, recentHistory: [], config: config) {
-            score = max(score, 60)
+        if let floor = scoreFloor(for: test, previousTest: previousTest, recentHistory: [], config: config) {
+            score = max(score, floor)
         }
 
         return Int(score.rounded())
@@ -394,6 +391,10 @@ struct ChemistryEngine {
             penalty *= 0.6
         }
 
+        if shouldReduceSecondaryAdvisoryPenalty(reading: reading, test: test, config: config) {
+            penalty *= 0.5
+        }
+
         return penalty
     }
 
@@ -416,6 +417,9 @@ struct ChemistryEngine {
             let isProblemWater = hasVisibleAlgae(test) || hasCloudyWater(test)
             if test.freeChlorine < minimum * 0.5 { return isProblemWater ? 42 : 30 }
             if test.freeChlorine < maintenanceFloor { return isProblemWater ? 32 : 22 }
+            if test.freeChlorine < minimum {
+                return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 14 : 18
+            }
             if test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound {
                 return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 10 : 14
             }
@@ -529,6 +533,39 @@ struct ChemistryEngine {
             && test.freeChlorine >= fcMinimum - 0.5
     }
 
+    private func isLowChlorineOnlyActiveIssue(_ test: PoolTest, config: PoolConfiguration) -> Bool {
+        let fcMinimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+        return hasPositiveClearWaterSignals(test)
+            && !hasVisibleAlgae(test)
+            && !hasCloudyWater(test)
+            && test.pH >= 7.2
+            && test.pH <= 7.8
+            && test.combinedChlorine <= 0.5
+            && calciumAcceptableRange(surface: config.surfaceType).contains(test.calciumHardness)
+            && test.freeChlorine < fcMinimum
+            && test.freeChlorine >= fcMinimum * 0.5
+    }
+
+    private func shouldReduceSecondaryAdvisoryPenalty(
+        reading: ChemicalReading,
+        test: PoolTest,
+        config: PoolConfiguration
+    ) -> Bool {
+        guard isLowChlorineOnlyActiveIssue(test, config: config) else { return false }
+
+        switch reading.key {
+        case "totalAlkalinity":
+            return test.totalAlkalinity > 140
+                && test.pH <= 7.8
+                && !hasScaling(test)
+        case "cyanuricAcid":
+            return test.cyanuricAcid > 50
+                && test.cyanuricAcid <= 90
+        default:
+            return false
+        }
+    }
+
     private func isStablePoolContext(
         _ test: PoolTest,
         previousTest: PoolTest?,
@@ -546,25 +583,54 @@ struct ChemistryEngine {
             && !hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
     }
 
-    private func allowsScoreBelowSixty(
-        _ test: PoolTest,
+    private func scoreFloor(
+        for test: PoolTest,
         previousTest: PoolTest?,
         recentHistory: [PoolTest],
         config: PoolConfiguration
-    ) -> Bool {
+    ) -> Double? {
         let fcMinimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
-        let majorScalingOrCorrosion = hasScaling(test)
-            || test.calciumHardness < calciumAcceptableRange(surface: config.surfaceType).lowerBound - 50
-            || (test.calciumHardness > calciumAcceptableRange(surface: config.surfaceType).upperBound && test.pH >= 7.8)
+        let calciumAcceptable = calciumAcceptableRange(surface: config.surfaceType).contains(test.calciumHardness)
+        let repeatedFailedChlorine = hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
 
-        return test.freeChlorine < fcMinimum - 0.5
+        if hasVisibleAlgae(test)
+            || hasCloudyWater(test)
             || test.pH < 7.0
             || test.pH > 8.0
             || test.combinedChlorine > 0.5
-            || hasCloudyWater(test)
-            || hasVisibleAlgae(test)
-            || hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
-            || majorScalingOrCorrosion
+            || test.freeChlorine < fcMinimum * 0.5
+            || repeatedFailedChlorine
+            || hasMajorScalingOrCorrosionRisk(test, config: config) {
+            return nil
+        }
+
+        if hasPositiveClearWaterSignals(test)
+            && test.pH >= 7.2
+            && test.pH <= 7.8
+            && test.combinedChlorine <= 0.5
+            && test.freeChlorine >= fcMinimum - 0.5
+            && calciumAcceptable
+            && !repeatedFailedChlorine {
+            return 70
+        }
+
+        if hasPositiveClearWaterSignals(test)
+            && test.pH >= 7.2
+            && test.pH <= 7.8
+            && test.combinedChlorine <= 0.5
+            && calciumAcceptable
+            && test.freeChlorine < fcMinimum - 0.5
+            && test.freeChlorine >= fcMinimum * 0.5 {
+            return 60
+        }
+
+        return nil
+    }
+
+    private func hasMajorScalingOrCorrosionRisk(_ test: PoolTest, config: PoolConfiguration) -> Bool {
+        hasScaling(test)
+            || test.calciumHardness < calciumAcceptableRange(surface: config.surfaceType).lowerBound - 50
+            || (test.calciumHardness > calciumAcceptableRange(surface: config.surfaceType).upperBound && test.pH >= 7.8)
     }
 
     private func calciumAcceptableRange(surface: SurfaceType) -> ClosedRange<Double> {
