@@ -34,7 +34,27 @@ private struct ChemicalFieldProfile {
     let unitSuffix: String
 }
 
+private enum TaylorDropEntryField: String, Identifiable {
+    case freeChlorine
+    case combinedChlorine
+    case totalAlkalinity
+    case calciumHardness
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .freeChlorine: return "Free Chlorine Drops"
+        case .combinedChlorine: return "Combined Chlorine Drops"
+        case .totalAlkalinity: return "Total Alkalinity Drops"
+        case .calciumHardness: return "Calcium Hardness Drops"
+        }
+    }
+}
+
 struct AddTestView: View {
+
+    private static let taylorSampleSizeDefaultsKey = "AddTestView.taylorSampleSize"
 
     /// When non-nil, the view is in "edit" mode for an existing test
     var editingTest: PoolTest? = nil
@@ -44,6 +64,7 @@ struct AddTestView: View {
         self.editingTest = editingTest
         self.startsOnTreatmentPlan = startsOnTreatmentPlan
         _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
+        _taylorSampleSize = State(initialValue: Self.savedTaylorSampleSize)
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -76,6 +97,9 @@ struct AddTestView: View {
     @State private var directEntryField: ChemicalField? = nil
     @State private var directEntryText: String = ""
     @State private var directEntryWantsFocus: Bool = false
+    @State private var directDropEntryField: TaylorDropEntryField? = nil
+    @State private var directDropEntryText: String = ""
+    @State private var directDropEntryWantsFocus: Bool = false
 
     // Post-save
     @State private var savedTest: PoolTest? = nil
@@ -94,6 +118,15 @@ struct AddTestView: View {
     @State private var taylorCCDrops: Int? = nil
     @State private var taylorTADrops: Int? = nil
     @State private var taylorCHDrops: Int? = nil
+
+    private static var savedTaylorSampleSize: TaylorSampleSize {
+        guard let rawValue = UserDefaults.standard.string(forKey: taylorSampleSizeDefaultsKey),
+              let sampleSize = TaylorSampleSize(rawValue: rawValue)
+        else {
+            return .twentyFiveMl
+        }
+        return sampleSize
+    }
 
     private var activeSavedTest: PoolTest? { editingTest ?? savedTest }
 
@@ -507,6 +540,9 @@ struct AddTestView: View {
             .sheet(item: $directEntryField) { field in
                 directNumericEntrySheet(for: field)
             }
+            .sheet(item: $directDropEntryField) { field in
+                directDropEntrySheet(for: field)
+            }
         }
         .onAppear(perform: prefill)
         .onChange(of: testMethod) { _, _ in
@@ -521,6 +557,9 @@ struct AddTestView: View {
             if matchesConfigDefaults {
                 saveTestMethodAsDefault = false
             }
+        }
+        .onChange(of: taylorSampleSize) { _, newValue in
+            saveTaylorSampleSize(newValue)
         }
         .task {
             await showInitialTreatmentPlanIfNeeded()
@@ -636,7 +675,7 @@ struct AddTestView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Edit \(label) value")
                     .accessibilityHint("Opens a numeric entry sheet")
-                    .disabled(isTaylorMode)
+                    .disabled(!allowsDirectEntry(for: field))
                 }
 
                 VStack(spacing: 5) {
@@ -674,10 +713,14 @@ struct AddTestView: View {
     }
 
     private func beginDirectEntry(for field: ChemicalField, value: Double, format: String) {
-        guard !isTaylorMode else { return }
+        guard allowsDirectEntry(for: field) else { return }
         directEntryText = String(format: format, value)
         directEntryWantsFocus = true
         directEntryField = field
+    }
+
+    private func allowsDirectEntry(for field: ChemicalField) -> Bool {
+        !isTaylorMode || field == .pH
     }
 
     private func directNumericEntrySheet(for field: ChemicalField) -> some View {
@@ -756,6 +799,113 @@ struct AddTestView: View {
         .presentationDetents([.height(310)])
         .presentationDragIndicator(.visible)
         .presentationBackground(PoolColor.sand)
+    }
+
+    private func beginDropEntry(for field: TaylorDropEntryField, currentDrops: Int?) {
+        directDropEntryText = currentDrops.map(String.init) ?? "0"
+        directDropEntryWantsFocus = true
+        directDropEntryField = field
+    }
+
+    private func directDropEntrySheet(for field: TaylorDropEntryField) -> some View {
+        let maxDrops = maxDrops(for: field)
+
+        return NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(field.title)
+                        .font(.headline)
+                        .foregroundStyle(PoolColor.primaryText)
+
+                    Text("Enter a whole number from 0 to \(maxDrops).")
+                        .font(.footnote)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                DirectNumericTextField(
+                    placeholder: "0",
+                    text: $directDropEntryText,
+                    keyboardType: .numberPad,
+                    wantsFocus: $directDropEntryWantsFocus
+                )
+                    .frame(height: 62)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(PoolColor.poolTeal.opacity(0.25), lineWidth: 1)
+                    )
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(PoolColor.sand.ignoresSafeArea())
+            .navigationTitle("Enter Drops")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        directDropEntryField = nil
+                    }
+                    .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        applyDropEntry(for: field)
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.poolTeal)
+                    .disabled(parsedDropEntryValue(for: field) == nil)
+                }
+            }
+        }
+        .onAppear {
+            directDropEntryWantsFocus = true
+        }
+        .onDisappear {
+            directDropEntryWantsFocus = false
+        }
+        .presentationDetents([.height(280)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(PoolColor.sand)
+    }
+
+    private func applyDropEntry(for field: TaylorDropEntryField) {
+        guard let drops = parsedDropEntryValue(for: field) else { return }
+
+        switch field {
+        case .freeChlorine:
+            taylorFCDrops = drops
+        case .combinedChlorine:
+            taylorCCDrops = drops
+        case .totalAlkalinity:
+            taylorTADrops = drops
+        case .calciumHardness:
+            taylorCHDrops = drops
+        }
+
+        directDropEntryField = nil
+    }
+
+    private func parsedDropEntryValue(for field: TaylorDropEntryField) -> Int? {
+        let sanitized = directDropEntryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(sanitized) else { return nil }
+        return value.clamped(to: 0...maxDrops(for: field))
+    }
+
+    private func maxDrops(for field: TaylorDropEntryField) -> Int {
+        switch field {
+        case .freeChlorine:
+            return Int((fieldProfile(for: .freeChlorine).range.upperBound / taylorSampleSize.ppmPerDrop).rounded(.down))
+        case .combinedChlorine:
+            return Int((3.0 / taylorSampleSize.ppmPerDrop).rounded(.down))
+        case .totalAlkalinity:
+            return Int((fieldProfile(for: .totalAlkalinity).range.upperBound / 10.0).rounded(.down))
+        case .calciumHardness:
+            return Int((fieldProfile(for: .calciumHardness).range.upperBound / 10.0).rounded(.down))
+        }
     }
 
     private func applyDirectEntry(for field: ChemicalField) {
@@ -903,7 +1053,8 @@ struct AddTestView: View {
         format: String = "%.1f",
         sampleSizePicker: Bool = false,
         dropsPrompt: String? = nil,
-        drops: Binding<Int?>? = nil
+        drops: Binding<Int?>? = nil,
+        dropEntryField: TaylorDropEntryField? = nil
     ) -> some View {
         let displayValue = valuePpm ?? range.lowerBound
         let status = chemicalStatus(for: field, value: displayValue, goodRange: goodRange, fullRange: range)
@@ -974,8 +1125,8 @@ struct AddTestView: View {
                     .foregroundStyle(PoolColor.secondaryText)
                 }
 
-                if let dropsPrompt, let drops {
-                    taylorDropsStepper(prompt: dropsPrompt, drops: drops)
+                if let dropsPrompt, let drops, let dropEntryField {
+                    taylorDropsStepper(prompt: dropsPrompt, drops: drops, entryField: dropEntryField)
                         .padding(.top, 4)
                 }
             }
@@ -994,7 +1145,11 @@ struct AddTestView: View {
         .labelsHidden()
     }
 
-    private func taylorDropsStepper(prompt: String, drops: Binding<Int?>) -> some View {
+    private func taylorDropsStepper(
+        prompt: String,
+        drops: Binding<Int?>,
+        entryField: TaylorDropEntryField
+    ) -> some View {
         HStack(spacing: 12) {
             Text(prompt)
                 .font(.caption)
@@ -1016,11 +1171,21 @@ struct AddTestView: View {
             .opacity(drops.wrappedValue == nil ? 0.35 : 1)
             .accessibilityLabel("Decrease \(prompt)")
 
-            Text(drops.wrappedValue.map(String.init) ?? "—")
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(PoolColor.primaryText)
-                .monospacedDigit()
-                .frame(minWidth: 28)
+            Button {
+                beginDropEntry(for: entryField, currentDrops: drops.wrappedValue)
+            } label: {
+                Text(drops.wrappedValue.map(String.init) ?? "—")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(PoolColor.primaryText)
+                    .monospacedDigit()
+                    .frame(minWidth: 34)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(prompt)")
+            .accessibilityHint("Opens a numeric entry sheet")
 
             Button {
                 drops.wrappedValue = (drops.wrappedValue ?? 0) + 1
@@ -1174,7 +1339,8 @@ struct AddTestView: View {
                     goodRange: profile.goodRange,
                     sampleSizePicker: true,
                     dropsPrompt: "Pink to Clear Drops",
-                    drops: $taylorFCDrops
+                    drops: $taylorFCDrops,
+                    dropEntryField: .freeChlorine
                 )
             } else {
                 chemRow(
@@ -1198,7 +1364,8 @@ struct AddTestView: View {
                 idealRange: "0 – 0.5 ppm",
                 goodRange: 0...0.5,
                 dropsPrompt: "Pink to Clear Drops",
-                drops: $taylorCCDrops
+                drops: $taylorCCDrops,
+                dropEntryField: .combinedChlorine
             )
         case .totalChlorine:
             if usesDropChlorine {
@@ -1238,7 +1405,8 @@ struct AddTestView: View {
                     goodRange: profile.goodRange,
                     format: profile.format,
                     dropsPrompt: "Green to Red Drops",
-                    drops: $taylorTADrops
+                    drops: $taylorTADrops,
+                    dropEntryField: .totalAlkalinity
                 )
             } else {
                 chemRow(
@@ -1264,7 +1432,8 @@ struct AddTestView: View {
                     goodRange: profile.goodRange,
                     format: profile.format,
                     dropsPrompt: "Red to Blue Drops",
-                    drops: $taylorCHDrops
+                    drops: $taylorCHDrops,
+                    dropEntryField: .calciumHardness
                 )
             } else {
                 chemRow(
@@ -1536,6 +1705,7 @@ struct AddTestView: View {
             testMethod = viewModel.poolConfig.testMethod
             liquidDropKitBrand = viewModel.poolConfig.liquidDropKitBrand
             saveTestMethodAsDefault = false
+            taylorSampleSize = Self.savedTaylorSampleSize
             pH = last.pH
             freeChlorine = last.freeChlorine
             totalChlorine = last.totalChlorine
@@ -1548,6 +1718,7 @@ struct AddTestView: View {
             testMethod = viewModel.poolConfig.testMethod
             liquidDropKitBrand = viewModel.poolConfig.liquidDropKitBrand
             saveTestMethodAsDefault = false
+            taylorSampleSize = Self.savedTaylorSampleSize
         }
         normalizeBrandForCurrentMethod()
     }
@@ -1556,6 +1727,10 @@ struct AddTestView: View {
         if !liquidDropKitBrand.isAvailable(for: testMethod) {
             liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
         }
+    }
+
+    private func saveTaylorSampleSize(_ sampleSize: TaylorSampleSize) {
+        UserDefaults.standard.set(sampleSize.rawValue, forKey: Self.taylorSampleSizeDefaultsKey)
     }
 
     @MainActor
