@@ -24,7 +24,7 @@ struct InsightsView: View {
                         if tests.isEmpty {
                             emptyState
                         } else {
-                            testFrequencyCard
+                            testingCadenceCard
                             poolScoreCard
                             chemicalBalanceCard
                         }
@@ -51,40 +51,47 @@ struct InsightsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Test Frequency Bar Chart
+    // MARK: - Testing Cadence
 
-    private var testFrequencyCard: some View {
-        chartCard(title: "Test Frequency", subtitle: "Last 30 days") {
-            let data = testFrequencyData()
-            if data.isEmpty {
+    private var testingCadenceCard: some View {
+        chartCard(title: "Testing Cadence", subtitle: "Last 30 days") {
+            let days = cadenceDays()
+            if last30DaysTests.isEmpty {
                 Text("No test data in the last 30 days")
                     .font(.subheadline)
                     .foregroundStyle(PoolColor.secondaryText)
                     .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
             } else {
-                Chart(data) { item in
-                    BarMark(
-                        x: .value("Week", item.label),
-                        y: .value("Tests", item.count)
-                    )
-                    .foregroundStyle(PoolColor.poolTeal.gradient)
-                    .cornerRadius(4)
-                }
-                .chartYAxis {
-                    AxisMarks(values: .automatic(desiredCount: 4)) {
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                            .foregroundStyle(PoolColor.divider)
-                        AxisValueLabel()
-                            .foregroundStyle(PoolColor.secondaryText)
+                VStack(alignment: .leading, spacing: 16) {
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 10),
+                        spacing: 6
+                    ) {
+                        ForEach(days) { day in
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(cadenceColor(for: day.count))
+                                .frame(height: 22)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(day.isToday ? PoolColor.primaryText.opacity(0.35) : .clear, lineWidth: 1)
+                                )
+                                .accessibilityLabel("\(day.label): \(day.count) test\(day.count == 1 ? "" : "s")")
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        cadenceStat(title: "Last Tested", value: lastTestedText())
+                        cadenceStat(title: "30-Day Tests", value: "\(last30DaysTests.count)")
+                        cadenceStat(title: "Avg Gap", value: averageTestGapText())
+                    }
+
+                    HStack(spacing: 8) {
+                        cadenceLegendSwatch(count: 0, label: "None")
+                        cadenceLegendSwatch(count: 1, label: "1")
+                        cadenceLegendSwatch(count: 2, label: "2")
+                        cadenceLegendSwatch(count: 3, label: "3+")
                     }
                 }
-                .chartXAxis {
-                    AxisMarks {
-                        AxisValueLabel()
-                            .foregroundStyle(PoolColor.secondaryText)
-                    }
-                }
-                .frame(height: 160)
             }
         }
     }
@@ -100,50 +107,55 @@ struct InsightsView: View {
                     .foregroundStyle(PoolColor.secondaryText)
                     .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
             } else {
-                Chart(data) { item in
-                    LineMark(
-                        x: .value("Date", item.date),
-                        y: .value("Score", item.score)
-                    )
-                    .foregroundStyle(PoolColor.poolTeal)
-                    .lineStyle(StrokeStyle(lineWidth: 2.5))
-
-                    AreaMark(
-                        x: .value("Date", item.date),
-                        yStart: .value("Min", 0),
-                        yEnd: .value("Score", item.score)
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [PoolColor.poolTeal.opacity(0.2), PoolColor.poolTeal.opacity(0.01)],
-                            startPoint: .top,
-                            endPoint: .bottom
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Chart(data) { item in
+                        LineMark(
+                            x: .value("Date", item.date),
+                            y: .value("Score", item.score)
                         )
-                    )
+                        .foregroundStyle(PoolColor.poolTeal)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
 
-                    PointMark(
-                        x: .value("Date", item.date),
-                        y: .value("Score", item.score)
-                    )
-                    .foregroundStyle(PoolColor.poolTeal)
-                    .symbolSize(28)
-                }
-                .chartYScale(domain: 0...100)
-                .chartYAxis {
-                    AxisMarks(values: [0, 25, 50, 75, 100]) {
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                            .foregroundStyle(PoolColor.divider)
-                        AxisValueLabel()
-                            .foregroundStyle(PoolColor.secondaryText)
+                        AreaMark(
+                            x: .value("Date", item.date),
+                            yStart: .value("Min", 0),
+                            yEnd: .value("Score", item.score)
+                        )
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [PoolColor.poolTeal.opacity(0.2), PoolColor.poolTeal.opacity(0.01)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+
+                        PointMark(
+                            x: .value("Date", item.date),
+                            y: .value("Score", item.score)
+                        )
+                        .foregroundStyle(PoolColor.poolTeal)
+                        .symbolSize(28)
                     }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day, count: 7)) {
-                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                            .foregroundStyle(PoolColor.secondaryText)
+                    .chartYScale(domain: 0...100)
+                    .chartYAxis {
+                        AxisMarks(values: [0, 25, 50, 75, 100]) {
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(PoolColor.divider)
+                            AxisValueLabel()
+                                .foregroundStyle(PoolColor.secondaryText)
+                        }
                     }
+                    .chartXAxis {
+                        AxisMarks(values: data.map(\.date)) {
+                            AxisTick(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(PoolColor.divider)
+                            AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                                .foregroundStyle(PoolColor.secondaryText)
+                        }
+                    }
+                    .frame(width: scoreChartWidth(for: data.count), height: 160)
                 }
-                .frame(height: 160)
+                .frame(height: 170)
             }
         }
     }
@@ -242,10 +254,12 @@ struct InsightsView: View {
 
     // MARK: - Data Helpers
 
-    struct WeeklyCount: Identifiable {
+    struct CadenceDay: Identifiable {
         let id = UUID()
+        let date: Date
         let label: String
         let count: Int
+        let isToday: Bool
     }
 
     struct ScorePoint: Identifiable {
@@ -261,25 +275,109 @@ struct InsightsView: View {
         let color: Color
     }
 
-    private func testFrequencyData() -> [WeeklyCount] {
+    private func cadenceDays() -> [CadenceDay] {
         let cal = Calendar.current
-        guard let start = cal.date(byAdding: .day, value: -27, to: cal.startOfDay(for: Date())) else {
+        let grouped = Dictionary(grouping: last30DaysTests) { test in
+            cal.startOfDay(for: test.date)
+        }
+        let df = DateFormatter()
+        df.dateFormat = "MMM d"
+
+        let today = cal.startOfDay(for: Date())
+        guard let start = cal.date(byAdding: .day, value: -29, to: today) else {
             return []
         }
-        // 4 weeks
-        return (0..<4).compactMap { weekIndex -> WeeklyCount? in
-            guard let weekStart = cal.date(byAdding: .day, value: weekIndex * 7, to: start),
-                  let weekEnd   = cal.date(byAdding: .day, value: 7, to: weekStart) else { return nil }
 
-            let count = last30DaysTests.filter { $0.date >= weekStart && $0.date < weekEnd }.count
-            let df = DateFormatter()
-            df.dateFormat = "MMM d"
-            return WeeklyCount(label: df.string(from: weekStart), count: count)
+        return (0..<30).compactMap { offset in
+            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return CadenceDay(
+                date: day,
+                label: df.string(from: day),
+                count: grouped[day]?.count ?? 0,
+                isToday: cal.isDateInToday(day)
+            )
         }
     }
 
+    private func cadenceColor(for count: Int) -> Color {
+        switch count {
+        case 0:
+            return PoolColor.divider.opacity(0.45)
+        case 1:
+            return PoolColor.poolTeal.opacity(0.35)
+        case 2:
+            return PoolColor.poolTeal.opacity(0.62)
+        default:
+            return PoolColor.poolTeal
+        }
+    }
+
+    private func cadenceStat(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(PoolColor.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PoolColor.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func cadenceLegendSwatch(count: Int, label: String) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(cadenceColor(for: count))
+                .frame(width: 12, height: 12)
+
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(PoolColor.secondaryText)
+        }
+    }
+
+    private func lastTestedText() -> String {
+        guard let latest = tests.first?.date else { return "No tests" }
+
+        let cal = Calendar.current
+        if cal.isDateInToday(latest) {
+            return "Today"
+        }
+        if cal.isDateInYesterday(latest) {
+            return "Yesterday"
+        }
+
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: latest), to: cal.startOfDay(for: Date())).day ?? 0
+        return "\(max(days, 0))d ago"
+    }
+
+    private func averageTestGapText() -> String {
+        let cal = Calendar.current
+        let uniqueDays = Array(Set(tests.map { cal.startOfDay(for: $0.date) })).sorted()
+        guard uniqueDays.count >= 2 else { return "Need 2" }
+
+        let gaps = zip(uniqueDays.dropFirst(), uniqueDays).compactMap { current, previous in
+            cal.dateComponents([.day], from: previous, to: current).day
+        }
+        guard !gaps.isEmpty else { return "Need 2" }
+
+        let average = Double(gaps.reduce(0, +)) / Double(gaps.count)
+        if average >= 10 {
+            return "\(Int(average.rounded()))d"
+        }
+        return String(format: "%.1fd", average)
+    }
+
     private func poolScoreData() -> [ScorePoint] {
-        let chronologicalTests = Array(last30DaysTests.prefix(20).reversed())
+        let chronologicalTests = tests.sorted { $0.date < $1.date }
         return chronologicalTests.enumerated().map { index, test in
             let previousTest = index > 0 ? chronologicalTests[index - 1] : nil
             return ScorePoint(
@@ -287,6 +385,10 @@ struct InsightsView: View {
                 score: viewModel.overallScore(for: test, previousTest: previousTest)
             )
         }
+    }
+
+    private func scoreChartWidth(for pointCount: Int) -> CGFloat {
+        max(320, CGFloat(pointCount) * 64)
     }
 
     private func chemicalBalanceData() -> [BalanceSegment] {

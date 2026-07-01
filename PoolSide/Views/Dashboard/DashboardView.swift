@@ -140,7 +140,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 Text(greetingLineText)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(PoolColor.secondaryText)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
@@ -175,9 +175,11 @@ struct DashboardView: View {
                         .frame(width: 162, height: 160)
                         .offset(x: 24, y: 0)
                         .allowsHitTesting(false)
+                        .padding(.top, -24)
                 }
-                .frame(height: latestTest == nil ? 164 : 148)
+                .frame(height: latestTest == nil ? 112 : 112)
                 .zIndex(0)
+//                .border(.red, width: 0.5)
 
             if let test = latestTest {
                 HStack(spacing: 5) {
@@ -201,19 +203,19 @@ struct DashboardView: View {
             let score = score(for: test)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Your pool looks")
-                    .font(.system(size: 39, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(PoolColor.primaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
 
                 Text(scoreLabel(score).lowercased() + "!")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(status == .ideal ? PoolColor.poolTeal : status.color)
                     .lineLimit(1)
             }
         } else {
             Text(welcomeMessage)
-                .font(.system(size: 39, weight: .bold, design: .rounded))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
                 .foregroundStyle(PoolColor.primaryText)
                 .lineLimit(3)
                 .minimumScaleFactor(0.86)
@@ -482,7 +484,7 @@ struct DashboardView: View {
         print("[Weather] Config snapshot: location=\(loc), lat=\(latStr), lon=\(lonStr), force=\(force)")
 
         guard let latitude = viewModel.poolConfig.latitude, let longitude = viewModel.poolConfig.longitude else {
-            print("[Weather] Decision: SKIP — coordinates are nil (cannot query WeatherKit)")
+            print("[Weather] Decision: SKIP — coordinates are nil (cannot query weather provider)")
             print("===== WEATHER REFRESH END =====\n")
             return
         }
@@ -625,39 +627,50 @@ private struct SwipeToDeleteRow<Content: View>: View {
             }
 
             content
+                .overlay(alignment: .trailing) {
+                    Color.clear
+                        .frame(width: 56)
+                        .contentShape(Rectangle())
+                        .gesture(horizontalSwipeGesture)
+                        .accessibilityHidden(true)
+                }
                 .offset(x: rowOffset)
-                .gesture(
-                    DragGesture(minimumDistance: 12)
-                        .onChanged { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-
-                            let baseOffset = isOpen ? -deleteWidth : 0
-                            dragOffset = min(0, baseOffset + value.translation.width)
-                        }
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else {
-                                dragOffset = 0
-                                return
-                            }
-
-                            let didFullSwipe = rowOffset < -fullSwipeDistance
-                                || abs(value.predictedEndTranslation.width) > fullSwipeDistance
-
-                            if didFullSwipe {
-                                onDelete()
-                            } else if rowOffset < -(deleteWidth * 0.45) {
-                                onOpen()
-                            } else {
-                                onClose()
-                            }
-
-                            dragOffset = 0
-                        }
-                )
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isOpen)
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
         }
         .clipped()
+    }
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.4 else {
+                    dragOffset = 0
+                    return
+                }
+
+                let baseOffset = isOpen ? -deleteWidth : 0
+                dragOffset = min(0, baseOffset + value.translation.width)
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.4 else {
+                    dragOffset = 0
+                    return
+                }
+
+                let didFullSwipe = rowOffset < -fullSwipeDistance
+                    || abs(value.predictedEndTranslation.width) > fullSwipeDistance
+
+                if didFullSwipe {
+                    onDelete()
+                } else if rowOffset < -(deleteWidth * 0.45) {
+                    onOpen()
+                } else {
+                    onClose()
+                }
+
+                dragOffset = 0
+            }
     }
 }
 

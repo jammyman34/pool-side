@@ -7,17 +7,54 @@ extension LiquidDropKitBrand {
         switch self {
         case .taylorK2006FASDPD:
             return Image(systemName: "drop.fill")
+        case .taylorK2005:
+            return Image(systemName: "drop")
+        case .otherLiquidDropKit:
+            return Image(systemName: "ellipsis.circle")
         case .hachColorQ:
             return Image(systemName: "drop.triangle")
         case .jblProColorimeter:
             return Image(systemName: "drop.circle")
         case .hannaChecker:
-            return Image(systemName: "drop.square")
+            return Image(systemName: "checkmark.square")
+        case .poolLab:
+            return Image(systemName: "testtube.2")
+        case .otherDigitalMeter:
+            return Image(systemName: "ellipsis.circle")
+        }
+    }
+}
+
+private struct ChemicalFieldProfile {
+    let range: ClosedRange<Double>
+    let step: Double
+    let idealRange: String
+    let goodRange: ClosedRange<Double>
+    let format: String
+    let unitSuffix: String
+}
+
+private enum TaylorDropEntryField: String, Identifiable {
+    case freeChlorine
+    case combinedChlorine
+    case totalAlkalinity
+    case calciumHardness
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .freeChlorine: return "Free Chlorine Drops"
+        case .combinedChlorine: return "Combined Chlorine Drops"
+        case .totalAlkalinity: return "Total Alkalinity Drops"
+        case .calciumHardness: return "Calcium Hardness Drops"
         }
     }
 }
 
 struct AddTestView: View {
+
+    private static let taylorSampleSizeDefaultsKey = "AddTestView.taylorSampleSize"
 
     /// When non-nil, the view is in "edit" mode for an existing test
     var editingTest: PoolTest? = nil
@@ -27,6 +64,7 @@ struct AddTestView: View {
         self.editingTest = editingTest
         self.startsOnTreatmentPlan = startsOnTreatmentPlan
         _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
+        _taylorSampleSize = State(initialValue: Self.savedTaylorSampleSize)
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -56,6 +94,12 @@ struct AddTestView: View {
     @State private var chemicalRowFrames: [ChemicalField: CGRect] = [:]
     @State private var dragStartFrame: CGRect = .zero
     @State private var dragTranslation: CGSize = .zero
+    @State private var directEntryField: ChemicalField? = nil
+    @State private var directEntryText: String = ""
+    @State private var directEntryWantsFocus: Bool = false
+    @State private var directDropEntryField: TaylorDropEntryField? = nil
+    @State private var directDropEntryText: String = ""
+    @State private var directDropEntryWantsFocus: Bool = false
 
     // Post-save
     @State private var savedTest: PoolTest? = nil
@@ -74,6 +118,15 @@ struct AddTestView: View {
     @State private var taylorCCDrops: Int? = nil
     @State private var taylorTADrops: Int? = nil
     @State private var taylorCHDrops: Int? = nil
+
+    private static var savedTaylorSampleSize: TaylorSampleSize {
+        guard let rawValue = UserDefaults.standard.string(forKey: taylorSampleSizeDefaultsKey),
+              let sampleSize = TaylorSampleSize(rawValue: rawValue)
+        else {
+            return .twentyFiveMl
+        }
+        return sampleSize
+    }
 
     private var activeSavedTest: PoolTest? { editingTest ?? savedTest }
 
@@ -114,43 +167,163 @@ struct AddTestView: View {
         TestFormSnapshot(
             date: date,
             pH: pH,
-            freeChlorine: isTaylorMode ? taylorFCPpm : freeChlorine,
-            totalChlorine: isTaylorMode ? (taylorTCAvailable ? taylorTCPpm : taylorFCPpm) : totalChlorine,
-            totalAlkalinity: isTaylorMode ? taylorTAPpm : totalAlkalinity,
-            calciumHardness: isTaylorMode ? taylorCHPpm : calciumHardness,
+            freeChlorine: usesDropChlorine ? taylorFCPpm : freeChlorine,
+            totalChlorine: usesDropChlorine ? (taylorTCAvailable ? taylorTCPpm : taylorFCPpm) : totalChlorine,
+            totalAlkalinity: usesDropAlkalinity ? taylorTAPpm : totalAlkalinity,
+            calciumHardness: usesDropHardness ? taylorCHPpm : calciumHardness,
             cyanuricAcid: cyanuricAcid,
             temperatureFahrenheit: includeTemperature ? temperature : nil,
             saltLevel: includeSalt ? saltLevel : nil,
             testMethod: testMethod,
-            liquidDropKitBrand: testMethod == .liquidDropKit ? liquidDropKitBrand : nil,
-            taylorSampleSize: isTaylorMode ? taylorSampleSize : nil,
-            taylorFCDrops: isTaylorMode ? taylorFCDrops : nil,
-            taylorCCDrops: isTaylorMode ? taylorCCDrops : nil,
-            taylorTADrops: isTaylorMode ? taylorTADrops : nil,
-            taylorCHDrops: isTaylorMode ? taylorCHDrops : nil,
+            liquidDropKitBrand: testMethod.usesBrandPicker ? liquidDropKitBrand : nil,
+            taylorSampleSize: usesDropChlorine ? taylorSampleSize : nil,
+            taylorFCDrops: usesDropChlorine ? taylorFCDrops : nil,
+            taylorCCDrops: usesDropChlorine ? taylorCCDrops : nil,
+            taylorTADrops: usesDropAlkalinity ? taylorTADrops : nil,
+            taylorCHDrops: usesDropHardness ? taylorCHDrops : nil,
             notes: notes,
             visualIndicators: orderedVisualIndicators
         )
     }
 
     private var isTaylorMode: Bool {
+        isTaylorK2006Mode
+    }
+
+    private var isTaylorK2006Mode: Bool {
         testMethod == .liquidDropKit && liquidDropKitBrand == .taylorK2006FASDPD
     }
 
+    private var isTaylorK2005Mode: Bool {
+        testMethod == .liquidDropKit && liquidDropKitBrand == .taylorK2005
+    }
+
+    private var usesDropChlorine: Bool {
+        isTaylorK2006Mode
+    }
+
+    private var usesDropAlkalinity: Bool {
+        isTaylorK2006Mode || isTaylorK2005Mode
+    }
+
+    private var usesDropHardness: Bool {
+        isTaylorK2006Mode || isTaylorK2005Mode
+    }
+
     private var visibleChemicalFields: [ChemicalField] {
-        let baseOrder = isTaylorMode ? ChemicalField.taylorDisplayOrder : chemicalOrder
+        let baseOrder = fixedChemicalOrderForSelectedTest ?? (isTaylorMode ? ChemicalField.taylorDisplayOrder : chemicalOrder)
         return baseOrder.filter { field in
             switch field {
             case .temperature:
                 return includeTemperature
             case .saltLevel:
-                return includeSalt
+                return includeSalt && supportsSaltInputForSelectedTest
             case .combinedChlorine:
                 return isTaylorMode
             default:
                 return true
             }
         }
+    }
+
+    private var fixedChemicalOrderForSelectedTest: [ChemicalField]? {
+        if isTaylorK2005Mode || isOtherLiquidKitMode || testMethod == .digitalTester || testMethod == .poolStore {
+            return ChemicalField.listedFormDisplayOrder
+        }
+        return nil
+    }
+
+    private var isOtherLiquidKitMode: Bool {
+        testMethod == .liquidDropKit && liquidDropKitBrand == .otherLiquidDropKit
+    }
+
+    private var supportsSaltInputForSelectedTest: Bool {
+        switch testMethod {
+        case .digitalTester:
+            return liquidDropKitBrand == .hannaChecker
+                || liquidDropKitBrand == .poolLab
+                || liquidDropKitBrand == .otherDigitalMeter
+        case .poolStore:
+            return true
+        case .liquidDropKit:
+            return !isTaylorK2005Mode && !isOtherLiquidKitMode
+        case .testStrips:
+            return true
+        }
+    }
+
+    private func totalChlorineGoodRange(upperBound: Double) -> ClosedRange<Double> {
+        let lower = min(freeChlorine, upperBound)
+        let upper = max(lower, min(upperBound, freeChlorine + 0.5))
+        return lower...upper
+    }
+
+    private func fieldProfile(for field: ChemicalField) -> ChemicalFieldProfile {
+        let engine = ChemistryEngine()
+        let chlorineRange = engine.freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
+        let chlorineLabel = engine.freeChlorineIdealRangeLabel(cyanuricAcid: cyanuricAcid)
+
+        let testStripProfiles: [ChemicalField: ChemicalFieldProfile] = [
+            .pH: .init(range: 6.2...8.4, step: 0.1, idealRange: "7.4 – 7.6", goodRange: 7.2...7.8, format: "%.1f", unitSuffix: ""),
+            .freeChlorine: .init(range: 0...20, step: 0.5, idealRange: chlorineLabel, goodRange: chlorineRange, format: "%.1f", unitSuffix: " ppm"),
+            .combinedChlorine: .init(range: 0...3, step: 0.5, idealRange: "0 – 0.5 ppm", goodRange: 0...0.5, format: "%.1f", unitSuffix: " ppm"),
+            .totalChlorine: .init(range: 0...10, step: 0.5, idealRange: "equal to Free Cl", goodRange: totalChlorineGoodRange(upperBound: 10), format: "%.1f", unitSuffix: " ppm"),
+            .totalAlkalinity: .init(range: 0...240, step: 5, idealRange: "80 – 100 ppm", goodRange: 80...120, format: "%.0f", unitSuffix: " ppm"),
+            .calciumHardness: .init(range: 0...1000, step: 10, idealRange: "250 – 400 ppm", goodRange: 200...500, format: "%.0f", unitSuffix: " ppm"),
+            .cyanuricAcid: .init(range: 0...300, step: 5, idealRange: "30 – 50 ppm", goodRange: 30...50, format: "%.0f", unitSuffix: " ppm"),
+            .temperature: .init(range: 50...105, step: 1, idealRange: "78 – 88°F", goodRange: 78...88, format: "%.0f", unitSuffix: "°F"),
+            .saltLevel: .init(range: 1000...5000, step: 100, idealRange: "2700 – 3400 ppm", goodRange: 2700...3400, format: "%.0f", unitSuffix: " ppm")
+        ]
+
+        let taylorK2005Profiles: [ChemicalField: ChemicalFieldProfile] = [
+            .pH: .init(range: 6.8...8.2, step: 0.1, idealRange: "7.4 – 7.6", goodRange: 7.2...7.8, format: "%.1f", unitSuffix: ""),
+            .freeChlorine: .init(range: 0...5, step: 0.5, idealRange: chlorineLabel, goodRange: chlorineRange, format: "%.1f", unitSuffix: " ppm"),
+            .combinedChlorine: testStripProfiles[.combinedChlorine]!,
+            .totalChlorine: .init(range: 0...5, step: 0.5, idealRange: "equal to Free Cl", goodRange: totalChlorineGoodRange(upperBound: 5), format: "%.1f", unitSuffix: " ppm"),
+            .totalAlkalinity: .init(range: 0...300, step: 10, idealRange: "80 – 100 ppm", goodRange: 80...120, format: "%.0f", unitSuffix: " ppm"),
+            .calciumHardness: testStripProfiles[.calciumHardness]!,
+            .cyanuricAcid: .init(range: 20...100, step: 5, idealRange: "30 – 50 ppm", goodRange: 30...50, format: "%.0f", unitSuffix: " ppm"),
+            .temperature: testStripProfiles[.temperature]!,
+            .saltLevel: testStripProfiles[.saltLevel]!
+        ]
+
+        let digitalProfiles: [ChemicalField: ChemicalFieldProfile] = [
+            .pH: .init(range: 6.5...8.5, step: 0.1, idealRange: "7.4 – 7.6", goodRange: 7.2...7.8, format: "%.1f", unitSuffix: ""),
+            .freeChlorine: .init(range: 0...20, step: 0.5, idealRange: chlorineLabel, goodRange: chlorineRange, format: "%.1f", unitSuffix: " ppm"),
+            .combinedChlorine: testStripProfiles[.combinedChlorine]!,
+            .totalChlorine: .init(range: 0...20, step: 0.5, idealRange: "equal to Free Cl", goodRange: totalChlorineGoodRange(upperBound: 20), format: "%.1f", unitSuffix: " ppm"),
+            .totalAlkalinity: .init(range: 0...300, step: 5, idealRange: "80 – 100 ppm", goodRange: 80...120, format: "%.0f", unitSuffix: " ppm"),
+            .calciumHardness: testStripProfiles[.calciumHardness]!,
+            .cyanuricAcid: .init(range: 0...150, step: 5, idealRange: "30 – 50 ppm", goodRange: 30...50, format: "%.0f", unitSuffix: " ppm"),
+            .temperature: testStripProfiles[.temperature]!,
+            .saltLevel: .init(range: 0...6000, step: 100, idealRange: "2700 – 3400 ppm", goodRange: 2700...3400, format: "%.0f", unitSuffix: " ppm")
+        ]
+
+        let otherLiquidProfiles: [ChemicalField: ChemicalFieldProfile] = [
+            .pH: .init(range: 6.8...8.4, step: 0.1, idealRange: "7.4 – 7.6", goodRange: 7.2...7.8, format: "%.1f", unitSuffix: ""),
+            .freeChlorine: .init(range: 0...10, step: 0.5, idealRange: chlorineLabel, goodRange: chlorineRange, format: "%.1f", unitSuffix: " ppm"),
+            .combinedChlorine: testStripProfiles[.combinedChlorine]!,
+            .totalChlorine: .init(range: 0...10, step: 0.5, idealRange: "equal to Free Cl", goodRange: totalChlorineGoodRange(upperBound: 10), format: "%.1f", unitSuffix: " ppm"),
+            .totalAlkalinity: .init(range: 0...300, step: 5, idealRange: "80 – 100 ppm", goodRange: 80...120, format: "%.0f", unitSuffix: " ppm"),
+            .calciumHardness: testStripProfiles[.calciumHardness]!,
+            .cyanuricAcid: .init(range: 0...150, step: 5, idealRange: "30 – 50 ppm", goodRange: 30...50, format: "%.0f", unitSuffix: " ppm"),
+            .temperature: testStripProfiles[.temperature]!,
+            .saltLevel: testStripProfiles[.saltLevel]!
+        ]
+
+        let activeProfiles: [ChemicalField: ChemicalFieldProfile]
+        switch testMethod {
+        case .liquidDropKit where isTaylorK2005Mode:
+            activeProfiles = taylorK2005Profiles
+        case .liquidDropKit where liquidDropKitBrand == .otherLiquidDropKit:
+            activeProfiles = otherLiquidProfiles
+        case .digitalTester, .poolStore:
+            activeProfiles = digitalProfiles
+        default:
+            activeProfiles = testStripProfiles
+        }
+
+        return activeProfiles[field] ?? testStripProfiles[field]!
     }
 
     private var taylorFCPpm: Double {
@@ -190,7 +363,7 @@ struct AddTestView: View {
     private var matchesConfigDefaults: Bool {
         let config = viewModel.poolConfig
         guard testMethod == config.testMethod else { return false }
-        if testMethod == .liquidDropKit {
+        if testMethod.usesBrandPicker {
             return liquidDropKitBrand == config.liquidDropKitBrand
         }
         return true
@@ -364,9 +537,18 @@ struct AddTestView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(PoolColor.sand)
             }
+            .sheet(item: $directEntryField) { field in
+                directNumericEntrySheet(for: field)
+            }
+            .sheet(item: $directDropEntryField) { field in
+                directDropEntrySheet(for: field)
+            }
         }
         .onAppear(perform: prefill)
         .onChange(of: testMethod) { _, _ in
+            if !liquidDropKitBrand.isAvailable(for: testMethod) {
+                liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
+            }
             if matchesConfigDefaults {
                 saveTestMethodAsDefault = false
             }
@@ -375,6 +557,9 @@ struct AddTestView: View {
             if matchesConfigDefaults {
                 saveTestMethodAsDefault = false
             }
+        }
+        .onChange(of: taylorSampleSize) { _, newValue in
+            saveTaylorSampleSize(newValue)
         }
         .task {
             await showInitialTreatmentPlanIfNeeded()
@@ -476,10 +661,21 @@ struct AddTestView: View {
                         .fontWeight(.medium)
                         .foregroundStyle(PoolColor.primaryText)
                     Spacer()
-                    Text(String(format: format, value.wrappedValue))
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(PoolColor.primaryText)
-                        .monospacedDigit()
+                    Button {
+                        beginDirectEntry(for: field, value: value.wrappedValue, format: format)
+                    } label: {
+                        Text(String(format: format, value.wrappedValue))
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(PoolColor.primaryText)
+                            .monospacedDigit()
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit \(label) value")
+                    .accessibilityHint("Opens a numeric entry sheet")
+                    .disabled(!allowsDirectEntry(for: field))
                 }
 
                 VStack(spacing: 5) {
@@ -514,6 +710,257 @@ struct AddTestView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private func beginDirectEntry(for field: ChemicalField, value: Double, format: String) {
+        guard allowsDirectEntry(for: field) else { return }
+        directEntryText = String(format: format, value)
+        directEntryWantsFocus = true
+        directEntryField = field
+    }
+
+    private func allowsDirectEntry(for field: ChemicalField) -> Bool {
+        field != .combinedChlorine
+    }
+
+    private func directNumericEntrySheet(for field: ChemicalField) -> some View {
+        let config = directEntryConfig(for: field)
+
+        return NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(config.title)
+                        .font(.headline)
+                        .foregroundStyle(PoolColor.primaryText)
+
+                    Text("Enter a value from \(formatRangeValue(config.range.lowerBound, format: config.format)) to \(formatRangeValue(config.range.upperBound, format: config.format))\(config.unitSuffix).")
+                        .font(.footnote)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                DirectNumericTextField(
+                    placeholder: config.placeholder,
+                    text: $directEntryText,
+                    keyboardType: config.keyboardType,
+                    wantsFocus: $directEntryWantsFocus
+                )
+                    .frame(height: 62)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(PoolColor.poolTeal.opacity(0.25), lineWidth: 1)
+                    )
+
+                HStack {
+                    Text("Good \(config.idealRange)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(hex: "57B881"))
+
+                    Spacer()
+
+                    Text("Slider step: \(formatRangeValue(config.step, format: config.format))")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(PoolColor.sand.ignoresSafeArea())
+            .navigationTitle("Enter Value")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        directEntryField = nil
+                    }
+                    .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        applyDirectEntry(for: field)
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.poolTeal)
+                    .disabled(parsedDirectEntryValue(for: field) == nil)
+                }
+            }
+        }
+        .onAppear {
+            directEntryWantsFocus = true
+        }
+        .onDisappear {
+            directEntryWantsFocus = false
+        }
+        .presentationDetents([.height(310)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(PoolColor.sand)
+    }
+
+    private func beginDropEntry(for field: TaylorDropEntryField, currentDrops: Int?) {
+        directDropEntryText = currentDrops.map(String.init) ?? "0"
+        directDropEntryWantsFocus = true
+        directDropEntryField = field
+    }
+
+    private func directDropEntrySheet(for field: TaylorDropEntryField) -> some View {
+        let maxDrops = maxDrops(for: field)
+
+        return NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(field.title)
+                        .font(.headline)
+                        .foregroundStyle(PoolColor.primaryText)
+
+                    Text("Enter a whole number from 0 to \(maxDrops).")
+                        .font(.footnote)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                DirectNumericTextField(
+                    placeholder: "0",
+                    text: $directDropEntryText,
+                    keyboardType: .numberPad,
+                    wantsFocus: $directDropEntryWantsFocus
+                )
+                    .frame(height: 62)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(PoolColor.poolTeal.opacity(0.25), lineWidth: 1)
+                    )
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(PoolColor.sand.ignoresSafeArea())
+            .navigationTitle("Enter Drops")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        directDropEntryField = nil
+                    }
+                    .foregroundStyle(PoolColor.secondaryText)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        applyDropEntry(for: field)
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.poolTeal)
+                    .disabled(parsedDropEntryValue(for: field) == nil)
+                }
+            }
+        }
+        .onAppear {
+            directDropEntryWantsFocus = true
+        }
+        .onDisappear {
+            directDropEntryWantsFocus = false
+        }
+        .presentationDetents([.height(280)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(PoolColor.sand)
+    }
+
+    private func applyDropEntry(for field: TaylorDropEntryField) {
+        guard let drops = parsedDropEntryValue(for: field) else { return }
+
+        switch field {
+        case .freeChlorine:
+            taylorFCDrops = drops
+        case .combinedChlorine:
+            taylorCCDrops = drops
+        case .totalAlkalinity:
+            taylorTADrops = drops
+        case .calciumHardness:
+            taylorCHDrops = drops
+        }
+
+        directDropEntryField = nil
+    }
+
+    private func parsedDropEntryValue(for field: TaylorDropEntryField) -> Int? {
+        let sanitized = directDropEntryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(sanitized) else { return nil }
+        return value.clamped(to: 0...maxDrops(for: field))
+    }
+
+    private func maxDrops(for field: TaylorDropEntryField) -> Int {
+        switch field {
+        case .freeChlorine:
+            return Int((fieldProfile(for: .freeChlorine).range.upperBound / taylorSampleSize.ppmPerDrop).rounded(.down))
+        case .combinedChlorine:
+            return Int((3.0 / taylorSampleSize.ppmPerDrop).rounded(.down))
+        case .totalAlkalinity:
+            return Int((fieldProfile(for: .totalAlkalinity).range.upperBound / 10.0).rounded(.down))
+        case .calciumHardness:
+            return Int((fieldProfile(for: .calciumHardness).range.upperBound / 10.0).rounded(.down))
+        }
+    }
+
+    private func applyDirectEntry(for field: ChemicalField) {
+        guard let value = parsedDirectEntryValue(for: field) else { return }
+        chemicalBinding(for: field).wrappedValue = value
+        directEntryField = nil
+    }
+
+    private func parsedDirectEntryValue(for field: ChemicalField) -> Double? {
+        let sanitized = directEntryText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+
+        guard let value = Double(sanitized) else { return nil }
+        let config = directEntryConfig(for: field)
+        let clamped = value.clamped(to: config.range)
+        return ((clamped / config.step).rounded() * config.step).rounded(toPlaces: config.decimalPlaces)
+    }
+
+    private func chemicalBinding(for field: ChemicalField) -> Binding<Double> {
+        switch field {
+        case .pH:
+            return $pH
+        case .freeChlorine:
+            return $freeChlorine
+        case .totalChlorine:
+            return $totalChlorine
+        case .totalAlkalinity:
+            return $totalAlkalinity
+        case .calciumHardness:
+            return $calciumHardness
+        case .cyanuricAcid:
+            return $cyanuricAcid
+        case .temperature:
+            return $temperature
+        case .saltLevel:
+            return $saltLevel
+        case .combinedChlorine:
+            return Binding(
+                get: { combinedChlorineValue },
+                set: { _ in }
+            )
+        }
+    }
+
+    private func directEntryConfig(for field: ChemicalField) -> DirectNumericEntryConfig {
+        let profile = fieldProfile(for: field)
+        return DirectNumericEntryConfig(
+            title: field.label,
+            range: profile.range,
+            step: profile.step,
+            format: profile.format,
+            idealRange: profile.idealRange,
+            unitSuffix: profile.unitSuffix
+        )
     }
 
     private func chemicalDragPreview(
@@ -606,7 +1053,8 @@ struct AddTestView: View {
         format: String = "%.1f",
         sampleSizePicker: Bool = false,
         dropsPrompt: String? = nil,
-        drops: Binding<Int?>? = nil
+        drops: Binding<Int?>? = nil,
+        dropEntryField: TaylorDropEntryField? = nil
     ) -> some View {
         let displayValue = valuePpm ?? range.lowerBound
         let status = chemicalStatus(for: field, value: displayValue, goodRange: goodRange, fullRange: range)
@@ -677,8 +1125,8 @@ struct AddTestView: View {
                     .foregroundStyle(PoolColor.secondaryText)
                 }
 
-                if let dropsPrompt, let drops {
-                    taylorDropsStepper(prompt: dropsPrompt, drops: drops)
+                if let dropsPrompt, let drops, let dropEntryField {
+                    taylorDropsStepper(prompt: dropsPrompt, drops: drops, entryField: dropEntryField)
                         .padding(.top, 4)
                 }
             }
@@ -697,7 +1145,11 @@ struct AddTestView: View {
         .labelsHidden()
     }
 
-    private func taylorDropsStepper(prompt: String, drops: Binding<Int?>) -> some View {
+    private func taylorDropsStepper(
+        prompt: String,
+        drops: Binding<Int?>,
+        entryField: TaylorDropEntryField
+    ) -> some View {
         HStack(spacing: 12) {
             Text(prompt)
                 .font(.caption)
@@ -719,11 +1171,21 @@ struct AddTestView: View {
             .opacity(drops.wrappedValue == nil ? 0.35 : 1)
             .accessibilityLabel("Decrease \(prompt)")
 
-            Text(drops.wrappedValue.map(String.init) ?? "—")
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(PoolColor.primaryText)
-                .monospacedDigit()
-                .frame(minWidth: 28)
+            Button {
+                beginDropEntry(for: entryField, currentDrops: drops.wrappedValue)
+            } label: {
+                Text(drops.wrappedValue.map(String.init) ?? "—")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(PoolColor.primaryText)
+                    .monospacedDigit()
+                    .frame(minWidth: 34)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(prompt)")
+            .accessibilityHint("Opens a numeric entry sheet")
 
             Button {
                 drops.wrappedValue = (drops.wrappedValue ?? 0) + 1
@@ -809,113 +1271,41 @@ struct AddTestView: View {
 
     @ViewBuilder
     private func chemicalDragPreview(for field: ChemicalField, width: CGFloat) -> some View {
+        let profile = fieldProfile(for: field)
+        let value: Double = {
+            switch field {
+            case .pH:
+                return pH
+            case .freeChlorine:
+                return usesDropChlorine ? taylorFCPpm : freeChlorine
+            case .combinedChlorine:
+                return usesDropChlorine ? taylorCCPpm : combinedChlorineValue
+            case .totalChlorine:
+                return usesDropChlorine ? taylorTCPpm : totalChlorine
+            case .totalAlkalinity:
+                return usesDropAlkalinity ? taylorTAPpm : totalAlkalinity
+            case .calciumHardness:
+                return usesDropHardness ? taylorCHPpm : calciumHardness
+            case .cyanuricAcid:
+                return cyanuricAcid
+            case .temperature:
+                return temperature
+            case .saltLevel:
+                return saltLevel
+            }
+        }()
+
         switch field {
-        case .pH:
+        case .pH, .freeChlorine, .combinedChlorine, .totalChlorine, .totalAlkalinity, .calciumHardness, .cyanuricAcid, .temperature, .saltLevel:
             chemicalDragPreview(
                 field: field,
-                label: "pH",
-                value: pH,
-                range: 6.2...8.4,
-                idealRange: "7.4 – 7.6",
-                goodRange: 7.2...7.8,
-                format: "%.1f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: pH, goodRange: 7.2...7.8, fullRange: 6.2...8.4)),
-                width: width
-            )
-        case .freeChlorine:
-            let chlorineRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
-            chemicalDragPreview(
-                field: field,
-                label: "Free Chlorine (ppm)",
-                value: freeChlorine,
-                range: 0...10,
-                idealRange: ChemistryEngine().freeChlorineIdealRangeLabel(cyanuricAcid: cyanuricAcid),
-                goodRange: chlorineRange,
-                meterColor: meterColor(for: chemicalStatus(for: field, value: freeChlorine, goodRange: chlorineRange, fullRange: 0...10)),
-                width: width
-            )
-        case .combinedChlorine:
-            chemicalDragPreview(
-                field: field,
-                label: "Combined Chlorine (ppm)",
-                value: isTaylorMode ? taylorCCPpm : combinedChlorineValue,
-                range: 0...3,
-                idealRange: "0 – 0.5 ppm",
-                goodRange: 0...0.5,
-                format: "%.1f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: isTaylorMode ? taylorCCPpm : combinedChlorineValue, goodRange: 0...0.5, fullRange: 0...3)),
-                width: width
-            )
-        case .totalChlorine:
-            let goodRange = freeChlorine...min(10, freeChlorine + 0.5)
-            chemicalDragPreview(
-                field: field,
-                label: "Total Chlorine (ppm)",
-                value: totalChlorine,
-                range: 0...10,
-                idealRange: "equal to Free Cl",
-                goodRange: goodRange,
-                meterColor: meterColor(for: chemicalStatus(for: field, value: totalChlorine, goodRange: goodRange, fullRange: 0...10)),
-                width: width
-            )
-        case .totalAlkalinity:
-            chemicalDragPreview(
-                field: field,
-                label: "Total Alkalinity (ppm)",
-                value: totalAlkalinity,
-                range: 0...240,
-                idealRange: "80 – 100 ppm",
-                goodRange: 80...120,
-                format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: totalAlkalinity, goodRange: 80...120, fullRange: 0...240)),
-                width: width
-            )
-        case .calciumHardness:
-            chemicalDragPreview(
-                field: field,
-                label: "Total Hardness (ppm)",
-                value: calciumHardness,
-                range: 0...1000,
-                idealRange: "250 – 400 ppm",
-                goodRange: 200...500,
-                format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: calciumHardness, goodRange: 200...500, fullRange: 0...1000)),
-                width: width
-            )
-        case .cyanuricAcid:
-            chemicalDragPreview(
-                field: field,
-                label: "Cyanuric Acid (ppm)",
-                value: cyanuricAcid,
-                range: 0...300,
-                idealRange: "30 – 50 ppm",
-                goodRange: 30...50,
-                format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: cyanuricAcid, goodRange: 30...50, fullRange: 0...300)),
-                width: width
-            )
-        case .temperature:
-            chemicalDragPreview(
-                field: field,
-                label: "Temperature (°F)",
-                value: temperature,
-                range: 50...105,
-                idealRange: "78 – 88°F",
-                goodRange: 78...88,
-                format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: temperature, goodRange: 78...88, fullRange: 50...105)),
-                width: width
-            )
-        case .saltLevel:
-            chemicalDragPreview(
-                field: field,
-                label: "Salt Level (ppm)",
-                value: saltLevel,
-                range: 1000...5000,
-                idealRange: "2700 – 3400 ppm",
-                goodRange: 2700...3400,
-                format: "%.0f",
-                meterColor: meterColor(for: chemicalStatus(for: field, value: saltLevel, goodRange: 2700...3400, fullRange: 1000...5000)),
+                label: field == .pH ? "pH" : "\(field.label) \(field == .temperature ? "(°F)" : "(ppm)")",
+                value: value,
+                range: profile.range,
+                idealRange: profile.idealRange,
+                goodRange: profile.goodRange,
+                format: profile.format,
+                meterColor: meterColor(for: chemicalStatus(for: field, value: value, goodRange: profile.goodRange, fullRange: profile.range)),
                 width: width
             )
         }
@@ -923,45 +1313,46 @@ struct AddTestView: View {
 
     @ViewBuilder
     private func chemicalRow(for field: ChemicalField) -> some View {
+        let profile = fieldProfile(for: field)
         switch field {
         case .pH:
             chemRow(
                 field: field,
-                icon: "pH",
+                icon: field.icon,
                 label: "pH",
                 value: $pH,
-                range: 6.2...8.4,
-                step: 0.1,
-                idealRange: "7.4 – 7.6",
-                goodRange: 7.2...7.8,
-                format: "%.1f",
+                range: profile.range,
+                step: profile.step,
+                idealRange: profile.idealRange,
+                goodRange: profile.goodRange,
+                format: profile.format,
                 showUnit: false
             )
         case .freeChlorine:
-            let chlorineRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
-            let idealLabel = ChemistryEngine().freeChlorineIdealRangeLabel(cyanuricAcid: cyanuricAcid)
-            if isTaylorMode {
+            if usesDropChlorine {
                 taylorChemRow(
                     field: field,
                     label: "Free Chlorine (ppm)",
                     valuePpm: taylorFCDrops == nil ? nil : taylorFCPpm,
-                    range: 0...10,
-                    idealRange: idealLabel,
-                    goodRange: chlorineRange,
+                    range: profile.range,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
                     sampleSizePicker: true,
                     dropsPrompt: "Pink to Clear Drops",
-                    drops: $taylorFCDrops
+                    drops: $taylorFCDrops,
+                    dropEntryField: .freeChlorine
                 )
             } else {
                 chemRow(
                     field: field,
-                    icon: "Free Chlorine",
+                    icon: field.icon,
                     label: "Free Chlorine (ppm)",
                     value: $freeChlorine,
-                    range: 0...10,
-                    step: 0.5,
-                    idealRange: idealLabel,
-                    goodRange: chlorineRange
+                    range: profile.range,
+                    step: profile.step,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
+                    format: profile.format
                 )
             }
         case .combinedChlorine:
@@ -973,118 +1364,126 @@ struct AddTestView: View {
                 idealRange: "0 – 0.5 ppm",
                 goodRange: 0...0.5,
                 dropsPrompt: "Pink to Clear Drops",
-                drops: $taylorCCDrops
+                drops: $taylorCCDrops,
+                dropEntryField: .combinedChlorine
             )
         case .totalChlorine:
-            if isTaylorMode {
+            if usesDropChlorine {
                 taylorChemRow(
                     field: field,
                     label: "Total Chlorine (ppm)",
                     valuePpm: taylorTCAvailable ? taylorTCPpm : nil,
-                    range: 0...10,
+                    range: profile.range,
                     idealRange: "FC + CC",
-                    goodRange: taylorFCPpm...min(10, taylorFCPpm + 0.5)
+                    goodRange: {
+                        let lower = min(taylorFCPpm, profile.range.upperBound)
+                        let upper = max(lower, min(profile.range.upperBound, taylorFCPpm + 0.5))
+                        return lower...upper
+                    }()
                 )
             } else {
                 chemRow(
                     field: field,
-                    icon: "Total Chlorine",
+                    icon: field.icon,
                     label: "Total Chlorine (ppm)",
                     value: $totalChlorine,
-                    range: 0...10,
-                    step: 0.5,
-                    idealRange: "equal to Free Cl",
-                    goodRange: freeChlorine...min(10, freeChlorine + 0.5)
+                    range: profile.range,
+                    step: profile.step,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
+                    format: profile.format
                 )
             }
         case .totalAlkalinity:
-            if isTaylorMode {
+            if usesDropAlkalinity {
                 taylorChemRow(
                     field: field,
                     label: "Total Alkalinity (ppm)",
                     valuePpm: taylorTADrops == nil ? nil : taylorTAPpm,
-                    range: 0...240,
-                    idealRange: "80 – 100 ppm",
-                    goodRange: 80...120,
-                    format: "%.0f",
+                    range: profile.range,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
+                    format: profile.format,
                     dropsPrompt: "Green to Red Drops",
-                    drops: $taylorTADrops
+                    drops: $taylorTADrops,
+                    dropEntryField: .totalAlkalinity
                 )
             } else {
                 chemRow(
                     field: field,
-                    icon: "Alkalinity",
+                    icon: field.icon,
                     label: "Total Alkalinity (ppm)",
                     value: $totalAlkalinity,
-                    range: 0...240,
-                    step: 5,
-                    idealRange: "80 – 100 ppm",
-                    goodRange: 80...120,
-                    format: "%.0f"
+                    range: profile.range,
+                    step: profile.step,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
+                    format: profile.format
                 )
             }
         case .calciumHardness:
-            if isTaylorMode {
+            if usesDropHardness {
                 taylorChemRow(
                     field: field,
                     label: "Total Hardness (ppm)",
                     valuePpm: taylorCHDrops == nil ? nil : taylorCHPpm,
-                    range: 0...1000,
-                    idealRange: "250 – 400 ppm",
-                    goodRange: 200...500,
-                    format: "%.0f",
+                    range: profile.range,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
+                    format: profile.format,
                     dropsPrompt: "Red to Blue Drops",
-                    drops: $taylorCHDrops
+                    drops: $taylorCHDrops,
+                    dropEntryField: .calciumHardness
                 )
             } else {
                 chemRow(
                     field: field,
-                    icon: "Hardness",
+                    icon: field.icon,
                     label: "Total Hardness (ppm)",
                     value: $calciumHardness,
-                    range: 0...1000,
-                    step: 10,
-                    idealRange: "250 – 400 ppm",
-                    goodRange: 200...500,
-                    format: "%.0f"
+                    range: profile.range,
+                    step: profile.step,
+                    idealRange: profile.idealRange,
+                    goodRange: profile.goodRange,
+                    format: profile.format
                 )
             }
         case .cyanuricAcid:
             chemRow(
                 field: field,
-                icon: "CYA",
+                icon: field.icon,
                 label: "Cyanuric Acid (ppm)",
                 value: $cyanuricAcid,
-                range: 0...300,
-                step: 5,
-                idealRange: "30 – 50 ppm",
-                goodRange: 30...50,
-                format: "%.0f"
+                range: profile.range,
+                step: profile.step,
+                idealRange: profile.idealRange,
+                goodRange: profile.goodRange,
+                format: profile.format
             )
         case .temperature:
             chemRow(
                 field: field,
-                icon: "pH",
+                icon: field.icon,
                 label: "Temperature (°F)",
                 value: $temperature,
-                range: 50...105,
-                step: 1,
-                idealRange: "78 – 88°F",
-                goodRange: 78...88,
-                format: "%.0f",
+                range: profile.range,
+                step: profile.step,
+                idealRange: profile.idealRange,
+                goodRange: profile.goodRange,
+                format: profile.format,
                 showUnit: false
             )
         case .saltLevel:
             chemRow(
                 field: field,
-                icon: "Free Chlorine",
+                icon: field.icon,
                 label: "Salt Level (ppm)",
                 value: $saltLevel,
-                range: 1000...5000,
-                step: 100,
-                idealRange: "2700 – 3400 ppm",
-                goodRange: 2700...3400,
-                format: "%.0f"
+                range: profile.range,
+                step: profile.step,
+                idealRange: profile.idealRange,
+                goodRange: profile.goodRange,
+                format: profile.format
             )
         }
     }
@@ -1103,9 +1502,7 @@ struct AddTestView: View {
 
         switch field {
         case .pH:
-            // UI strip-aligned zones: full 6.2-8.4, good 7.2-7.8, ideal 7.4-7.6
-            // Color mapping via rangedStatus using the provided goodRange/fullRange from caller
-            return rangedStatus(value: value, goodRange: 7.2...7.8, fullRange: 6.2...8.4)
+            return rangedStatus(value: value, goodRange: goodRange, fullRange: fullRange)
 
         case .freeChlorine:
             // Keep dynamic by CYA, but color is still driven by engine which already adapts.
@@ -1116,22 +1513,16 @@ struct AddTestView: View {
             return rangedStatus(value: value, goodRange: 0...0.5, fullRange: 0...3)
 
         case .totalChlorine:
-            // UI good band: FC ... FC + 0.5 (ideal when equal to FC). Do not show shock messaging here.
-            let fc = freeChlorine
-            let tcGood = fc...min(10, fc + 0.5)
-            return rangedStatus(value: value, goodRange: tcGood, fullRange: 0...10)
+            return rangedStatus(value: value, goodRange: goodRange, fullRange: fullRange)
 
         case .totalAlkalinity:
-            // UI: full 0-240, good 80-120, ideal 80-100
-            return rangedStatus(value: value, goodRange: 80...120, fullRange: 0...240)
+            return rangedStatus(value: value, goodRange: goodRange, fullRange: fullRange)
 
         case .calciumHardness:
-            // UI (Total Hardness): full 0-1000, good 200-500, ideal 250-400
-            return rangedStatus(value: value, goodRange: 200...500, fullRange: 0...1000)
+            return rangedStatus(value: value, goodRange: goodRange, fullRange: fullRange)
 
         case .cyanuricAcid:
-            // UI: full 0-300, good 30-50
-            return rangedStatus(value: value, goodRange: 30...50, fullRange: 0...300)
+            return rangedStatus(value: value, goodRange: goodRange, fullRange: fullRange)
 
         case .saltLevel:
             // Keep existing engine-based status
@@ -1314,6 +1705,7 @@ struct AddTestView: View {
             testMethod = viewModel.poolConfig.testMethod
             liquidDropKitBrand = viewModel.poolConfig.liquidDropKitBrand
             saveTestMethodAsDefault = false
+            taylorSampleSize = Self.savedTaylorSampleSize
             pH = last.pH
             freeChlorine = last.freeChlorine
             totalChlorine = last.totalChlorine
@@ -1326,7 +1718,19 @@ struct AddTestView: View {
             testMethod = viewModel.poolConfig.testMethod
             liquidDropKitBrand = viewModel.poolConfig.liquidDropKitBrand
             saveTestMethodAsDefault = false
+            taylorSampleSize = Self.savedTaylorSampleSize
         }
+        normalizeBrandForCurrentMethod()
+    }
+
+    private func normalizeBrandForCurrentMethod() {
+        if !liquidDropKitBrand.isAvailable(for: testMethod) {
+            liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
+        }
+    }
+
+    private func saveTaylorSampleSize(_ sampleSize: TaylorSampleSize) {
+        UserDefaults.standard.set(sampleSize.rawValue, forKey: Self.taylorSampleSizeDefaultsKey)
     }
 
     @MainActor
@@ -1356,16 +1760,17 @@ struct AddTestView: View {
         let shouldReplaceCompletedPlan = activeSavedTest != nil && hasFormChanges
         let test: PoolTest
 
-        let persistedBrand: LiquidDropKitBrand? = testMethod == .liquidDropKit ? liquidDropKitBrand : nil
+        normalizeBrandForCurrentMethod()
+        let persistedBrand: LiquidDropKitBrand? = testMethod.usesBrandPicker ? liquidDropKitBrand : nil
 
-        // In Taylor mode the user's drops are the source of truth — derive ppm from them.
-        let resolvedFC = isTaylorMode ? taylorFCPpm : freeChlorine
+        // In drop-test rows, the user's drops are the source of truth — derive ppm from them.
+        let resolvedFC = usesDropChlorine ? taylorFCPpm : freeChlorine
         let resolvedTC: Double = {
-            guard isTaylorMode else { return totalChlorine }
+            guard usesDropChlorine else { return totalChlorine }
             return taylorTCAvailable ? taylorTCPpm : taylorFCPpm
         }()
-        let resolvedTA = isTaylorMode ? taylorTAPpm : totalAlkalinity
-        let resolvedCH = isTaylorMode ? taylorCHPpm : calciumHardness
+        let resolvedTA = usesDropAlkalinity ? taylorTAPpm : totalAlkalinity
+        let resolvedCH = usesDropHardness ? taylorCHPpm : calciumHardness
 
         if let existing = activeSavedTest {
             // Update existing
@@ -1380,11 +1785,11 @@ struct AddTestView: View {
             existing.saltLevel = includeSalt ? saltLevel : nil
             existing.testMethod = testMethod
             existing.liquidDropKitBrand = persistedBrand
-            existing.taylorSampleSize = isTaylorMode ? taylorSampleSize : nil
-            existing.taylorFCDrops = isTaylorMode ? taylorFCDrops : nil
-            existing.taylorCCDrops = isTaylorMode ? taylorCCDrops : nil
-            existing.taylorTADrops = isTaylorMode ? taylorTADrops : nil
-            existing.taylorCHDrops = isTaylorMode ? taylorCHDrops : nil
+            existing.taylorSampleSize = usesDropChlorine ? taylorSampleSize : nil
+            existing.taylorFCDrops = usesDropChlorine ? taylorFCDrops : nil
+            existing.taylorCCDrops = usesDropChlorine ? taylorCCDrops : nil
+            existing.taylorTADrops = usesDropAlkalinity ? taylorTADrops : nil
+            existing.taylorCHDrops = usesDropHardness ? taylorCHDrops : nil
             existing.notes = notes
             existing.visualIndicators = orderedVisualIndicators
             test = existing
@@ -1404,12 +1809,12 @@ struct AddTestView: View {
                 notes: notes,
                 visualIndicators: orderedVisualIndicators
             )
-            if isTaylorMode {
+            if usesDropChlorine || usesDropAlkalinity || usesDropHardness {
                 test.taylorSampleSize = taylorSampleSize
-                test.taylorFCDrops = taylorFCDrops
-                test.taylorCCDrops = taylorCCDrops
-                test.taylorTADrops = taylorTADrops
-                test.taylorCHDrops = taylorCHDrops
+                test.taylorFCDrops = usesDropChlorine ? taylorFCDrops : nil
+                test.taylorCCDrops = usesDropChlorine ? taylorCCDrops : nil
+                test.taylorTADrops = usesDropAlkalinity ? taylorTADrops : nil
+                test.taylorCHDrops = usesDropHardness ? taylorCHDrops : nil
             }
             modelContext.insert(test)
         }
@@ -1421,7 +1826,7 @@ struct AddTestView: View {
                 updatedConfig.testMethod = testMethod
                 changed = true
             }
-            if testMethod == .liquidDropKit, updatedConfig.liquidDropKitBrand != liquidDropKitBrand {
+            if testMethod.usesBrandPicker, updatedConfig.liquidDropKitBrand != liquidDropKitBrand {
                 updatedConfig.liquidDropKitBrand = liquidDropKitBrand
                 changed = true
             }
@@ -1481,6 +1886,81 @@ private struct TestFormSnapshot: Equatable {
     let visualIndicators: [String]
 }
 
+private struct DirectNumericEntryConfig {
+    let title: String
+    let range: ClosedRange<Double>
+    let step: Double
+    let format: String
+    let idealRange: String
+    var unitSuffix: String = ""
+
+    var placeholder: String {
+        format == "%.0f" ? "300" : "7.4"
+    }
+
+    var decimalPlaces: Int {
+        format == "%.0f" ? 0 : 1
+    }
+
+    var keyboardType: UIKeyboardType {
+        decimalPlaces == 0 ? .numberPad : .decimalPad
+    }
+}
+
+private struct DirectNumericTextField: UIViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let keyboardType: UIKeyboardType
+    @Binding var wantsFocus: Bool
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.placeholder = placeholder
+        textField.keyboardType = keyboardType
+        textField.autocorrectionType = .no
+        textField.autocapitalizationType = .none
+        textField.textAlignment = .left
+        textField.font = UIFont.systemFont(ofSize: 34, weight: .bold)
+        textField.textColor = UIColor(PoolColor.primaryText)
+        textField.tintColor = UIColor(PoolColor.poolTeal)
+        textField.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange(_:)), for: .editingChanged)
+        return textField
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+        uiView.placeholder = placeholder
+        uiView.keyboardType = keyboardType
+
+        guard wantsFocus, !context.coordinator.didSelectInitialText else { return }
+        context.coordinator.didSelectInitialText = true
+        DispatchQueue.main.async {
+            uiView.becomeFirstResponder()
+            uiView.selectAll(nil)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        @Binding var text: String
+        var didSelectInitialText = false
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        @objc func textDidChange(_ sender: UITextField) {
+            text = sender.text ?? ""
+        }
+    }
+}
+
 private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
     case pH
     case freeChlorine
@@ -1510,6 +1990,17 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
     static let taylorDisplayOrder: [ChemicalField] = [
         .freeChlorine,
         .combinedChlorine,
+        .totalChlorine,
+        .pH,
+        .totalAlkalinity,
+        .calciumHardness,
+        .cyanuricAcid,
+        .temperature,
+        .saltLevel
+    ]
+
+    static let listedFormDisplayOrder: [ChemicalField] = [
+        .freeChlorine,
         .totalChlorine,
         .pH,
         .totalAlkalinity,
@@ -1840,12 +2331,12 @@ struct TestingMethodCard: View {
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Testing Method")
+                Text(summaryTitle)
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundStyle(PoolColor.primaryText)
 
-                Text(testMethod.displayName)
+                Text(summarySubtitle)
                     .font(.headline)
                     .fontWeight(.bold)
                     .foregroundStyle(PoolColor.primaryText)
@@ -1856,6 +2347,20 @@ struct TestingMethodCard: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(PoolColor.poolTeal)
         }
+    }
+
+    private var summaryTitle: String {
+        if testMethod.usesBrandPicker {
+            return "Testing Method: \(testMethod.displayName)"
+        }
+        return "Testing Method"
+    }
+
+    private var summarySubtitle: String {
+        if testMethod.usesBrandPicker {
+            return liquidDropKitBrand.displayName
+        }
+        return testMethod.displayName
     }
 
     private var editorView: some View {
@@ -1869,7 +2374,8 @@ struct TestingMethodCard: View {
                 HStack {
                     Picker("Testing Method", selection: $testMethod) {
                         ForEach(TestMethod.allCases) { method in
-                            Text(method.displayName).tag(method)
+                            Label(method.displayName, systemImage: method.systemImageName)
+                                .tag(method)
                         }
                     }
                     .pickerStyle(.menu)
@@ -1889,7 +2395,7 @@ struct TestingMethodCard: View {
                 }
             }
 
-            if testMethod == .liquidDropKit {
+            if testMethod == .liquidDropKit || testMethod == .digitalTester {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Brand")
                         .font(.subheadline)
@@ -1897,11 +2403,12 @@ struct TestingMethodCard: View {
                         .foregroundStyle(PoolColor.primaryText)
 
                     HStack {
-                        Picker("Liquid Drop Kit Brand", selection: $liquidDropKitBrand) {
-                            ForEach(LiquidDropKitBrand.allCases) { brand in
-                                HStack {
+                        Picker("\(testMethod.displayName) Brand", selection: $liquidDropKitBrand) {
+                            ForEach(LiquidDropKitBrand.options(for: testMethod)) { brand in
+                                Label {
+                                    Text(brand.displayName)
+                                } icon: {
                                     brand.icon
-                                    Text(brand.rawValue)
                                 }
                                 .tag(brand)
                             }
@@ -1920,6 +2427,11 @@ struct TestingMethodCard: View {
                 .foregroundStyle(PoolColor.primaryText)
                 .tint(PoolColor.poolTeal)
         }
+        .onChange(of: testMethod) { _, newValue in
+            if !liquidDropKitBrand.isAvailable(for: newValue) {
+                liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: newValue)
+            }
+        }
     }
 }
 
@@ -1927,22 +2439,6 @@ private struct TestingMethodSheetHeightKey: PreferenceKey {
     static var defaultValue: CGFloat { 0 }
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
-    }
-}
-
-// Extension for TestMethod to provide systemImageName for TestingMethodCard summary view
-fileprivate extension TestMethod {
-    var systemImageName: String {
-        switch self {
-        case .testStrips:
-            return "testtube.2"
-        case .liquidDropKit:
-            return "drop.fill"
-        case .digitalTester:
-            return "wave.3.forward"
-        case .poolStore:
-            return "building.2"
-        }
     }
 }
 

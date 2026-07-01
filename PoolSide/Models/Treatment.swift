@@ -176,6 +176,19 @@ enum ChemicalProductCategory: String, CaseIterable, Identifiable {
 }
 
 extension Treatment {
+    var isWatchlistItem: Bool {
+        urgency == .advisory
+    }
+
+    var isAcidTreatment: Bool {
+        let name = chemicalName.lowercased()
+        return name.contains("muriatic acid")
+            || name.contains("dry acid")
+            || name.contains("ph decreaser")
+            || (targetParameter == "pH" && expectedDelta < 0)
+            || (targetParameter == "totalAlkalinity" && expectedDelta < 0 && name.contains("acid"))
+    }
+
     /// Returns the swappable product category for this treatment, or nil when
     /// no alternative products exist (hardcoded treatments, visual indicators,
     /// or single-option categories like alkalinity / calcium increasers).
