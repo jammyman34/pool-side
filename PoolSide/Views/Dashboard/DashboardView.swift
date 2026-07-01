@@ -627,39 +627,50 @@ private struct SwipeToDeleteRow<Content: View>: View {
             }
 
             content
+                .overlay(alignment: .trailing) {
+                    Color.clear
+                        .frame(width: 56)
+                        .contentShape(Rectangle())
+                        .gesture(horizontalSwipeGesture)
+                        .accessibilityHidden(true)
+                }
                 .offset(x: rowOffset)
-                .gesture(
-                    DragGesture(minimumDistance: 12)
-                        .onChanged { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-
-                            let baseOffset = isOpen ? -deleteWidth : 0
-                            dragOffset = min(0, baseOffset + value.translation.width)
-                        }
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else {
-                                dragOffset = 0
-                                return
-                            }
-
-                            let didFullSwipe = rowOffset < -fullSwipeDistance
-                                || abs(value.predictedEndTranslation.width) > fullSwipeDistance
-
-                            if didFullSwipe {
-                                onDelete()
-                            } else if rowOffset < -(deleteWidth * 0.45) {
-                                onOpen()
-                            } else {
-                                onClose()
-                            }
-
-                            dragOffset = 0
-                        }
-                )
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isOpen)
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
         }
         .clipped()
+    }
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.4 else {
+                    dragOffset = 0
+                    return
+                }
+
+                let baseOffset = isOpen ? -deleteWidth : 0
+                dragOffset = min(0, baseOffset + value.translation.width)
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.4 else {
+                    dragOffset = 0
+                    return
+                }
+
+                let didFullSwipe = rowOffset < -fullSwipeDistance
+                    || abs(value.predictedEndTranslation.width) > fullSwipeDistance
+
+                if didFullSwipe {
+                    onDelete()
+                } else if rowOffset < -(deleteWidth * 0.45) {
+                    onOpen()
+                } else {
+                    onClose()
+                }
+
+                dragOffset = 0
+            }
     }
 }
 

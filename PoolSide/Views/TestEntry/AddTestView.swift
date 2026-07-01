@@ -720,7 +720,7 @@ struct AddTestView: View {
     }
 
     private func allowsDirectEntry(for field: ChemicalField) -> Bool {
-        !isTaylorMode || field == .pH
+        field != .combinedChlorine
     }
 
     private func directNumericEntrySheet(for field: ChemicalField) -> some View {
