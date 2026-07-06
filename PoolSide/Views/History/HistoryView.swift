@@ -71,7 +71,7 @@ struct HistoryView: View {
             ) {
                 Button("Delete Test", role: .destructive) {
                     if let test = testToDelete {
-                        modelContext.delete(test)
+                        deleteTest(test)
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -88,6 +88,25 @@ struct HistoryView: View {
             .foregroundStyle(PoolColor.cloudWhite.opacity(0.5))
             .textCase(.uppercase)
             .tracking(0.5)
+    }
+
+    private func deleteTest(_ test: PoolTest) {
+        if selectedTest?.id == test.id {
+            selectedTest = nil
+        }
+        testToDelete = nil
+
+        Task {
+            do {
+                try await viewModel.deletePoolTestAndRefreshHistory(
+                    test,
+                    allTests: tests,
+                    modelContext: modelContext
+                )
+            } catch {
+                viewModel.lastError = error.localizedDescription
+            }
+        }
     }
 }
 

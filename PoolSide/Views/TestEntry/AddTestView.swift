@@ -88,6 +88,15 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
+    @State private var swimmingLoad: SwimmingLoad = .unknown
+    @State private var petSwimmingLoad: PetSwimmingLoad = .unknown
+    @State private var rainLoad: RainLoad = .unknown
+    @State private var coverOpenTime: CoverOpenTime = .unknown
+    @State private var organicDebrisLoad: OrganicDebrisLoad = .unknown
+    @State private var skimmedDebris: SkimmedDebris = .unknown
+    @State private var waterAdded: WaterAdded = .unknown
+    @State private var cleaningActivity: CleaningActivity = .unknown
+    @State private var poolBrushed: PoolBrushed = .unknown
     @State private var originalSnapshot: TestFormSnapshot? = nil
     @State private var chemicalOrder: [ChemicalField] = ChemicalField.defaultDisplayOrder
     @State private var draggedChemical: ChemicalField? = nil
@@ -181,6 +190,7 @@ struct AddTestView: View {
             taylorCCDrops: usesDropChlorine ? taylorCCDrops : nil,
             taylorTADrops: usesDropAlkalinity ? taylorTADrops : nil,
             taylorCHDrops: usesDropHardness ? taylorCHDrops : nil,
+            poolConditions: currentPoolConditions,
             notes: notes,
             visualIndicators: orderedVisualIndicators
         )
@@ -369,6 +379,37 @@ struct AddTestView: View {
         return true
     }
 
+    private var currentPoolConditions: PoolConditions {
+        PoolConditions(
+            swimmingLoad: swimmingLoad,
+            petSwimmingLoad: viewModel.poolConfig.petsRegularlySwim ? petSwimmingLoad : .unknown,
+            rainLoad: rainLoad,
+            coverOpenTime: viewModel.poolConfig.hasCover ? coverOpenTime : .unknown,
+            organicDebrisLoad: organicDebrisLoad,
+            skimmedDebris: shouldShowSkimmedDebris ? skimmedDebris : .unknown,
+            waterAdded: waterAdded,
+            cleaningActivity: cleaningActivity,
+            poolBrushed: poolBrushed
+        )
+    }
+
+    private var shouldShowPetSwimming: Bool {
+        viewModel.poolConfig.petsRegularlySwim
+    }
+
+    private var shouldShowCoverOpenTime: Bool {
+        viewModel.poolConfig.hasCover
+    }
+
+    private var shouldShowSkimmedDebris: Bool {
+        switch organicDebrisLoad {
+        case .low, .moderate, .high:
+            return true
+        case .unknown, .none:
+            return false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -426,6 +467,10 @@ struct AddTestView: View {
                         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
                         .padding(.horizontal, 16)
                         .padding(.top, 16) // overlap with banner bottom
+
+                        poolConditionsCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
 
                         visualIndicatorsCard
                             .padding(.horizontal, 16)
@@ -561,6 +606,11 @@ struct AddTestView: View {
         .onChange(of: taylorSampleSize) { _, newValue in
             saveTaylorSampleSize(newValue)
         }
+        .onChange(of: organicDebrisLoad) { _, newValue in
+            if newValue == .unknown || newValue == .none {
+                skimmedDebris = .unknown
+            }
+        }
         .task {
             await showInitialTreatmentPlanIfNeeded()
         }
@@ -568,10 +618,10 @@ struct AddTestView: View {
 
     // MARK: - Hero Banner
 
-    private var heroBanner: some View {
-        let headerHeight: CGFloat = 250
-        let topPadding: CGFloat = 16
-        let contentBottomPadding: CGFloat = 56
+private var heroBanner: some View {
+    let headerHeight: CGFloat = 250
+    let topPadding: CGFloat = 0
+    let contentBottomPadding: CGFloat = 56
 
         return GeometryReader { proxy in
             ZStack {
@@ -1588,6 +1638,219 @@ struct AddTestView: View {
             .padding(.leading, 60)
     }
 
+    private var poolConditionsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pool Conditions (recommended)")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(PoolColor.primaryText)
+                Text("Since last test log")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+            }
+
+            VStack(spacing: 18) {
+                poolConditionRow(
+                    title: "Swimming",
+                    selection: $swimmingLoad,
+                    options: [
+                        (.none, "None", "No swimming"),
+                        (.low, "Low", "1-2 swimmers for <1 hr"),
+                        (.moderate, "Mod", "2-5 swimmers for 1-2 hrs"),
+                        (.high, "High", ">5 swimmers or 1-2 swimmers for >2 hrs")
+                    ]
+                )
+
+                if shouldShowPetSwimming {
+                    conditionDivider
+                    poolConditionRow(
+                        title: "Pet Swimming",
+                        selection: $petSwimmingLoad,
+                        options: [
+                            (.none, "None", "No pets"),
+                            (.low, "Low", "1 pet for <15 min"),
+                            (.moderate, "Mod", "1 pet for 15-30 min or 2 pets briefly"),
+                            (.high, "High", ">1 pet or 1 pet for >30 min")
+                        ]
+                    )
+                }
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Rain",
+                    selection: $rainLoad,
+                    options: [
+                        (.none, "None", "No rain"),
+                        (.light, "Light", "Light rain or brief drizzle"),
+                        (.steady, "Steady", "Steady rain"),
+                        (.heavy, "Heavy", "Heavy rain or storms")
+                    ]
+                )
+
+                if shouldShowCoverOpenTime {
+                    conditionDivider
+                    poolConditionRow(
+                        title: "Pool Cover",
+                        selection: $coverOpenTime,
+                        options: [
+                            (.mostlyOpen, "Mostly Open", "Cover was open most of the time"),
+                            (.sixToEighteenHours, "6-18h", "Pool was open for about 6-18 hours"),
+                            (.twoToSixHours, "2-6h", "Pool was open for about 2-6 hours"),
+                            (.lessThanTwoHours, "<2h", "Pool was open for less than 2 hours")
+                        ]
+                    )
+                }
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Organic Debris",
+                    subtitle: "Leaves, bugs, pollen, grass, etc.",
+                    selection: $organicDebrisLoad,
+                    options: [
+                        (.none, "None", "No noticeable debris"),
+                        (.low, "Low", "A few bugs or leaves"),
+                        (.moderate, "Mod", "Noticeable debris across the pool"),
+                        (.high, "High", "Heavy debris or storm cleanup")
+                    ]
+                )
+
+                if shouldShowSkimmedDebris {
+                    conditionDivider
+                    poolConditionRow(
+                        title: "Skimmed",
+                        selection: $skimmedDebris,
+                        options: [
+                            (.no, "No", "Debris was not skimmed out"),
+                            (.yes, "Yes", "Debris was skimmed out")
+                        ]
+                    )
+                }
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Water Added",
+                    selection: $waterAdded,
+                    options: [
+                        (.none, "None", "No water added"),
+                        (.lessThanOneInch, "<1\"", "Small top-off"),
+                        (.oneToTwoInches, "1-2\"", "Added about 1-2 inches"),
+                        (.moreThanTwoInches, ">2\"", "Added more than 2 inches or a large refill")
+                    ]
+                )
+
+                conditionDivider
+                if viewModel.poolConfig.usesRoboticCleaner {
+                    poolConditionRow(
+                        title: "Robot Cleaning",
+                        selection: $cleaningActivity,
+                        options: [
+                            (.no, "No", "Robot was not run"),
+                            (.oneCycle, "1 Cycle", "Robot completed one cleaning cycle"),
+                            (.multipleCycles, "Multiple", "Robot completed more than one cycle")
+                        ]
+                    )
+                } else {
+                    poolConditionRow(
+                        title: "Vacuumed",
+                        selection: $cleaningActivity,
+                        options: [
+                            (.no, "No", "Pool was not vacuumed"),
+                            (.spotVacuumed, "Spot", "Only problem areas were vacuumed"),
+                            (.entirePool, "Entire", "Entire pool was vacuumed")
+                        ]
+                    )
+                }
+
+                poolConditionRow(
+                    title: "Pool Brushed",
+                    selection: $poolBrushed,
+                    options: [
+                        (.no, "No", "Pool was not brushed"),
+                        (.yes, "Yes", "Pool walls or floor were brushed")
+                    ]
+                )
+            }
+
+            Text("These details help Pool Side understand chlorine demand and explain future recommendations.")
+                .font(.caption)
+                .foregroundStyle(PoolColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        }
+        .padding(18)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private var conditionDivider: some View {
+        Rectangle()
+            .fill(PoolColor.divider)
+            .frame(height: 1)
+    }
+
+    private func poolConditionRow<Value: Hashable>(
+        title: String,
+        subtitle: String? = nil,
+        selection: Binding<Value>,
+        options: [(value: Value, label: String, explanation: String)]
+    ) -> some View {
+        let selectedExplanation = options.first { $0.value == selection.wrappedValue }?.explanation
+
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.primaryText)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+            }
+
+            HStack(spacing: 4) {
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    let isSelected = option.value == selection.wrappedValue
+
+                    Button {
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+                            selection.wrappedValue = option.value
+                        }
+                    } label: {
+                        Text(option.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? .white : PoolColor.primaryText)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .padding(.horizontal, 4)
+                            .background(
+                                isSelected ? PoolColor.poolTeal : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 9)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 12))
+
+            if let selectedExplanation {
+                Text(selectedExplanation)
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
+        }
+    }
+
     private var visualIndicatorsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
@@ -1697,6 +1960,7 @@ struct AddTestView: View {
             taylorCCDrops = test.taylorCCDrops
             taylorTADrops = test.taylorTADrops
             taylorCHDrops = test.taylorCHDrops
+            applyPoolConditions(test.resolvedPoolConditions)
             saveTestMethodAsDefault = false
             notes = test.notes
             selectedVisualIndicators = Set(test.visualIndicators)
@@ -1727,6 +1991,18 @@ struct AddTestView: View {
         if !liquidDropKitBrand.isAvailable(for: testMethod) {
             liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
         }
+    }
+
+    private func applyPoolConditions(_ conditions: PoolConditions) {
+        swimmingLoad = conditions.swimmingLoad
+        petSwimmingLoad = conditions.petSwimmingLoad
+        rainLoad = conditions.rainLoad
+        coverOpenTime = conditions.coverOpenTime
+        organicDebrisLoad = conditions.organicDebrisLoad
+        skimmedDebris = shouldShowSkimmedDebris ? conditions.skimmedDebris : .unknown
+        waterAdded = conditions.waterAdded
+        cleaningActivity = conditions.cleaningActivity
+        poolBrushed = conditions.poolBrushed
     }
 
     private func saveTaylorSampleSize(_ sampleSize: TaylorSampleSize) {
@@ -1790,6 +2066,7 @@ struct AddTestView: View {
             existing.taylorCCDrops = usesDropChlorine ? taylorCCDrops : nil
             existing.taylorTADrops = usesDropAlkalinity ? taylorTADrops : nil
             existing.taylorCHDrops = usesDropHardness ? taylorCHDrops : nil
+            existing.poolConditions = currentPoolConditions
             existing.notes = notes
             existing.visualIndicators = orderedVisualIndicators
             test = existing
@@ -1806,6 +2083,7 @@ struct AddTestView: View {
                 saltLevel: includeSalt ? saltLevel : nil,
                 testMethod: testMethod,
                 liquidDropKitBrand: persistedBrand,
+                poolConditions: currentPoolConditions,
                 notes: notes,
                 visualIndicators: orderedVisualIndicators
             )
@@ -1882,6 +2160,7 @@ private struct TestFormSnapshot: Equatable {
     let taylorCCDrops: Int?
     let taylorTADrops: Int?
     let taylorCHDrops: Int?
+    let poolConditions: PoolConditions
     let notes: String
     let visualIndicators: [String]
 }

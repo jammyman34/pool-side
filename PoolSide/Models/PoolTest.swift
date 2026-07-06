@@ -109,6 +109,7 @@ final class PoolTest {
     var taylorCHDrops: Int?
     var notes: String
     var visualIndicators: [String] = []
+    var poolConditionsData: Data?
 
     /// AI-generated assessment text stored alongside the test record
     var aiAssessment: String?
@@ -131,6 +132,7 @@ final class PoolTest {
         saltLevel: Double? = nil,
         testMethod: TestMethod = .testStrips,
         liquidDropKitBrand: LiquidDropKitBrand? = nil,
+        poolConditions: PoolConditions? = nil,
         notes: String = "",
         visualIndicators: [String] = [],
         aiAssessment: String? = nil
@@ -147,6 +149,7 @@ final class PoolTest {
         self.saltLevel = saltLevel
         self.testMethodRaw = testMethod.rawValue
         self.liquidDropKitBrandRaw = liquidDropKitBrand?.rawValue
+        self.poolConditionsData = try? poolConditions.map { try JSONEncoder().encode($0) }
         self.notes = notes
         self.visualIndicators = visualIndicators
         self.aiAssessment = aiAssessment
@@ -173,6 +176,20 @@ final class PoolTest {
     var taylorSampleSize: TaylorSampleSize? {
         get { taylorSampleSizeRaw.flatMap(TaylorSampleSize.init(rawValue:)) }
         set { taylorSampleSizeRaw = newValue?.rawValue }
+    }
+
+    var poolConditions: PoolConditions? {
+        get {
+            guard let poolConditionsData else { return nil }
+            return try? JSONDecoder().decode(PoolConditions.self, from: poolConditionsData)
+        }
+        set {
+            poolConditionsData = try? newValue.map { try JSONEncoder().encode($0) }
+        }
+    }
+
+    var resolvedPoolConditions: PoolConditions {
+        poolConditions ?? .unknown
     }
 
     /// Overall pool health score 0–100 based on weighted chemistry risk.

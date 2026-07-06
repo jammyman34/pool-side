@@ -26,6 +26,7 @@
 		6571B70B1EC96A122198DB26 /* TestDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */; };
 		8CE42F94F26BB1ECC4596E4F /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E9A2DCAFE611D5B8D72E73 /* StatusBadge.swift */; };
 		8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40260884F73467DEAD0224AF /* NotificationService.swift */; };
+		9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */; };
 		9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */; };
 		AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DF5015684F5FE62BCF2E0C /* AddTestView.swift */; };
 		B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */; };
@@ -54,6 +55,7 @@
 		6ECB4659535BC97B6A35D4D7 /* Treatment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Treatment.swift; sourceTree = "<group>"; };
 		8DC453B301AE5F6180DBE8BF /* TestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestDetailView.swift; sourceTree = "<group>"; };
 		9227EFAE07F3F0E9EA12F090 /* TreatmentPlanSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentPlanSheet.swift; sourceTree = "<group>"; };
+		9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConditions.swift; sourceTree = "<group>"; };
 		9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
 		9BF358082FE2F10C00853A99 /* PoolSide.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PoolSide.entitlements; sourceTree = "<group>"; };
 		A2B1172BBFB76FCBAB212A92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -87,6 +89,7 @@
 				03997BD5D8BB0BCD1D084DE1 /* PoolConfiguration.swift */,
 				B5257F2A016A318F0C4AF595 /* PoolTest.swift */,
 				6ECB4659535BC97B6A35D4D7 /* Treatment.swift */,
+				9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -293,6 +296,7 @@
 				F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */,
 				DCE555DE08A9B1037986EF5A /* Color+PoolSide.swift in Sources */,
 				1D925055E573DF7A2FC9F39B /* ContentView.swift in Sources */,
+				9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */,
 				5325E4C01AF239F5FCF4E84D /* DashboardView.swift in Sources */,
 				0607AFB2A4783B87439B2DDC /* Date+Extensions.swift in Sources */,
 				27DC9C214EC1AB86E6D987EC /* FoundationModelsService.swift in Sources */,
@@ -334,7 +338,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -492,7 +496,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";

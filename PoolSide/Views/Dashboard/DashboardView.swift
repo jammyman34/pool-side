@@ -405,13 +405,18 @@ struct DashboardView: View {
 
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
             swipedTestID = nil
-            modelContext.delete(test)
         }
 
-        do {
-            try modelContext.save()
-        } catch {
-            viewModel.lastError = error.localizedDescription
+        Task {
+            do {
+                try await viewModel.deletePoolTestAndRefreshHistory(
+                    test,
+                    allTests: tests,
+                    modelContext: modelContext
+                )
+            } catch {
+                viewModel.lastError = error.localizedDescription
+            }
         }
     }
 

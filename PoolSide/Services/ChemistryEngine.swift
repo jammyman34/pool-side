@@ -352,6 +352,7 @@ struct ChemistryEngine {
 
         penalty += combinedChlorinePenalty(for: test)
         penalty += visualIndicatorPenalty(for: test)
+        penalty += poolConditionsPenalty(for: test)
 
         var score = max(0, min(100, 100 - penalty))
         if let floor = scoreFloor(for: test, previousTest: previousTest, recentHistory: recentHistory, config: config) {
@@ -748,6 +749,39 @@ struct ChemistryEngine {
         }
     }
 
+    private func poolConditionsPenalty(for test: PoolTest) -> Double {
+        let chlorineDemand = chlorineDemandScore(for: test)
+        let waterChange = waterChangeScore(for: test)
+        var penalty = 0.0
+
+        if chlorineDemand >= 6 {
+            penalty += test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound ? 5 : 3
+        } else if chlorineDemand >= 3 {
+            penalty += test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound ? 3 : 2
+        }
+
+        if waterChange >= 2 {
+            penalty += 2
+        }
+
+        return penalty
+    }
+
+    func recommendationConfidenceInput(
+        for test: PoolTest,
+        recentHistory: [PoolTest] = []
+    ) -> RecommendationConfidenceInput {
+        RecommendationConfidenceInput(
+            hasChemistryData: true,
+            hasPoolConditions: test.resolvedPoolConditions.hasAnyKnownCondition,
+            hasVisualIndicators: !test.visualIndicators.isEmpty,
+            hasRecentHistory: !recentHistory.isEmpty,
+            hasCompletedTreatmentHistory: recentHistory.flatMap(\.treatments).contains { $0.isCompleted },
+            chlorineDemandScore: chlorineDemandScore(for: test),
+            waterChangeScore: waterChangeScore(for: test)
+        )
+    }
+
     // MARK: - Rule-Based Treatments
 
     func ruleTreatments(
@@ -1065,6 +1099,9 @@ struct ChemistryEngine {
 
         case "totalAlkalinity":
             if reading.value < 70 {
+                if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
+                    return possibleDilutionRetestTemplate(for: "Total Alkalinity")
+                }
                 let lbs = kGal * 1.4 * ((80 - reading.value) / 10)
                 return TreatmentTemplate(
                     chemicalName: config.alkalinityIncreaserPreference.displayName,
@@ -1117,6 +1154,9 @@ struct ChemistryEngine {
         case "calciumHardness":
             let acceptable = calciumAcceptableRange(surface: config.surfaceType)
             if reading.value < acceptable.lowerBound {
+                if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
+                    return possibleDilutionRetestTemplate(for: "Calcium Hardness")
+                }
                 let lbs = kGal * 1.25 * ((acceptable.lowerBound - reading.value) / 10)
                 return TreatmentTemplate(
                     chemicalName: "Calcium Hardness Increaser (\(config.calciumIncreaserPreference.displayName))",
@@ -1166,6 +1206,9 @@ struct ChemistryEngine {
 
         case "cyanuricAcid":
             if reading.value < 30 {
+                if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
+                    return possibleDilutionRetestTemplate(for: "CYA")
+                }
                 if config.testMethod == .testStrips || test.testMethod == .testStrips {
                     return TreatmentTemplate(
                         chemicalName: "Confirm CYA",
@@ -1219,6 +1262,9 @@ struct ChemistryEngine {
 
         case "saltLevel":
             if reading.value < 2700 {
+                if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
+                    return possibleDilutionRetestTemplate(for: "Salt")
+                }
                 let pounds = volume * (3200 - reading.value) / 12000
                 return TreatmentTemplate(
                     chemicalName: "Pool Salt",
@@ -1268,7 +1314,15 @@ struct ChemistryEngine {
         if shouldUseUpperChlorineTarget(for: test, recentHistory: recentHistory) {
             return targetRange.upperBound
         }
-        return freeChlorineTargetMidpoint(cyanuricAcid: test.cyanuricAcid)
+        let midpoint = freeChlorineTargetMidpoint(cyanuricAcid: test.cyanuricAcid)
+        let demandScore = chlorineDemandScore(for: test)
+        if demandScore >= 6 {
+            return targetRange.upperBound
+        }
+        if demandScore >= 3 {
+            return midpoint + ((targetRange.upperBound - midpoint) * 0.25)
+        }
+        return midpoint
     }
 
     private func shouldUseUpperChlorineTarget(for test: PoolTest, recentHistory: [PoolTest]) -> Bool {
@@ -1358,6 +1412,7 @@ struct ChemistryEngine {
     private func chlorineTreatmentUrgency(for test: PoolTest, target: Double, recentHistory: [PoolTest], config: PoolConfiguration) -> TreatmentUrgency {
         let minimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
         let maintenanceFloor = max(0, minimum - 0.5)
+        let targetLower = freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
         if hasVisibleAlgae(test) || hasCloudyWater(test) || target >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
             return .immediate
         }
@@ -1370,10 +1425,21 @@ struct ChemistryEngine {
         if test.freeChlorine < maintenanceFloor {
             return .recommended
         }
+        if test.freeChlorine < targetLower && chlorineDemandScore(for: test) >= 3 {
+            return .recommended
+        }
         if isStablePoolContext(test, previousTest: recentHistory.first, recentHistory: recentHistory, config: config) {
             return .optional
         }
         return .optional
+    }
+
+    private func chlorineDemandScore(for test: PoolTest) -> Int {
+        test.resolvedPoolConditions.chlorineDemandContribution
+    }
+
+    private func waterChangeScore(for test: PoolTest) -> Int {
+        test.resolvedPoolConditions.waterChangeContribution
     }
 
     private func chlorineInstructions(for product: ChemicalProduct, test: PoolTest) -> String {
@@ -1413,12 +1479,52 @@ struct ChemistryEngine {
         return 60
     }
 
+    private func shouldConfirmPossibleDilutionBeforeCorrection(
+        reading: ChemicalReading,
+        test: PoolTest,
+        config: PoolConfiguration
+    ) -> Bool {
+        guard waterChangeScore(for: test) >= 2 else { return false }
+
+        switch reading.key {
+        case "totalAlkalinity":
+            return test.totalAlkalinity >= 50
+        case "calciumHardness":
+            return test.calciumHardness >= calciumAcceptableRange(surface: config.surfaceType).lowerBound - 50
+        case "cyanuricAcid":
+            return test.cyanuricAcid >= 15
+        case "saltLevel":
+            return test.saltLevel.map { $0 >= 2400 } ?? false
+        default:
+            return false
+        }
+    }
+
+    private func possibleDilutionRetestTemplate(for parameter: String) -> TreatmentTemplate {
+        TreatmentTemplate(
+            chemicalName: "Confirm \(parameter)",
+            actionDescription: "\(parameter) may be lower from recent water addition or rain.",
+            amount: 0,
+            unit: "",
+            instructions: "Recent water addition or rain may explain this lower value. Retest before making a large correction unless the value is unsafe or symptoms appear.",
+            targetParameter: "poolConditions",
+            urgency: .advisory,
+            expectedEffectParameter: parameter,
+            expectedDelta: 0,
+            effectDelayHours: 0,
+            effectDurationHours: 24,
+            doNotRepeatHours: 24
+        )
+    }
+
     private func advisoryTemplates(
         for test: PoolTest,
         previousTest: PoolTest?,
         config: PoolConfiguration
     ) -> [TreatmentTemplate] {
         var templates: [TreatmentTemplate] = []
+        let chlorineDemand = chlorineDemandScore(for: test)
+        let waterChange = waterChangeScore(for: test)
 
         let targetRange = freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
         if test.totalChlorine + 0.3 >= test.freeChlorine
@@ -1494,6 +1600,32 @@ struct ChemistryEngine {
                 instructions: "Keep circulation and filtration running. If foam persists or CC rises above 0.5, oxidize and retest.",
                 targetParameter: "visualIndicators",
                 urgency: .advisory
+            ))
+        }
+
+        if chlorineDemand >= 3 && !templates.contains(where: { $0.chemicalName == "Increased Chlorine Demand" }) {
+            templates.append(TreatmentTemplate(
+                chemicalName: "Increased Chlorine Demand",
+                actionDescription: "Recent pool conditions may increase chlorine demand.",
+                amount: 0,
+                unit: "",
+                instructions: "Recent pool conditions may increase chlorine demand. The chlorine recommendation accounts for swimming, rain, debris, cover time, and cleaning activity where provided.",
+                targetParameter: "poolConditions",
+                urgency: .advisory,
+                doNotRepeatHours: 24
+            ))
+        }
+
+        if waterChange >= 2 && !templates.contains(where: { $0.chemicalName == "Possible Dilution" }) {
+            templates.append(TreatmentTemplate(
+                chemicalName: "Possible Dilution",
+                actionDescription: "Recent water addition or rain may dilute chemistry.",
+                amount: 0,
+                unit: "",
+                instructions: "Recent water addition or rain may dilute stabilizer, hardness, alkalinity, salt, and chlorine. Retest before making large corrections unless values are unsafe.",
+                targetParameter: "poolConditions",
+                urgency: .advisory,
+                doNotRepeatHours: 24
             ))
         }
 
@@ -1635,6 +1767,16 @@ struct ChemistryEngine {
         if abs(delta) < 0.05 { return .stable }
         return delta > 0 ? .rising : .falling
     }
+}
+
+struct RecommendationConfidenceInput {
+    let hasChemistryData: Bool
+    let hasPoolConditions: Bool
+    let hasVisualIndicators: Bool
+    let hasRecentHistory: Bool
+    let hasCompletedTreatmentHistory: Bool
+    let chlorineDemandScore: Int
+    let waterChangeScore: Int
 }
 
 private struct ChemicalProduct {

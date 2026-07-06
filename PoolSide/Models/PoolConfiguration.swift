@@ -12,6 +12,8 @@ struct PoolConfiguration: Codable, Equatable {
     var liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD
     var isSaltwater: Bool = false
     var hasCover: Bool = false
+    var petsRegularlySwim: Bool = false
+    var usesRoboticCleaner: Bool = false
     var chlorinePreference: ChlorinePreference = .calHypo
     var pHIncreaserPreference: PHIncreaserPreference = .sodaAsh
     var pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid
@@ -31,6 +33,8 @@ struct PoolConfiguration: Codable, Equatable {
         liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD,
         isSaltwater: Bool = false,
         hasCover: Bool = false,
+        petsRegularlySwim: Bool = false,
+        usesRoboticCleaner: Bool = false,
         chlorinePreference: ChlorinePreference = .calHypo,
         pHIncreaserPreference: PHIncreaserPreference = .sodaAsh,
         pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid,
@@ -49,6 +53,8 @@ struct PoolConfiguration: Codable, Equatable {
         self.liquidDropKitBrand = liquidDropKitBrand
         self.isSaltwater = isSaltwater
         self.hasCover = hasCover
+        self.petsRegularlySwim = petsRegularlySwim
+        self.usesRoboticCleaner = usesRoboticCleaner
         self.chlorinePreference = chlorinePreference
         self.pHIncreaserPreference = pHIncreaserPreference
         self.pHDecreaserPreference = pHDecreaserPreference
@@ -70,6 +76,8 @@ struct PoolConfiguration: Codable, Equatable {
         liquidDropKitBrand = try container.decodeIfPresent(LiquidDropKitBrand.self, forKey: .liquidDropKitBrand) ?? .taylorK2006FASDPD
         isSaltwater = try container.decodeIfPresent(Bool.self, forKey: .isSaltwater) ?? false
         hasCover = try container.decodeIfPresent(Bool.self, forKey: .hasCover) ?? false
+        petsRegularlySwim = try container.decodeIfPresent(Bool.self, forKey: .petsRegularlySwim) ?? false
+        usesRoboticCleaner = try container.decodeIfPresent(Bool.self, forKey: .usesRoboticCleaner) ?? false
         chlorinePreference = try container.decodeIfPresent(ChlorinePreference.self, forKey: .chlorinePreference) ?? .calHypo
         pHIncreaserPreference = try container.decodeIfPresent(PHIncreaserPreference.self, forKey: .pHIncreaserPreference) ?? .sodaAsh
         pHDecreaserPreference = try container.decodeIfPresent(PHDecreaserPreference.self, forKey: .pHDecreaserPreference) ?? .muriaticAcid

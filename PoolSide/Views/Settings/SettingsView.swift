@@ -17,6 +17,8 @@ struct SettingsView: View {
     @State private var liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD
     @State private var isSaltwater: Bool = false
     @State private var hasCover: Bool = false
+    @State private var petsRegularlySwim: Bool = false
+    @State private var usesRoboticCleaner: Bool = false
     @State private var chlorinePreference: ChlorinePreference = .calHypo
     @State private var pHIncreaserPreference: PHIncreaserPreference = .sodaAsh
     @State private var pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid
@@ -45,6 +47,8 @@ struct SettingsView: View {
             liquidDropKitBrand: liquidDropKitBrand,
             isSaltwater: isSaltwater,
             hasCover: hasCover,
+            petsRegularlySwim: petsRegularlySwim,
+            usesRoboticCleaner: usesRoboticCleaner,
             chlorinePreference: chlorinePreference,
             pHIncreaserPreference: pHIncreaserPreference,
             pHDecreaserPreference: pHDecreaserPreference,
@@ -79,6 +83,10 @@ struct SettingsView: View {
                                 locationRow
                                 rowDivider
                                 toggleRow(label: "Pool Cover", isOn: $hasCover)
+                                rowDivider
+                                toggleRow(label: "Do pets regularly swim in your pool?", isOn: $petsRegularlySwim)
+                                rowDivider
+                                toggleRow(label: "Do you use a robotic pool cleaner?", isOn: $usesRoboticCleaner)
                                 rowDivider
                                 toggleRow(label: "Salt-Chlorine System", isOn: $isSaltwater)
                             }
@@ -513,6 +521,8 @@ struct SettingsView: View {
         normalizeBrandForCurrentMethod()
         isSaltwater = config.isSaltwater
         hasCover = config.hasCover
+        petsRegularlySwim = config.petsRegularlySwim
+        usesRoboticCleaner = config.usesRoboticCleaner
         chlorinePreference = config.chlorinePreference
         pHIncreaserPreference = config.pHIncreaserPreference
         pHDecreaserPreference = config.pHDecreaserPreference

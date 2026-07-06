@@ -182,6 +182,46 @@ final class PoolViewModel {
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
     }
 
+    @MainActor
+    func deletePoolTest(_ test: PoolTest, modelContext: ModelContext) throws {
+        for treatment in test.treatments {
+            if let identifier = treatment.reminderNotificationIdentifier {
+                NotificationService.shared.cancel(identifier: identifier)
+                treatment.reminderNotificationIdentifier = nil
+            }
+        }
+
+        modelContext.delete(test)
+        try modelContext.save()
+    }
+
+    @MainActor
+    func deletePoolTestAndRefreshHistory(
+        _ test: PoolTest,
+        allTests: [PoolTest],
+        modelContext: ModelContext
+    ) async throws {
+        let deletedID = test.id
+        let deletedDate = test.date
+        let remainingTests = allTests
+            .filter { $0.id != deletedID }
+            .sorted { $0.date < $1.date }
+
+        try deletePoolTest(test, modelContext: modelContext)
+
+        for remainingTest in remainingTests where remainingTest.date > deletedDate {
+            let recentTests = recentHistory(before: remainingTest, in: remainingTests, limit: 10)
+            await generateRecommendations(
+                for: remainingTest,
+                recentTests: recentTests,
+                modelContext: modelContext,
+                replacingCompletedPlan: false
+            )
+        }
+
+        try modelContext.save()
+    }
+
     // MARK: - Trend Analysis
 
     /// Returns true if a parameter has been worsening over the last N tests
