@@ -53,8 +53,17 @@ final class PoolViewModel {
         return .ideal
     }
 
-    func overallScore(for test: PoolTest, previousTest: PoolTest? = nil) -> Int {
-        chemistryEngine.overallScore(for: test, previousTest: previousTest, config: poolConfig)
+    func overallScore(
+        for test: PoolTest,
+        previousTest: PoolTest? = nil,
+        recentHistory: [PoolTest] = []
+    ) -> Int {
+        chemistryEngine.overallScore(
+            for: test,
+            previousTest: previousTest,
+            recentHistory: recentHistory,
+            config: poolConfig
+        )
     }
 
     func previousTest(before test: PoolTest, in tests: [PoolTest]) -> PoolTest? {
@@ -62,6 +71,15 @@ final class PoolViewModel {
             .filter { $0.id != test.id && $0.date < test.date }
             .sorted { $0.date > $1.date }
             .first
+    }
+
+    func recentHistory(before test: PoolTest, in tests: [PoolTest], limit: Int = 10) -> [PoolTest] {
+        Array(
+            tests
+                .filter { $0.id != test.id && $0.date < test.date }
+                .sorted { $0.date > $1.date }
+                .prefix(limit)
+        )
     }
 
     // MARK: - Generate Recommendations

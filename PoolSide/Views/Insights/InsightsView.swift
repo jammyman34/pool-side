@@ -380,9 +380,14 @@ struct InsightsView: View {
         let chronologicalTests = tests.sorted { $0.date < $1.date }
         return chronologicalTests.enumerated().map { index, test in
             let previousTest = index > 0 ? chronologicalTests[index - 1] : nil
+            let recentHistory = Array(chronologicalTests[..<index].reversed().prefix(10))
             return ScorePoint(
                 date: test.date,
-                score: viewModel.overallScore(for: test, previousTest: previousTest)
+                score: viewModel.overallScore(
+                    for: test,
+                    previousTest: previousTest,
+                    recentHistory: recentHistory
+                )
             )
         }
     }

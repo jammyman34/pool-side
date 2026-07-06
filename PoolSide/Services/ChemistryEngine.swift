@@ -114,9 +114,9 @@ struct ChemistryEngine {
 
     func pHStatus(_ value: Double) -> ChemicalStatus {
         switch value {
-        case 7.2...7.8:         return .ideal
+        case 7.2...7.6:         return .ideal
         case 7.0..<7.2:         return .slightlyLow
-        case 7.8...8.0:         return .slightlyHigh
+        case 7.6...8.0:         return .slightlyHigh
         case 6.8..<7.0:         return .low
         case 8.0...8.2:         return .high
         default:                 return .critical
@@ -334,20 +334,27 @@ struct ChemistryEngine {
     func overallScore(
         for test: PoolTest,
         previousTest: PoolTest? = nil,
+        recentHistory: [PoolTest] = [],
         config: PoolConfiguration = .current
     ) -> Int {
         let readings = allReadings(for: test, previousTest: previousTest, config: config)
         guard !readings.isEmpty else { return 0 }
 
         var penalty = readings.reduce(0.0) { total, reading in
-            total + scorePenalty(for: reading, test: test, previousTest: previousTest, config: config)
+            total + scorePenalty(
+                for: reading,
+                test: test,
+                previousTest: previousTest,
+                recentHistory: recentHistory,
+                config: config
+            )
         }
 
         penalty += combinedChlorinePenalty(for: test)
         penalty += visualIndicatorPenalty(for: test)
 
         var score = max(0, min(100, 100 - penalty))
-        if let floor = scoreFloor(for: test, previousTest: previousTest, recentHistory: [], config: config) {
+        if let floor = scoreFloor(for: test, previousTest: previousTest, recentHistory: recentHistory, config: config) {
             score = max(score, floor)
         }
 
@@ -358,9 +365,16 @@ struct ChemistryEngine {
         for reading: ChemicalReading,
         test: PoolTest,
         previousTest: PoolTest?,
+        recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> Double {
-        var penalty = contextualBasePenalty(for: reading, test: test, previousTest: previousTest, config: config)
+        var penalty = contextualBasePenalty(
+            for: reading,
+            test: test,
+            previousTest: previousTest,
+            recentHistory: recentHistory,
+            config: config
+        )
 
         guard penalty > 0 else { return 0 }
 
@@ -391,7 +405,9 @@ struct ChemistryEngine {
             penalty *= 0.6
         }
 
-        if shouldReduceSecondaryAdvisoryPenalty(reading: reading, test: test, config: config) {
+        if shouldStronglyReduceSecondaryAdvisoryPenalty(reading: reading, test: test, recentHistory: recentHistory, config: config) {
+            penalty *= 0.3
+        } else if shouldReduceSecondaryAdvisoryPenalty(reading: reading, test: test, recentHistory: recentHistory, config: config) {
             penalty *= 0.5
         }
 
@@ -402,6 +418,7 @@ struct ChemistryEngine {
         for reading: ChemicalReading,
         test: PoolTest,
         previousTest: PoolTest?,
+        recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> Double {
         guard reading.status != .ideal && reading.status != .testing else { return 0 }
@@ -418,10 +435,10 @@ struct ChemistryEngine {
             if test.freeChlorine < minimum * 0.5 { return isProblemWater ? 42 : 30 }
             if test.freeChlorine < maintenanceFloor { return isProblemWater ? 32 : 22 }
             if test.freeChlorine < minimum {
-                return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 14 : 18
+                return isStablePoolContext(test, previousTest: previousTest, recentHistory: recentHistory, config: config) ? 14 : 18
             }
             if test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound {
-                return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 10 : 14
+                return isStablePoolContext(test, previousTest: previousTest, recentHistory: recentHistory, config: config) ? 10 : 14
             }
             return 3
 
@@ -430,14 +447,14 @@ struct ChemistryEngine {
                 if test.totalAlkalinity >= 200 { return 12 }
                 if test.pH >= 7.6 || isPHRising(current: test, previousTest: previousTest) || hasScaling(test) { return 10 }
                 if test.pH <= 7.4 && !hasVisibleAlgae(test) && !hasCloudyWater(test) { return 3 }
-                return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 6 : 8
+                return isStablePoolContext(test, previousTest: previousTest, recentHistory: recentHistory, config: config) ? 6 : 8
             }
             return 4
 
         case "cyanuricAcid":
             if test.cyanuricAcid > 90 { return 16 }
-            if test.cyanuricAcid >= 80 { return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 8 : 12 }
-            if test.cyanuricAcid > 50 { return isStablePoolContext(test, previousTest: previousTest, recentHistory: [], config: config) ? 6 : 8 }
+            if test.cyanuricAcid >= 80 { return isStablePoolContext(test, previousTest: previousTest, recentHistory: recentHistory, config: config) ? 8 : 12 }
+            if test.cyanuricAcid > 50 { return isStablePoolContext(test, previousTest: previousTest, recentHistory: recentHistory, config: config) ? 6 : 8 }
             if test.cyanuricAcid < 15 { return 12 }
             return 4
 
@@ -485,11 +502,27 @@ struct ChemistryEngine {
 
     private func shouldTreatHighAlkalinityWithAcid(_ alkalinity: Double, test: PoolTest, previousTest: PoolTest?) -> Bool {
         guard alkalinity > 140 else { return false }
-        if test.pH <= 7.4 { return false }
-        if test.pH >= 7.6 { return true }
-        if isPHRising(current: test, previousTest: previousTest) { return true }
         if hasScaling(test) { return true }
-        return alkalinity >= 200 && test.pH >= 7.5
+        if test.pH <= 7.6 { return false }
+        if isPHRising(current: test, previousTest: previousTest) { return true }
+        return alkalinity >= 200 && test.pH > 7.6
+    }
+
+    private func shouldTreatHighPHWithAcid(_ pH: Double, test: PoolTest, previousTest: PoolTest?) -> Bool {
+        if pH > 8.0 { return true }
+        if pH >= 7.8 { return true }
+        if pH > 7.6 {
+            return isPHRising(current: test, previousTest: previousTest) || hasScaling(test)
+        }
+        return false
+    }
+
+    private func pHDecreaserUrgency(for pH: Double, test: PoolTest, previousTest: PoolTest?) -> TreatmentUrgency {
+        if pH > 8.0 { return .immediate }
+        if hasScaling(test) || isPHRising(current: test, previousTest: previousTest) || test.totalAlkalinity > 140 {
+            return .recommended
+        }
+        return .optional
     }
 
     private func hasIndicator(_ indicator: VisualIndicator, in test: PoolTest) -> Bool {
@@ -533,7 +566,7 @@ struct ChemistryEngine {
             && test.freeChlorine >= fcMinimum - 0.5
     }
 
-    private func isLowChlorineOnlyActiveIssue(_ test: PoolTest, config: PoolConfiguration) -> Bool {
+    private func isLowChlorineOnlyActiveIssue(_ test: PoolTest, recentHistory: [PoolTest], config: PoolConfiguration) -> Bool {
         let fcMinimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
         return hasPositiveClearWaterSignals(test)
             && !hasVisibleAlgae(test)
@@ -543,15 +576,52 @@ struct ChemistryEngine {
             && test.combinedChlorine <= 0.5
             && calciumAcceptableRange(surface: config.surfaceType).contains(test.calciumHardness)
             && test.freeChlorine < fcMinimum
-            && test.freeChlorine >= fcMinimum * 0.5
+            && test.freeChlorine >= fcMinimum * 0.35
+            && !hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
+    }
+
+    private func isStableLowChlorineOnlyActiveIssue(_ test: PoolTest, recentHistory: [PoolTest], config: PoolConfiguration) -> Bool {
+        let fcMinimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+        return hasPositiveClearWaterSignals(test)
+            && !hasVisibleAlgae(test)
+            && !hasCloudyWater(test)
+            && test.pH >= 7.2
+            && test.pH <= 7.8
+            && test.combinedChlorine <= 0.05
+            && calciumAcceptableRange(surface: config.surfaceType).contains(test.calciumHardness)
+            && test.freeChlorine < fcMinimum
+            && test.freeChlorine >= fcMinimum * 0.35
+            && !hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory)
     }
 
     private func shouldReduceSecondaryAdvisoryPenalty(
         reading: ChemicalReading,
         test: PoolTest,
+        recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> Bool {
-        guard isLowChlorineOnlyActiveIssue(test, config: config) else { return false }
+        guard isLowChlorineOnlyActiveIssue(test, recentHistory: recentHistory, config: config) else { return false }
+
+        switch reading.key {
+        case "totalAlkalinity":
+            return test.totalAlkalinity > 140
+                && test.pH <= 7.8
+                && !hasScaling(test)
+        case "cyanuricAcid":
+            return test.cyanuricAcid > 50
+                && test.cyanuricAcid <= 90
+        default:
+            return false
+        }
+    }
+
+    private func shouldStronglyReduceSecondaryAdvisoryPenalty(
+        reading: ChemicalReading,
+        test: PoolTest,
+        recentHistory: [PoolTest],
+        config: PoolConfiguration
+    ) -> Bool {
+        guard isStableLowChlorineOnlyActiveIssue(test, recentHistory: recentHistory, config: config) else { return false }
 
         switch reading.key {
         case "totalAlkalinity":
@@ -911,7 +981,7 @@ struct ChemistryEngine {
                     effectDurationHours: 12,
                     doNotRepeatHours: 12
                 )
-            } else {
+            } else if shouldTreatHighPHWithAcid(reading.value, test: test, previousTest: previousTest) {
                 let targetPH = 7.6
                 let oz = kGal * 6 * ((reading.value - targetPH) / 0.2)
                 let product = pHDecreaserProduct(config.pHDecreaserPreference, ounces: oz)
@@ -920,13 +990,28 @@ struct ChemistryEngine {
                     actionDescription: "Lower pH into the safe operating range",
                     amount: product.amount,
                     unit: product.unit,
-                    instructions: "\(product.instructions) Avoid chasing alkalinity at the same time; retest pH first.",
+                    instructions: "\(product.instructions) Add this conservative dose, circulate, then retest pH before adding more. Avoid chasing alkalinity at the same time.",
                     targetParameter: "pH",
-                    urgency: reading.value > 8.0 ? .immediate : .recommended,
+                    urgency: pHDecreaserUrgency(for: reading.value, test: test, previousTest: previousTest),
                     expectedEffectParameter: "pH",
                     expectedDelta: targetPH - reading.value,
                     effectDelayHours: 4,
                     effectDurationHours: 24,
+                    doNotRepeatHours: 12
+                )
+            } else {
+                return TreatmentTemplate(
+                    chemicalName: "Monitor Elevated pH",
+                    actionDescription: "pH is only mildly elevated; retest before adding acid.",
+                    amount: 0,
+                    unit: "",
+                    instructions: "Keep circulation running and retest pH. Do not add acid unless pH reaches 7.8 or higher, pH keeps rising, or scaling appears.",
+                    targetParameter: "pH",
+                    urgency: .advisory,
+                    expectedEffectParameter: "pH",
+                    expectedDelta: 0,
+                    effectDelayHours: 0,
+                    effectDurationHours: 12,
                     doNotRepeatHours: 12
                 )
             }
@@ -997,13 +1082,13 @@ struct ChemistryEngine {
                 )
             } else if shouldTreatHighAlkalinityWithAcid(reading.value, test: test, previousTest: previousTest) {
                 let flOz = kGal * 0.8 * ((reading.value - 120) / 10)
-                let acidDose = practicalLiquidAcidDose(fluidOunces: flOz)
+                let acidDose = practicalLiquidAcidDose(fluidOunces: conservativeSingleLiquidAcidDose(fluidOunces: flOz))
                 return TreatmentTemplate(
                     chemicalName: "pH Decreaser / Muriatic Acid",
                     actionDescription: "Lower TA only because pH is high or drifting upward",
                     amount: acidDose.amount,
                     unit: acidDose.unit,
-                    instructions: "Use the acid/aeration process: add acid carefully, circulate, then aerate to raise pH without restoring TA. Do not repeat until pH and TA are retested.",
+                    instructions: "Use the acid/aeration process: add this conservative dose carefully, circulate, then aerate to raise pH without restoring TA. Retest pH in 4 hours and TA after circulation before adding more.",
                     targetParameter: "totalAlkalinity",
                     urgency: .optional,
                     expectedEffectParameter: "totalAlkalinity",
@@ -1018,7 +1103,7 @@ struct ChemistryEngine {
                     actionDescription: "TA is elevated, but pH does not currently justify acid.",
                     amount: 0,
                     unit: "",
-                    instructions: "Do not add muriatic acid solely for TA while pH is low-normal. Watch for repeated pH rise; correct TA only if pH keeps drifting upward.",
+                    instructions: "Do not add muriatic acid solely for TA while pH is in or near the safe range. Watch for repeated pH rise or scaling; correct TA only if pH keeps drifting upward or scaling appears.",
                     targetParameter: "totalAlkalinity",
                     urgency: .advisory,
                     expectedEffectParameter: "totalAlkalinity",
@@ -1212,9 +1297,18 @@ struct ChemistryEngine {
             .flatMap { $0.treatments }
             .filter { $0.isCompleted && !$0.isSkipped && $0.targetParameter == "freeChlorine" }
             .count
+        let repeatedLowFCReadings = recentHistory
+            .prefix(5)
+            .filter { historicalTest in
+                historicalTest.freeChlorine < freeChlorineMinimum(cyanuricAcid: historicalTest.cyanuricAcid)
+                    && !hasVisibleAlgae(historicalTest)
+                    && !hasCloudyWater(historicalTest)
+            }
+            .count
 
         return completedChlorineDoses >= 2
-            && test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
+            && repeatedLowFCReadings >= 2
+            && test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
     }
 
     private func preferredChlorinePreference(for test: PoolTest, config: PoolConfiguration) -> ChlorinePreference {
@@ -1476,21 +1570,29 @@ struct ChemistryEngine {
     private func pHDecreaserProduct(_ preference: PHDecreaserPreference, ounces: Double) -> ChemicalProduct {
         switch preference {
         case .muriaticAcid:
-            let dose = practicalLiquidAcidDose(fluidOunces: ounces)
+            let dose = practicalLiquidAcidDose(fluidOunces: conservativeSingleLiquidAcidDose(fluidOunces: ounces))
             return ChemicalProduct(
                 name: "pH Decreaser / Muriatic Acid",
                 amount: dose.amount,
                 unit: dose.unit,
-                instructions: "Add slowly to the deep end with the pump running. Never pre-mix with other chemicals. Retest pH in 4 hours."
+                instructions: "Add slowly to the deep end with the pump running. Never pre-mix with other chemicals. Retest pH in 4 hours before adding more."
             )
         case .dryAcid:
             return ChemicalProduct(
                 name: "pH Decreaser / Dry Acid",
-                amount: (ounces / 16).rounded(toPlaces: 1),
+                amount: (conservativeSingleDryAcidDose(ounces: ounces) / 16).rounded(toPlaces: 1),
                 unit: "lbs",
-                instructions: "Pre-dissolve in a bucket of pool water and add slowly with the pump running. Retest pH in 4 hours."
+                instructions: "Pre-dissolve in a bucket of pool water and add slowly with the pump running. Retest pH in 4 hours before adding more."
             )
         }
+    }
+
+    private func conservativeSingleLiquidAcidDose(fluidOunces: Double) -> Double {
+        min(max(0, fluidOunces), 64)
+    }
+
+    private func conservativeSingleDryAcidDose(ounces: Double) -> Double {
+        min(max(0, ounces), 64)
     }
 
     private func practicalLiquidAcidDose(fluidOunces: Double) -> (amount: Double, unit: String) {

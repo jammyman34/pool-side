@@ -249,7 +249,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2650;
+				LastUpgradeCheck = 2660;
 			};
 			buildConfigurationList = 4C0B3A621F7A33B93B4E1E55 /* Build configuration list for PBXProject "PoolSide" */;
 			developmentRegion = en;
@@ -334,7 +334,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.9;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -492,7 +492,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.9;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";

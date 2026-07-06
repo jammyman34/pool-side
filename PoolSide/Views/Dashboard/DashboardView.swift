@@ -393,7 +393,8 @@ struct DashboardView: View {
     private func score(for test: PoolTest) -> Int {
         viewModel.overallScore(
             for: test,
-            previousTest: viewModel.previousTest(before: test, in: tests)
+            previousTest: viewModel.previousTest(before: test, in: tests),
+            recentHistory: viewModel.recentHistory(before: test, in: tests)
         )
     }
 
