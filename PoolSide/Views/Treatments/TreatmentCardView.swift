@@ -425,7 +425,7 @@ struct TreatmentCardView: View {
 
     private var waitLabel: String? {
         guard allowsActions, treatment.minutesBeforeNext > 0, !treatment.isCompleted, !treatment.isSkipped else { return nil }
-        return "Retest in \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
+        return "Wait \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
     }
 }
 

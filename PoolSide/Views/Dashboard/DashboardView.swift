@@ -39,6 +39,10 @@ struct DashboardView: View {
                             scoreCard(test: test)
                                 .padding(.horizontal, 28)
 
+                            nextTestPill(for: test)
+                                .padding(.horizontal, 28)
+                                .padding(.top, 12)
+
                             // Recent tests
                             recentTestsSection
                                 .padding(.top, 28)
@@ -194,6 +198,30 @@ struct DashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func nextTestPill(for test: PoolTest) -> some View {
+        let recommendation = viewModel.nextTestRecommendation(for: test, in: tests)
+
+        return HStack(spacing: 8) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PoolColor.poolTeal)
+
+            Text("Next test \(nextTestPillDateText(recommendation.recommendedDate))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(PoolColor.sand.opacity(0.60), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(PoolColor.sunshine.opacity(0.40), lineWidth: 1)
+        )
+        .accessibilityLabel("Next pool test \(nextTestPillDateText(recommendation.recommendedDate))")
     }
 
     @ViewBuilder
@@ -567,6 +595,19 @@ struct DashboardView: View {
         let f = DateFormatter()
         f.timeStyle = .short
         return f.string(from: date)
+    }
+
+    private func nextTestPillDateText(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return "today at \(timeString(date))"
+        }
+        if Calendar.current.isDateInTomorrow(date) {
+            return "tomorrow at \(timeString(date))"
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return "\(formatter.string(from: date)) at \(timeString(date))"
     }
 }
 

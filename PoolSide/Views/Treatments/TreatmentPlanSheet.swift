@@ -70,6 +70,10 @@ struct TreatmentPlanSheet: View {
         WhyPlanConfidence(input: confidenceInput, test: test, config: viewModel.poolConfig)
     }
 
+    private var nextTestRecommendation: NextTestRecommendation {
+        viewModel.nextTestRecommendation(for: test, in: tests)
+    }
+
     private func shouldSuppressSavedAcidTreatment(_ treatment: Treatment) -> Bool {
         test.pH <= 7.4
             && !test.visualIndicators.contains(VisualIndicator.scaling.rawValue)
@@ -153,6 +157,8 @@ struct TreatmentPlanSheet: View {
 
                         whyThisPlanCard
 
+                        nextPoolTestCard
+
                         validationPromptCard
                     }
                     .padding(.horizontal, 16)
@@ -203,7 +209,8 @@ struct TreatmentPlanSheet: View {
             }
         }
         .onAppear {
-            isWhyThisPlanExpanded = shouldExpandWhyThisPlanByDefault
+            isWhyThisPlanExpanded = savedWhyThisPlanExpandedState
+            Task { await NotificationService.shared.checkAuthorizationStatus() }
         }
     }
 
@@ -368,11 +375,16 @@ struct TreatmentPlanSheet: View {
 
     // MARK: - Why This Plan
 
-    private var shouldExpandWhyThisPlanByDefault: Bool {
-        allTreatments.contains { $0.urgency == .immediate }
-            || confidenceLabel == .low
-            || currentScore < 60
-            || chemistryReadings.contains { $0.status == .critical }
+    private var whyThisPlanExpansionKey: String {
+        "TreatmentPlanSheet.whyThisPlanExpanded.\(test.id.uuidString)"
+    }
+
+    private var savedWhyThisPlanExpandedState: Bool {
+        UserDefaults.standard.bool(forKey: whyThisPlanExpansionKey)
+    }
+
+    private func saveWhyThisPlanExpandedState(_ isExpanded: Bool) {
+        UserDefaults.standard.set(isExpanded, forKey: whyThisPlanExpansionKey)
     }
 
     private var whyThisPlanCard: some View {
@@ -381,6 +393,7 @@ struct TreatmentPlanSheet: View {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
                     isWhyThisPlanExpanded.toggle()
                 }
+                saveWhyThisPlanExpandedState(isWhyThisPlanExpanded)
             } label: {
                 HStack(spacing: 10) {
                     Text("Why This Plan")
@@ -533,6 +546,40 @@ struct TreatmentPlanSheet: View {
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
     }
 
+    private var nextPoolTestCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Next Pool Test", systemImage: "calendar.badge.clock")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(PoolColor.primaryText)
+
+            Text(nextPoolTestDisplayText)
+                .font(.caption)
+                .foregroundStyle(PoolColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Reason: \(nextTestRecommendation.reason)")
+                .font(.caption)
+                .foregroundStyle(PoolColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(nextPoolTestReminderStatus)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(PoolColor.sand.opacity(0.45), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(PoolColor.sand, lineWidth: 1)
+                )
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
     private var whyPlanSummary: [String] {
         var lines: [String] = []
         let engine = ChemistryEngine()
@@ -635,35 +682,31 @@ struct TreatmentPlanSheet: View {
     }
 
     private var nextTestTiming: String {
-        if let chlorine = treatmentSteps.first(where: { $0.targetParameter == "freeChlorine" && $0.urgency == .immediate }) {
-            return "Retest FC and CC after \(chlorineRetestLabel(for: chlorine)) before adding more."
-        }
-        if let pH = treatmentSteps.first(where: { $0.targetParameter == "pH" }) {
-            return pH.urgency == .immediate ? "Retest pH after 4 hours." : "Retest pH after circulation, about 4 hours."
-        }
-        if treatmentSteps.contains(where: { $0.targetParameter == "cyanuricAcid" }) {
-            return "Retest CYA after 48–72 hours."
-        }
-        if confidenceInput.waterChangeScore >= 2 {
-            return "Retest after circulation or tomorrow."
-        }
-        if confidenceInput.chlorineDemandScore >= 3 {
-            return "Retest tomorrow."
-        }
-        if treatmentSteps.isEmpty {
-            return "Retest in 1–3 days."
-        }
-        return "Retest in 24 hours."
+        "\(nextTestRecommendation.title): \(nextPoolTestRelativeText). \(nextTestRecommendation.reason)"
     }
 
-    private func chlorineRetestLabel(for treatment: Treatment) -> String {
-        if treatment.chemicalName.contains("Granules") || treatment.chemicalName.contains("Dichlor") {
-            return "4 hours"
+    private var nextPoolTestDisplayText: String {
+        "Next pool test: \(nextPoolTestRelativeText)"
+    }
+
+    private var nextPoolTestRelativeText: String {
+        if Calendar.current.isDateInTomorrow(nextTestRecommendation.recommendedDate) {
+            return "Tomorrow around \(Self.timeFormatter.string(from: nextTestRecommendation.recommendedDate))"
         }
-        if treatment.chemicalName.contains("Tablets") {
-            return "24 hours"
+        if Calendar.current.isDateInToday(nextTestRecommendation.recommendedDate) {
+            return "Today around \(Self.timeFormatter.string(from: nextTestRecommendation.recommendedDate))"
         }
-        return "60 minutes"
+        return Self.reminderDateFormatter.string(from: nextTestRecommendation.recommendedDate)
+    }
+
+    private var nextPoolTestReminderStatus: String {
+        if !viewModel.poolConfig.enableNextPoolTestReminders {
+            return "Next pool test reminders are off"
+        }
+        if NotificationService.shared.isAuthorized {
+            return "Reminder scheduled"
+        }
+        return "Turn on notifications to get this reminder"
     }
 
     private var validationPrompt: String {
@@ -941,7 +984,10 @@ struct TreatmentPlanSheet: View {
 
     private func waitTimingText(for treatment: Treatment) -> String {
         if treatment.minutesBeforeNext > 0 {
-            return NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)
+            return "Wait \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step."
+        }
+        if let retest = NextTestRecommendationEngine().treatmentRetestRecommendation(for: treatment) {
+            return "Retest in \(NotificationService.waitLabel(minutes: max(1, Int(retest.interval / 60))))."
         }
         return treatment.targetParameter == "pH" ? "Retest pH after circulation." : "Retest based on plan timing."
     }
@@ -1026,6 +1072,19 @@ struct TreatmentPlanSheet: View {
         return formatter
     }()
 
+    private static let reminderDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     // MARK: - Complete Treatment
 
     @MainActor
@@ -1036,36 +1095,55 @@ struct TreatmentPlanSheet: View {
         viewModel.completeTreatment(treatment)
 
         // Find next pending step
-        let nextPending = allTreatments
+        let nextPending = treatmentSteps
             .filter { !$0.isCompleted && !$0.isSkipped }
             .sorted { $0.sortOrder < $1.sortOrder }
             .first
 
-        var scheduledReminderLabel: String?
+        var scheduledMessages: [String] = []
 
-        if minutesToWait > 0, let next = nextPending {
-            var canScheduleReminder = NotificationService.shared.isAuthorized
-            if !canScheduleReminder {
-                canScheduleReminder = await NotificationService.shared.requestPermission()
-            }
+        await NotificationService.shared.checkAuthorizationStatus()
 
-            if canScheduleReminder {
-                let identifier = await NotificationService.shared.scheduleNextStepReminder(
-                    nextTreatmentName: next.chemicalName,
-                    afterMinutes: minutesToWait
-                )
+        if viewModel.poolConfig.enableTreatmentStepReminders,
+           NotificationService.shared.isAuthorized,
+           minutesToWait > 0,
+           let next = nextPending {
+            if let identifier = await NotificationService.shared.scheduleTreatmentStepReminder(
+                treatmentID: treatment.id,
+                nextTreatmentName: next.chemicalName,
+                afterMinutes: minutesToWait
+            ) {
                 treatment.reminderNotificationIdentifier = identifier
-                scheduledReminderLabel = NotificationService.waitLabel(minutes: minutesToWait)
+                treatment.stepReminderNotificationIdentifier = identifier
+                scheduledMessages.append("next step in \(NotificationService.waitLabel(minutes: minutesToWait))")
+            }
+        }
+
+        if NotificationService.shared.isAuthorized,
+           let retest = NextTestRecommendationEngine().treatmentRetestRecommendation(
+                for: treatment,
+                completedAt: treatment.completedAt ?? Date()
+           ) {
+            let minutes = max(1, Int(retest.interval / 60))
+            if let identifier = await NotificationService.shared.scheduleTreatmentRetestReminder(
+                treatmentID: treatment.id,
+                parameter: treatment.targetParameter,
+                afterMinutes: minutes,
+                reason: retest.scheduledReason
+            ) {
+                treatment.retestReminderNotificationIdentifier = identifier
+                scheduledMessages.append("retest in \(NotificationService.waitLabel(minutes: minutes))")
             }
         }
 
         do {
             try modelContext.save()
-            if let scheduledReminderLabel {
-                toastMessage = ToastMessage.notificationSet(label: scheduledReminderLabel)
+            await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
+            if !scheduledMessages.isEmpty {
+                toastMessage = ToastMessage.notificationSet(label: scheduledMessages.joined(separator: ", "))
             } else if minutesToWait > 0, nextPending != nil {
                 toastMessage = ToastMessage(
-                    text: "Reminder not set. Notifications are off.",
+                    text: "Step reminder not set. Notifications are off.",
                     icon: "bell.slash",
                     color: PoolColor.secondaryText
                 )
@@ -1078,9 +1156,12 @@ struct TreatmentPlanSheet: View {
     @MainActor
     private func markTreatmentIncomplete(_ treatment: Treatment) async {
         let reminderCanceled = treatment.reminderNotificationIdentifier != nil
+            || treatment.stepReminderNotificationIdentifier != nil
+            || treatment.retestReminderNotificationIdentifier != nil
         viewModel.markTreatmentIncomplete(treatment)
         do {
             try modelContext.save()
+            await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
             if reminderCanceled {
                 toastMessage = ToastMessage.treatmentIncomplete(reminderCanceled: true)
             }
@@ -1094,6 +1175,7 @@ struct TreatmentPlanSheet: View {
         viewModel.skipTreatment(treatment)
         do {
             try modelContext.save()
+            await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
         } catch {
             viewModel.lastError = error.localizedDescription
         }
@@ -1104,6 +1186,7 @@ struct TreatmentPlanSheet: View {
         viewModel.restoreTreatment(treatment)
         do {
             try modelContext.save()
+            await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
         } catch {
             viewModel.lastError = error.localizedDescription
         }

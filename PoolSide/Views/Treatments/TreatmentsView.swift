@@ -106,7 +106,7 @@ struct TreatmentsView: View {
             VStack(spacing: 1) {
                 ForEach(pendingTreatments) { treatment in
                     TreatmentRowView(treatment: treatment, showCheckbox: true) {
-                        viewModel.completeTreatment(treatment)
+                        Task { await completeTreatment(treatment) }
                     }
                     .background(PoolColor.oceanBlue)
 
@@ -155,6 +155,53 @@ struct TreatmentsView: View {
                 .opacity(0.75)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        }
+    }
+
+    @MainActor
+    private func completeTreatment(_ treatment: Treatment) async {
+        let minutesToWait = treatment.minutesBeforeNext
+        viewModel.completeTreatment(treatment)
+
+        let samePlanTreatments = treatment.poolTest?.treatments ?? []
+        let nextPending = samePlanTreatments
+            .filter { !$0.isWatchlistItem && !$0.isCompleted && !$0.isSkipped }
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .first
+
+        await NotificationService.shared.checkAuthorizationStatus()
+
+        if viewModel.poolConfig.enableTreatmentStepReminders,
+           NotificationService.shared.isAuthorized,
+           minutesToWait > 0,
+           let nextPending,
+           let identifier = await NotificationService.shared.scheduleTreatmentStepReminder(
+                treatmentID: treatment.id,
+                nextTreatmentName: nextPending.chemicalName,
+                afterMinutes: minutesToWait
+           ) {
+            treatment.reminderNotificationIdentifier = identifier
+            treatment.stepReminderNotificationIdentifier = identifier
+        }
+
+        if NotificationService.shared.isAuthorized,
+           let retest = NextTestRecommendationEngine().treatmentRetestRecommendation(
+                for: treatment,
+                completedAt: treatment.completedAt ?? Date()
+           ) {
+            let minutes = max(1, Int(retest.interval / 60))
+            treatment.retestReminderNotificationIdentifier = await NotificationService.shared.scheduleTreatmentRetestReminder(
+                treatmentID: treatment.id,
+                parameter: treatment.targetParameter,
+                afterMinutes: minutes,
+                reason: retest.scheduledReason
+            )
+        }
+
+        try? modelContext.save()
+
+        if let latest = tests.sorted(by: { $0.date > $1.date }).first {
+            await viewModel.replaceNextPoolTestReminder(for: latest, allTests: tests)
         }
     }
 }

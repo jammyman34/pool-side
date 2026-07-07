@@ -14,6 +14,7 @@ final class PoolViewModel {
 
     // MARK: - Services
     private let chemistryEngine = ChemistryEngine()
+    private let nextTestRecommendationEngine = NextTestRecommendationEngine()
     private var aiService: AIService?
 
     // MARK: - Init
@@ -115,6 +116,7 @@ final class PoolViewModel {
             test.treatments
                 .filter { $0.isAIGenerated && (replacingCompletedPlan || (!$0.isCompleted && !$0.isSkipped)) }
                 .forEach {
+                    NotificationService.shared.cancelTreatmentReminder(for: $0)
                     modelContext.delete($0)
                 }
 
@@ -146,14 +148,12 @@ final class PoolViewModel {
     func markTreatmentIncomplete(_ treatment: Treatment) {
         treatment.isCompleted = false
         treatment.completedAt = nil
-        if let identifier = treatment.reminderNotificationIdentifier {
-            NotificationService.shared.cancel(identifier: identifier)
-            treatment.reminderNotificationIdentifier = nil
-        }
+        NotificationService.shared.cancelTreatmentReminder(for: treatment)
     }
 
     @MainActor
     func skipTreatment(_ treatment: Treatment) {
+        NotificationService.shared.cancelTreatmentReminder(for: treatment)
         treatment.isSkipped = true
         treatment.skippedAt = Date()
         treatment.isCompleted = false
@@ -182,13 +182,46 @@ final class PoolViewModel {
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
     }
 
+    func nextTestRecommendation(for test: PoolTest, in tests: [PoolTest]) -> NextTestRecommendation {
+        let allTreatments = test.treatments
+            .filter { !($0.isSkipped && $0.isWatchlistItem) }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let treatmentSteps = allTreatments.filter { !$0.isWatchlistItem }
+        let watchlist = allTreatments.filter { $0.isWatchlistItem }
+
+        return nextTestRecommendationEngine.recommendation(
+            for: test,
+            treatmentSteps: treatmentSteps,
+            watchlist: watchlist,
+            recentHistory: recentHistory(before: test, in: tests, limit: 10),
+            config: poolConfig
+        )
+    }
+
+    @MainActor
+    func replaceNextPoolTestReminder(for latestTest: PoolTest?, allTests: [PoolTest]) async {
+        guard poolConfig.enableNextPoolTestReminders else {
+            NotificationService.shared.cancelNextPoolTestReminder()
+            return
+        }
+
+        await NotificationService.shared.checkAuthorizationStatus()
+        guard NotificationService.shared.isAuthorized, let latestTest else {
+            NotificationService.shared.cancelNextPoolTestReminder()
+            return
+        }
+
+        let recommendation = nextTestRecommendation(for: latestTest, in: allTests)
+        _ = await NotificationService.shared.replaceNextPoolTestReminder(
+            at: recommendation.recommendedDate,
+            reason: recommendation.scheduledReason
+        )
+    }
+
     @MainActor
     func deletePoolTest(_ test: PoolTest, modelContext: ModelContext) throws {
         for treatment in test.treatments {
-            if let identifier = treatment.reminderNotificationIdentifier {
-                NotificationService.shared.cancel(identifier: identifier)
-                treatment.reminderNotificationIdentifier = nil
-            }
+            NotificationService.shared.cancelTreatmentReminder(for: treatment)
         }
 
         modelContext.delete(test)
@@ -220,6 +253,9 @@ final class PoolViewModel {
         }
 
         try modelContext.save()
+
+        let latestRemaining = remainingTests.sorted { $0.date > $1.date }.first
+        await replaceNextPoolTestReminder(for: latestRemaining, allTests: remainingTests)
     }
 
     // MARK: - Trend Analysis
