@@ -27,18 +27,14 @@ struct NextTestRecommendation {
     let source: Source
 
     var relativeLabel: String {
-        Self.relativeFormatter.localizedString(for: recommendedDate, relativeTo: Date())
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: recommendedDate, relativeTo: Date())
     }
 
     var scheduledReason: String {
         body.isEmpty ? reason : body
     }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
 }
 
 struct NextTestRecommendationEngine {
@@ -90,10 +86,14 @@ struct NextTestRecommendationEngine {
         }
 
         if confidence.waterChangeScore >= 2 || watchlist.contains(where: { $0.chemicalName.localizedCaseInsensitiveContains("Dilution") }) {
+            let backwashed = test.resolvedPoolConditions.backwashedFilter == .yes
+            let reason = backwashed
+                ? "Recent backwashing or water replacement can dilute readings."
+                : "Recent rain or water addition can dilute readings."
             return make(
                 from: test.date,
                 hours: 24,
-                reason: "Recent rain or water addition can dilute readings.",
+                reason: reason,
                 title: "Next pool test",
                 body: "Retest after circulation or tomorrow to confirm dilution effects before making large corrections.",
                 urgency: .watch,

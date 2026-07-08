@@ -58,6 +58,7 @@ struct AIRecommendationRequest: @unchecked Sendable {
             parts.append("    Cover open time: \(conditions.coverOpenTime.rawValue)")
             parts.append("    Organic debris: \(conditions.organicDebrisLoad.rawValue)")
             parts.append("    Skimmed debris: \(conditions.skimmedDebris.rawValue)")
+            parts.append("    Backwashed filter: \(conditions.backwashedFilter.rawValue)")
             parts.append("    Water added: \(conditions.waterAdded.rawValue)")
             parts.append("    Cleaning: \(conditions.cleaningActivity.rawValue)")
             parts.append("    Pool brushed: \(conditions.poolBrushed.rawValue)")

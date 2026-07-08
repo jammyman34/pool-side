@@ -645,7 +645,9 @@ struct TreatmentPlanSheet: View {
         if test.resolvedPoolConditions.hasOrganicLoadReduction {
             factors.append("Skimming, cleaning, or brushing may have reduced some organic load.")
         }
-        if confidenceInput.waterChangeScore >= 2 {
+        if test.resolvedPoolConditions.backwashedFilter == .yes {
+            factors.append("Backwashing and water replacement may explain dilution in CYA, hardness, alkalinity, salt, or chlorine.")
+        } else if confidenceInput.waterChangeScore >= 2 {
             factors.append("Recent water addition or rain may have diluted stabilizer, hardness, alkalinity, salt, or chlorine.")
         }
         if test.visualIndicators.contains(VisualIndicator.crystalClear.rawValue) && test.combinedChlorine <= 0.5 {
@@ -840,6 +842,7 @@ struct TreatmentPlanSheet: View {
             "- Swimming: \(conditions.swimmingLoad.exportText)",
             "- Rain: \(conditions.rainLoad.exportText)",
             "- Organic debris: \(conditions.organicDebrisLoad.exportText)",
+            "- Backwashed filter: \(conditions.backwashedFilter.exportText)",
             "- Water added: \(conditions.waterAdded.exportText)"
         ]
 
@@ -876,7 +879,7 @@ struct TreatmentPlanSheet: View {
             lines.append("- Acid/pH decreaser suppressed because pH is safe.")
         }
         if confidenceInput.waterChangeScore >= 2 {
-            lines.append("- Large CYA/CH/TA corrections avoided because recent water change or rain may explain dilution; retest is preferred unless values are unsafe.")
+            lines.append("- Large CYA/CH/TA corrections avoided because recent water change, backwashing, or rain may explain dilution; retest is preferred unless values are unsafe.")
         }
         if !treatmentSteps.contains(where: { $0.chemicalName.localizedCaseInsensitiveContains("shock") })
             && test.combinedChlorine <= 0.5
@@ -917,7 +920,7 @@ struct TreatmentPlanSheet: View {
             drivers.append("pool conditions increased chlorine demand")
         }
         if confidenceInput.waterChangeScore >= 2 {
-            drivers.append("possible dilution")
+            drivers.append(test.resolvedPoolConditions.backwashedFilter == .yes ? "possible dilution from backwashing/water replacement" : "possible dilution")
         }
 
         return drivers.isEmpty ? "No major score drivers; pool appears stable." : drivers.joined(separator: ", ")
@@ -959,7 +962,8 @@ struct TreatmentPlanSheet: View {
 
     private func shortConditionsSummary(for conditions: PoolConditions) -> String {
         guard conditions.hasAnyKnownCondition else { return "not logged" }
-        return "demand \(conditions.chlorineDemandContribution), dilution \(conditions.waterChangeContribution)"
+        let backwash = conditions.backwashedFilter == .yes ? ", backwashed filter" : ""
+        return "demand \(conditions.chlorineDemandContribution), dilution \(conditions.waterChangeContribution)\(backwash)"
     }
 
     private func formattedTreatmentAmount(_ treatment: Treatment) -> String {
@@ -1294,6 +1298,15 @@ private extension SkimmedDebris {
     var exportText: String {
         switch self {
         case .unknown: return "unknown / not logged"
+        case .no: return "no"
+        case .yes: return "yes"
+        }
+    }
+}
+
+private extension BackwashedFilter {
+    var exportText: String {
+        switch self {
         case .no: return "no"
         case .yes: return "yes"
         }

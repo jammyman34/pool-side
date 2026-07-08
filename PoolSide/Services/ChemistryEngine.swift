@@ -773,7 +773,7 @@ struct ChemistryEngine {
     ) -> RecommendationConfidenceInput {
         RecommendationConfidenceInput(
             hasChemistryData: true,
-            hasPoolConditions: test.resolvedPoolConditions.hasAnyKnownCondition,
+            hasPoolConditions: test.poolConditions != nil,
             hasVisualIndicators: !test.visualIndicators.isEmpty,
             hasRecentHistory: !recentHistory.isEmpty,
             hasCompletedTreatmentHistory: recentHistory.flatMap(\.treatments).contains { $0.isCompleted },
@@ -1617,12 +1617,19 @@ struct ChemistryEngine {
         }
 
         if waterChange >= 2 && !templates.contains(where: { $0.chemicalName == "Possible Dilution" }) {
+            let backwashed = test.resolvedPoolConditions.backwashedFilter == .yes
+            let actionDescription = backwashed
+                ? "Recent backwashing or water replacement may dilute chemistry."
+                : "Recent water addition or rain may dilute chemistry."
+            let instructions = backwashed
+                ? "Backwashing removes pool water and replacement water may dilute stabilizer, hardness, alkalinity, salt, and chlorine. Retest before making large corrections unless values are unsafe."
+                : "Recent water addition or rain may dilute stabilizer, hardness, alkalinity, salt, and chlorine. Retest before making large corrections unless values are unsafe."
             templates.append(TreatmentTemplate(
                 chemicalName: "Possible Dilution",
-                actionDescription: "Recent water addition or rain may dilute chemistry.",
+                actionDescription: actionDescription,
                 amount: 0,
                 unit: "",
-                instructions: "Recent water addition or rain may dilute stabilizer, hardness, alkalinity, salt, and chlorine. Retest before making large corrections unless values are unsafe.",
+                instructions: instructions,
                 targetParameter: "poolConditions",
                 urgency: .advisory,
                 doNotRepeatHours: 24

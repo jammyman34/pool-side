@@ -93,10 +93,11 @@ struct AddTestView: View {
     @State private var rainLoad: RainLoad = .unknown
     @State private var coverOpenTime: CoverOpenTime = .unknown
     @State private var organicDebrisLoad: OrganicDebrisLoad = .unknown
-    @State private var skimmedDebris: SkimmedDebris = .unknown
-    @State private var waterAdded: WaterAdded = .unknown
-    @State private var cleaningActivity: CleaningActivity = .unknown
-    @State private var poolBrushed: PoolBrushed = .unknown
+    @State private var skimmedDebris: SkimmedDebris = .no
+    @State private var backwashedFilter: BackwashedFilter = .no
+    @State private var waterAdded: WaterAdded = .none
+    @State private var cleaningActivity: CleaningActivity = .no
+    @State private var poolBrushed: PoolBrushed = .no
     @State private var originalSnapshot: TestFormSnapshot? = nil
     @State private var chemicalOrder: [ChemicalField] = ChemicalField.defaultDisplayOrder
     @State private var draggedChemical: ChemicalField? = nil
@@ -386,7 +387,8 @@ struct AddTestView: View {
             rainLoad: rainLoad,
             coverOpenTime: viewModel.poolConfig.hasCover ? coverOpenTime : .unknown,
             organicDebrisLoad: organicDebrisLoad,
-            skimmedDebris: shouldShowSkimmedDebris ? skimmedDebris : .unknown,
+            skimmedDebris: shouldShowSkimmedDebris ? skimmedDebris : .no,
+            backwashedFilter: backwashedFilter,
             waterAdded: waterAdded,
             cleaningActivity: cleaningActivity,
             poolBrushed: poolBrushed
@@ -608,7 +610,7 @@ struct AddTestView: View {
         }
         .onChange(of: organicDebrisLoad) { _, newValue in
             if newValue == .unknown || newValue == .none {
-                skimmedDebris = .unknown
+                skimmedDebris = .no
             }
         }
         .task {
@@ -1205,6 +1207,10 @@ private var heroBanner: some View {
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(PoolColor.secondaryText)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .layoutPriority(1)
             Spacer(minLength: 8)
 
             Button {
@@ -1651,6 +1657,8 @@ private var heroBanner: some View {
             }
 
             VStack(spacing: 18) {
+                poolConditionsGroupHeader("Environment")
+
                 poolConditionRow(
                     title: "Swimming",
                     selection: $swimmingLoad,
@@ -1715,8 +1723,10 @@ private var heroBanner: some View {
                     ]
                 )
 
+                conditionDivider
+                poolConditionsGroupHeader("Maintenance")
+
                 if shouldShowSkimmedDebris {
-                    conditionDivider
                     poolConditionRow(
                         title: "Skimmed",
                         selection: $skimmedDebris,
@@ -1725,7 +1735,17 @@ private var heroBanner: some View {
                             (.yes, "Yes", "Debris was skimmed out")
                         ]
                     )
+                    conditionDivider
                 }
+
+                poolConditionRow(
+                    title: "Backwashed Filter",
+                    selection: $backwashedFilter,
+                    options: [
+                        (.no, "No", "Filter was not backwashed"),
+                        (.yes, "Yes", "Backwashed and rinsed filter since last test log")
+                    ]
+                )
 
                 conditionDivider
                 poolConditionRow(
@@ -1762,6 +1782,7 @@ private var heroBanner: some View {
                     )
                 }
 
+                conditionDivider
                 poolConditionRow(
                     title: "Pool Brushed",
                     selection: $poolBrushed,
@@ -1788,6 +1809,15 @@ private var heroBanner: some View {
         Rectangle()
             .fill(PoolColor.divider)
             .frame(height: 1)
+    }
+
+    private func poolConditionsGroupHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2)
+            .fontWeight(.bold)
+            .foregroundStyle(PoolColor.secondaryText)
+            .tracking(0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func poolConditionRow<Value: Hashable>(
@@ -1999,7 +2029,8 @@ private var heroBanner: some View {
         rainLoad = conditions.rainLoad
         coverOpenTime = conditions.coverOpenTime
         organicDebrisLoad = conditions.organicDebrisLoad
-        skimmedDebris = shouldShowSkimmedDebris ? conditions.skimmedDebris : .unknown
+        skimmedDebris = shouldShowSkimmedDebris ? conditions.skimmedDebris : .no
+        backwashedFilter = conditions.backwashedFilter
         waterAdded = conditions.waterAdded
         cleaningActivity = conditions.cleaningActivity
         poolBrushed = conditions.poolBrushed

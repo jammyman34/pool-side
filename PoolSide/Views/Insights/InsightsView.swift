@@ -354,7 +354,7 @@ struct InsightsView: View {
     }
 
     private var recentConditionsLogged: Bool {
-        tests.prefix(5).contains { $0.resolvedPoolConditions.hasAnyKnownCondition }
+        tests.prefix(5).contains { $0.poolConditions != nil }
     }
 
     private func poolPersonalityInsights() -> [PersonalityInsight] {
@@ -452,6 +452,14 @@ struct InsightsView: View {
         let waterChange = latest.resolvedPoolConditions.waterChangeContribution
 
         if waterChange >= 2 {
+            if latest.resolvedPoolConditions.backwashedFilter == .yes {
+                return PersonalityInsight(
+                    title: "CYA Dilution Watch",
+                    message: "Recent backwashing may affect stabilizer or hardness readings. Retest before making large corrections unless values are unsafe.",
+                    icon: "arrow.down.forward.circle.fill",
+                    color: PoolColor.oceanBlue
+                )
+            }
             return PersonalityInsight(
                 title: "CYA Dilution Watch",
                 message: "Recent water addition or rain may affect stabilizer readings. Retest before making large corrections unless values are unsafe.",
@@ -559,7 +567,11 @@ struct InsightsView: View {
         }
 
         if conditions.waterChangeContribution >= 2 {
-            messages.append("Recent water addition or rain may explain lower CYA, hardness, alkalinity, salt, or chlorine.")
+            if conditions.backwashedFilter == .yes {
+                messages.append("Recent backwashing may explain lower stabilizer, hardness, alkalinity, salt, or chlorine.")
+            } else {
+                messages.append("Recent water addition or rain may explain lower CYA, hardness, alkalinity, salt, or chlorine.")
+            }
         }
 
         if let previous = tests.dropFirst().first, latest.freeChlorine < previous.freeChlorine - 1.0 {
