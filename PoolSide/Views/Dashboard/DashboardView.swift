@@ -45,6 +45,7 @@ struct DashboardView: View {
 
                             // Recent tests
                             recentTestsSection
+                                .padding(.horizontal, 28)
                                 .padding(.top, 28)
                         } else {
                             firstTimeCard
@@ -224,23 +225,66 @@ struct DashboardView: View {
         .accessibilityLabel("Next pool test \(nextTestPillDateText(recommendation.recommendedDate))")
     }
 
+    private func dashboardHeroTitle(for test: PoolTest) -> String {
+        switch swimReadinessStatus(for: test) {
+        case .readyNow:
+            return "Pool is ready"
+        case .readyAfterWait:
+            return "Almost swim-ready"
+        case .notRecommended:
+            return "Check before swimming"
+        case .unknown:
+            break
+        }
+
+        let pendingActions = test.treatments.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
+        if pendingActions.contains(where: { $0.urgency == .immediate || $0.urgency == .recommended }) {
+            return "Review your plan"
+        }
+
+        let activeTreatments = test.treatments.filter { !$0.isCompleted && !$0.isSkipped }
+        if activeTreatments.isEmpty {
+            return "All clear for now"
+        }
+
+        return "Latest pool check"
+    }
+
+    private func swimReadinessStatus(for test: PoolTest) -> DashboardSwimReadinessStatus {
+        let indicators = Set(test.visualIndicators)
+        let hasVisibleProblem = indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+            || indicators.contains(VisualIndicator.cloudyWater.rawValue)
+            || indicators.contains(VisualIndicator.foam.rawValue)
+        let targetRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
+
+        if hasVisibleProblem
+            || test.pH < 7.2
+            || test.pH > 7.8
+            || test.combinedChlorine > 0.5
+            || test.freeChlorine < targetRange.lowerBound {
+            return .notRecommended
+        }
+
+        if test.freeChlorine > max(10, targetRange.upperBound) {
+            return .readyAfterWait
+        }
+
+        if test.visualIndicators.isEmpty {
+            return .unknown
+        }
+
+        return .readyNow
+    }
+
     @ViewBuilder
     private var heroTitle: some View {
         if let test = latestTest {
-            let status = viewModel.overallStatus(for: test)
-            let score = score(for: test)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Your pool looks")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundStyle(PoolColor.primaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-
-                Text(scoreLabel(score).lowercased() + "!")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundStyle(status == .ideal ? PoolColor.poolTeal : status.color)
-                    .lineLimit(1)
-            }
+            Text(dashboardHeroTitle(for: test))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundStyle(PoolColor.primaryText)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
         } else {
             Text(welcomeMessage)
                 .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -258,12 +302,7 @@ struct DashboardView: View {
         return HStack(alignment: .center, spacing: 18) {
             VStack(spacing: 8) {
                 ScoreRing(score: score, size: 118)
-                Text("Pool Score")
-                    .font(.caption)
-                    .foregroundStyle(PoolColor.secondaryText)
-                Text(scoreLabel(score))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(scoreColor(score))
+                currentStatusRow(for: test)
             }
             .frame(width: 134)
 
@@ -273,8 +312,7 @@ struct DashboardView: View {
                 .padding(.vertical, 6)
 
             VStack(spacing: 0) {
-                let readings = Array(viewModel.readings(for: test).prefix(5))
-                ForEach(readings) { reading in
+                ForEach(dashboardReadings(for: test)) { reading in
                     readingRow(reading)
                 }
             }
@@ -289,14 +327,46 @@ struct DashboardView: View {
         .shadow(color: .black.opacity(0.05), radius: 10, y: 3)
     }
 
+    private func currentStatusRow(for test: PoolTest) -> some View {
+        let summary = viewModel.currentStatusSummary(for: test)
+
+        return Button {
+            editRoute = DashboardEditRoute(test: test, startsOnTreatmentPlan: true)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Current Status")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+
+                HStack(alignment: .center, spacing: 8) {
+                    Text(summary)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PoolColor.primaryText)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(PoolColor.secondaryText.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Current status: \(summary). Open treatment plan")
+    }
+
     private func readingRow(_ reading: ChemicalReading) -> some View {
         HStack(spacing: 12) {
-            Text(reading.parameter)
+            Text(dashboardAbbreviation(for: reading))
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(PoolColor.primaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: 34, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -334,7 +404,7 @@ struct DashboardView: View {
 //                    .fontWeight(.medium)
 //                    .foregroundStyle(PoolColor.poolTeal)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 4)
             .padding(.bottom, 12)
 
             VStack(spacing: 0) {
@@ -367,11 +437,12 @@ struct DashboardView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
-            .padding(.horizontal, 16)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func recentTestRow(_ test: PoolTest) -> some View {
@@ -414,6 +485,7 @@ struct DashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(PoolColor.secondaryText.opacity(0.5))
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
     }
@@ -566,6 +638,36 @@ struct DashboardView: View {
         }
     }
 
+    private func dashboardReadings(for test: PoolTest) -> [ChemicalReading] {
+        let previousTest = viewModel.previousTest(before: test, in: tests)
+        let readings = viewModel.readings(for: test, previousTest: previousTest)
+        let dashboardOrder = [
+            "freeChlorine",
+            "pH",
+            "totalAlkalinity",
+            "cyanuricAcid",
+            "calciumHardness",
+            "saltLevel"
+        ]
+
+        return dashboardOrder.compactMap { key in
+            readings.first { $0.key == key }
+        }
+    }
+
+    private func dashboardAbbreviation(for reading: ChemicalReading) -> String {
+        switch reading.key {
+        case "pH": return "pH"
+        case "freeChlorine": return "FC"
+        case "totalAlkalinity": return "TA"
+        case "calciumHardness": return "CH"
+        case "cyanuricAcid": return "CYA"
+        case "saltLevel": return "Salt"
+        default: return String(reading.parameter.prefix(2))
+        }
+    }
+
+
     private func formattedValue(_ reading: ChemicalReading) -> String {
         reading.parameter == "pH"
             ? String(format: "%.1f", reading.value)
@@ -576,12 +678,13 @@ struct DashboardView: View {
 
     private func barFill(_ reading: ChemicalReading) -> CGFloat {
         switch reading.key {
-        case "pH":              return CGFloat((reading.value - 6.4) / 2.4).clamped(to: 0.05...1)
-        case "freeChlorine":    return CGFloat(reading.value / 6).clamped(to: 0.05...1)
-        case "totalAlkalinity": return CGFloat(reading.value / 180).clamped(to: 0.05...1)
-        case "calciumHardness": return CGFloat(reading.value / 600).clamped(to: 0.05...1)
-        case "cyanuricAcid":    return CGFloat(reading.value / 120).clamped(to: 0.05...1)
-        default:                return 0.5
+        case "pH":                return CGFloat((reading.value - 6.4) / 2.4).clamped(to: 0.05...1)
+        case "freeChlorine":      return CGFloat(reading.value / 12).clamped(to: 0.05...1)
+        case "totalAlkalinity":   return CGFloat(reading.value / 180).clamped(to: 0.05...1)
+        case "calciumHardness":   return CGFloat(reading.value / 600).clamped(to: 0.05...1)
+        case "cyanuricAcid":      return CGFloat(reading.value / 120).clamped(to: 0.05...1)
+        case "saltLevel":         return CGFloat(reading.value / 5000).clamped(to: 0.05...1)
+        default:                  return 0.5
         }
     }
 
@@ -618,24 +721,29 @@ private struct DashboardEditRoute: Identifiable {
     var id: UUID { test.id }
 }
 
+private enum DashboardSwimReadinessStatus {
+    case readyNow
+    case readyAfterWait
+    case notRecommended
+    case unknown
+}
+
 private enum DashboardWelcomeMessage {
     static let messages = [
-        "Welcome to\nPool Side!",
-        "Let's get your\nwater dialed in.",
-        "Clear water\nstarts here.",
-        "Pool care,\nmade simple.",
-        "Quick water check time?",
-        "Your pool plan\nstarts here.",
-        "Fresh readings,\nbetter swims.",
-        "Time to tune up\nthe water.",
-        "Keep your pool\nswim-ready.",
-        "A balanced pool\nis a happy pool.",
-        "Let's make the\nwater sparkle.",
-        "Test today,\nswim easier."
+        "Welcome to\nPool Side",
+        "Keep your pool\nswim-ready",
+        "Clear water\nstarts here",
+        "Healthy water,\neasier swims",
+        "Test today,\nswim easier",
+        "Know what\nto do next",
+        "Stay ahead of\npool problems",
+        "Simple care,\nclear water",
+        "Your pool plan\nstarts here",
+        "Better logs,\nbetter swims"
     ]
 
     static func random() -> String {
-        messages.randomElement() ?? "Welcome to\nPool Side!"
+        messages.randomElement() ?? "Welcome to\nPool Side"
     }
 }
 
@@ -685,6 +793,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isOpen)
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
         }
+        .frame(maxWidth: .infinity)
         .clipped()
     }
 

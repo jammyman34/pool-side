@@ -28,6 +28,7 @@
 		8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40260884F73467DEAD0224AF /* NotificationService.swift */; };
 		9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */; };
 		9B8AF63D2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */; };
+		9B8AF63F2FFE992100CB6A85 /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */; };
 		9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */; };
 		AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DF5015684F5FE62BCF2E0C /* AddTestView.swift */; };
 		B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */; };
@@ -58,6 +59,7 @@
 		9227EFAE07F3F0E9EA12F090 /* TreatmentPlanSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentPlanSheet.swift; sourceTree = "<group>"; };
 		9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConditions.swift; sourceTree = "<group>"; };
 		9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextTestRecommendationEngine.swift; sourceTree = "<group>"; };
+		9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
 		9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
 		9BF358082FE2F10C00853A99 /* PoolSide.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PoolSide.entitlements; sourceTree = "<group>"; };
 		A2B1172BBFB76FCBAB212A92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -154,6 +156,7 @@
 				A664D93FFE0BFE1680980E89 /* Services */,
 				BBB3F6E19B7F92C1D7208B47 /* ViewModels */,
 				9FE651517B2EAC666399DAC8 /* Views */,
+				9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */,
 			);
 			path = PoolSide;
 			sourceTree = "<group>";
@@ -281,6 +284,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9B8AF63F2FFE992100CB6A85 /* Launch Screen.storyboard in Resources */,
 				B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -338,6 +342,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5CWYP72CU8;
 				INFOPLIST_FILE = PoolSide/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -496,6 +501,7 @@
 				DEBUG = YES;
 				DEVELOPMENT_TEAM = 5CWYP72CU8;
 				INFOPLIST_FILE = PoolSide/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

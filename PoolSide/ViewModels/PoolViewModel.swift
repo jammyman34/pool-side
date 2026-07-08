@@ -67,6 +67,10 @@ final class PoolViewModel {
         )
     }
 
+    func currentStatusSummary(for test: PoolTest) -> String {
+        chemistryEngine.currentStatusSummary(for: test, treatments: test.treatments, config: poolConfig)
+    }
+
     func previousTest(before test: PoolTest, in tests: [PoolTest]) -> PoolTest? {
         tests
             .filter { $0.id != test.id && $0.date < test.date }

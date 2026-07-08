@@ -329,6 +329,82 @@ struct ChemistryEngine {
         return readings
     }
 
+    // MARK: - Current Status Summary
+
+    func currentStatusSummary(for test: PoolTest, treatments: [Treatment] = [], config: PoolConfiguration = .current) -> String {
+        let indicators = Set(test.visualIndicators)
+
+        if indicators.contains(VisualIndicator.greenWater.rawValue) || indicators.contains(VisualIndicator.algaeSpots.rawValue) {
+            return "Algae recovery"
+        }
+
+        if indicators.contains(VisualIndicator.cloudyWater.rawValue) && !indicators.contains(VisualIndicator.crystalClear.rawValue) {
+            return "Cloudy water"
+        }
+
+        if test.pH < 7.0 || test.pH > 8.0 {
+            return "Unsafe water chemistry"
+        }
+
+        let minimumFC = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+        let targetLower = freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
+        let lowChlorine = test.freeChlorine < targetLower || test.freeChlorine < minimumFC
+        let elevatedAlkalinity = test.totalAlkalinity > 140
+        let elevatedStabilizer = test.cyanuricAcid > 50
+        let elevatedCombinedChlorine = test.combinedChlorine > 0.5
+        let hardnessIssue = calciumHardnessStatus(test.calciumHardness, surface: config.surfaceType) != .ideal
+        let saltIssue = config.isSaltwater && test.saltLevel.map { saltStatus($0) != .ideal } == true
+        let possibleDilution = test.resolvedPoolConditions.waterChangeContribution >= 2
+            || treatments.contains { $0.chemicalName.localizedCaseInsensitiveContains("Dilution") }
+
+        let issueCount = [
+            lowChlorine,
+            elevatedAlkalinity,
+            elevatedStabilizer,
+            elevatedCombinedChlorine,
+            hardnessIssue,
+            saltIssue
+        ].filter { $0 }.count
+
+        if issueCount >= 3 {
+            return "Multiple issues"
+        }
+
+        if possibleDilution && issueCount <= 1 {
+            return "Possible dilution"
+        }
+
+        if lowChlorine && elevatedAlkalinity {
+            return "Low chlorine and elevated alkalinity"
+        }
+
+        if lowChlorine {
+            return "Low chlorine"
+        }
+
+        if elevatedAlkalinity {
+            return "Elevated alkalinity"
+        }
+
+        if elevatedStabilizer {
+            return "Elevated stabilizer"
+        }
+
+        if elevatedCombinedChlorine {
+            return "Elevated combined chlorine"
+        }
+
+        if hardnessIssue {
+            return "Hardness needs attention"
+        }
+
+        if saltIssue {
+            return "Salt needs attention"
+        }
+
+        return "Balanced water"
+    }
+
     // MARK: - Overall Score
 
     func overallScore(
