@@ -204,25 +204,29 @@ struct DashboardView: View {
     private func nextTestPill(for test: PoolTest) -> some View {
         let recommendation = viewModel.nextTestRecommendation(for: test, in: tests)
 
-        return HStack(spacing: 8) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(PoolColor.poolTeal)
+        return TimelineView(.periodic(from: .now, by: 60)) { context in
+            let label = nextTestPillText(for: recommendation.recommendedDate, now: context.date)
 
-            Text("Next test \(nextTestPillDateText(recommendation.recommendedDate))")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(PoolColor.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PoolColor.poolTeal)
+
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PoolColor.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(PoolColor.sand.opacity(0.60), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(PoolColor.sunshine.opacity(0.40), lineWidth: 1)
+            )
+            .accessibilityLabel(label)
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
-        .background(PoolColor.sand.opacity(0.60), in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(PoolColor.sunshine.opacity(0.40), lineWidth: 1)
-        )
-        .accessibilityLabel("Next pool test \(nextTestPillDateText(recommendation.recommendedDate))")
     }
 
     private func dashboardHeroTitle(for test: PoolTest) -> String {
@@ -698,6 +702,14 @@ struct DashboardView: View {
         let f = DateFormatter()
         f.timeStyle = .short
         return f.string(from: date)
+    }
+
+    private func nextTestPillText(for date: Date, now: Date = Date()) -> String {
+        if date <= now {
+            return "Test pool water today"
+        }
+
+        return "Next test \(nextTestPillDateText(date))"
     }
 
     private func nextTestPillDateText(_ date: Date) -> String {

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import AudioToolbox
 
 extension LiquidDropKitBrand {
     var icon: Image {
@@ -52,6 +53,24 @@ private enum TaylorDropEntryField: String, Identifiable {
     }
 }
 
+private enum CyaMixingTimerState: Equatable {
+    static let duration: TimeInterval = 30
+
+    case idle
+    case running(endTime: Date)
+    case paused(remaining: TimeInterval)
+
+    var isIdle: Bool {
+        if case .idle = self { return true }
+        return false
+    }
+
+    var isRunning: Bool {
+        if case .running = self { return true }
+        return false
+    }
+}
+
 struct AddTestView: View {
 
     private static let taylorSampleSizeDefaultsKey = "AddTestView.taylorSampleSize"
@@ -69,6 +88,7 @@ struct AddTestView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(PoolViewModel.self) private var viewModel
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
@@ -110,6 +130,8 @@ struct AddTestView: View {
     @State private var directDropEntryField: TaylorDropEntryField? = nil
     @State private var directDropEntryText: String = ""
     @State private var directDropEntryWantsFocus: Bool = false
+    @State private var cyaMixingTimer: CyaMixingTimerState = .idle
+    @State private var showingCyaTimerToast = false
 
     // Post-save
     @State private var savedTest: PoolTest? = nil
@@ -487,6 +509,14 @@ struct AddTestView: View {
                 .scrollDisabled(draggedChemical != nil)
                 .ignoresSafeArea(edges: .top)
 
+                if showingCyaTimerToast {
+                    cyaTimerToast
+                        .padding(.top, 62)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(20)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
+
                 // Treatment button pinned at bottom
                 Button {
                     Task { await save() }
@@ -596,6 +626,9 @@ struct AddTestView: View {
             if !liquidDropKitBrand.isAvailable(for: testMethod) {
                 liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
             }
+            if testMethod != .liquidDropKit {
+                resetCyaMixingTimer()
+            }
             if matchesConfigDefaults {
                 saveTestMethodAsDefault = false
             }
@@ -608,6 +641,11 @@ struct AddTestView: View {
         .onChange(of: taylorSampleSize) { _, newValue in
             saveTaylorSampleSize(newValue)
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                checkCyaMixingTimerAfterResume()
+            }
+        }
         .onChange(of: organicDebrisLoad) { _, newValue in
             if newValue == .unknown || newValue == .none {
                 skimmedDebris = .no
@@ -616,6 +654,21 @@ struct AddTestView: View {
         .task {
             await showInitialTreatmentPlanIfNeeded()
         }
+    }
+
+    private var cyaTimerToast: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(PoolColor.statusIdeal)
+            Text("Time to measure!")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Hero Banner
@@ -685,26 +738,7 @@ private var heroBanner: some View {
         let meterColor = meterColor(for: status)
 
         return HStack(alignment: .top, spacing: 16) {
-            ChemicalIcon(field: field, size: 54)
-                .contentShape(RoundedRectangle(cornerRadius: 14))
-                .overlay {
-                    if !isTaylorMode {
-                        ReorderLongPressOverlay(
-                            onBegan: {
-                                beginChemicalDrag(for: field)
-                            },
-                            onChanged: { translation in
-                                dragTranslation = translation
-                                updateChemicalOrder(for: field, with: translation)
-                            },
-                            onEnded: {
-                                endChemicalDrag()
-                            }
-                        )
-                    }
-                }
-                .accessibilityLabel(isTaylorMode ? label : "Reorder \(label)")
-                .accessibilityHint(isTaylorMode ? "" : "Touch and hold, then drag up or down to reorder this chemical")
+            chemicalIconColumn(field: field, label: label)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -762,6 +796,157 @@ private var heroBanner: some View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private func chemicalIconColumn(field: ChemicalField, label: String) -> some View {
+        VStack(spacing: 6) {
+            if shouldShowCyaMixingTimer(for: field) {
+                cyaMixingTimerButton(field: field, label: label)
+            } else {
+                ChemicalIcon(field: field, size: 54)
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        if !isTaylorMode {
+                            ReorderLongPressOverlay(
+                                onBegan: {
+                                    beginChemicalDrag(for: field)
+                                },
+                                onChanged: { translation in
+                                    dragTranslation = translation
+                                    updateChemicalOrder(for: field, with: translation)
+                                },
+                                onEnded: {
+                                    endChemicalDrag()
+                                }
+                            )
+                        }
+                    }
+                    .accessibilityLabel(isTaylorMode ? label : "Reorder \(label)")
+                    .accessibilityHint(isTaylorMode ? "" : "Touch and hold, then drag up or down to reorder this chemical")
+            }
+        }
+        .frame(width: 62)
+    }
+
+    private func shouldShowCyaMixingTimer(for field: ChemicalField) -> Bool {
+        field == .cyanuricAcid && testMethod == .liquidDropKit
+    }
+
+    private func cyaMixingTimerButton(field: ChemicalField, label: String) -> some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { context in
+            let isRunning = cyaMixingTimer.isRunning
+            let remainingSeconds = cyaMixingRemainingSeconds(now: context.date)
+
+            VStack(spacing: 6) {
+                ZStack {
+                    ChemicalIcon(field: field, size: 54)
+                        .opacity(isRunning ? 0.60 : 1)
+
+                    if isRunning {
+                        Image(systemName: "pause.circle.fill")
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(Color(hex: "848484").opacity(0.85))
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+                .onTapGesture {
+                    toggleCyaMixingTimer(now: context.date)
+                }
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    resetCyaMixingTimer(feedback: true)
+                }
+                .accessibilityLabel("CYA mixing timer")
+                .accessibilityHint("Tap to start, pause, or resume. Touch and hold to reset.")
+
+                HStack(spacing: 4) {
+                    if cyaMixingTimer.isIdle {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color(hex: "848484"))
+                    }
+
+                    Text(cyaMixingTimerLabel(remainingSeconds: remainingSeconds))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color(hex: "848484"))
+                        .monospacedDigit()
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(width: 62)
+            }
+            .onChange(of: remainingSeconds) { _, newValue in
+                if cyaMixingTimer.isRunning && newValue <= 0 {
+                    completeCyaMixingTimer()
+                }
+            }
+        }
+    }
+
+    private func toggleCyaMixingTimer(now: Date = Date()) {
+        switch cyaMixingTimer {
+        case .idle:
+            cyaMixingTimer = .running(endTime: now.addingTimeInterval(CyaMixingTimerState.duration))
+        case .running(let endTime):
+            let remaining = max(0, endTime.timeIntervalSince(now))
+            cyaMixingTimer = .paused(remaining: remaining)
+        case .paused(let remaining):
+            cyaMixingTimer = .running(endTime: now.addingTimeInterval(remaining))
+        }
+    }
+
+    private func resetCyaMixingTimer(feedback: Bool = false) {
+        cyaMixingTimer = .idle
+        if feedback {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    private func completeCyaMixingTimer() {
+        guard cyaMixingTimer.isRunning else { return }
+        cyaMixingTimer = .idle
+        showCyaTimerCompletionFeedback()
+    }
+
+    private func checkCyaMixingTimerAfterResume() {
+        guard case .running(let endTime) = cyaMixingTimer else { return }
+        if endTime <= Date() {
+            completeCyaMixingTimer()
+        }
+    }
+
+    private func cyaMixingRemainingSeconds(now: Date = Date()) -> Int {
+        switch cyaMixingTimer {
+        case .idle:
+            return Int(CyaMixingTimerState.duration)
+        case .running(let endTime):
+            return Int(ceil(max(0, endTime.timeIntervalSince(now))))
+        case .paused(let remaining):
+            return Int(ceil(max(0, remaining)))
+        }
+    }
+
+    private func cyaMixingTimerLabel(remainingSeconds: Int) -> String {
+        switch cyaMixingTimer {
+        case .idle:
+            return "\(remainingSeconds) sec"
+        case .running, .paused:
+            return "Mixing\n\(remainingSeconds) sec"
+        }
+    }
+
+    private func showCyaTimerCompletionFeedback() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        AudioServicesPlaySystemSound(1057)
+
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+            showingCyaTimerToast = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showingCyaTimerToast = false
+            }
+        }
     }
 
     private func beginDirectEntry(for field: ChemicalField, value: Double, format: String) {
