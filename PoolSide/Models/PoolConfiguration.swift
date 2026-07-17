@@ -17,6 +17,7 @@ struct PoolConfiguration: Codable, Equatable {
     var enableNextPoolTestReminders: Bool = true
     var enableTreatmentStepReminders: Bool = true
     var chlorinePreference: ChlorinePreference = .calHypo
+    var lastNonSaltChlorinePreference: ChlorinePreference = .liquidChlorine10
     var pHIncreaserPreference: PHIncreaserPreference = .sodaAsh
     var pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid
     var alkalinityIncreaserPreference: AlkalinityIncreaserPreference = .sodiumBicarbonate
@@ -40,6 +41,7 @@ struct PoolConfiguration: Codable, Equatable {
         enableNextPoolTestReminders: Bool = true,
         enableTreatmentStepReminders: Bool = true,
         chlorinePreference: ChlorinePreference = .calHypo,
+        lastNonSaltChlorinePreference: ChlorinePreference = .liquidChlorine10,
         pHIncreaserPreference: PHIncreaserPreference = .sodaAsh,
         pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid,
         alkalinityIncreaserPreference: AlkalinityIncreaserPreference = .sodiumBicarbonate,
@@ -62,6 +64,7 @@ struct PoolConfiguration: Codable, Equatable {
         self.enableNextPoolTestReminders = enableNextPoolTestReminders
         self.enableTreatmentStepReminders = enableTreatmentStepReminders
         self.chlorinePreference = chlorinePreference
+        self.lastNonSaltChlorinePreference = lastNonSaltChlorinePreference
         self.pHIncreaserPreference = pHIncreaserPreference
         self.pHDecreaserPreference = pHDecreaserPreference
         self.alkalinityIncreaserPreference = alkalinityIncreaserPreference
@@ -87,6 +90,7 @@ struct PoolConfiguration: Codable, Equatable {
         enableNextPoolTestReminders = try container.decodeIfPresent(Bool.self, forKey: .enableNextPoolTestReminders) ?? true
         enableTreatmentStepReminders = try container.decodeIfPresent(Bool.self, forKey: .enableTreatmentStepReminders) ?? true
         chlorinePreference = try container.decodeIfPresent(ChlorinePreference.self, forKey: .chlorinePreference) ?? .calHypo
+        lastNonSaltChlorinePreference = try container.decodeIfPresent(ChlorinePreference.self, forKey: .lastNonSaltChlorinePreference) ?? (chlorinePreference.isSaltGenerator ? .liquidChlorine10 : chlorinePreference)
         pHIncreaserPreference = try container.decodeIfPresent(PHIncreaserPreference.self, forKey: .pHIncreaserPreference) ?? .sodaAsh
         pHDecreaserPreference = try container.decodeIfPresent(PHDecreaserPreference.self, forKey: .pHDecreaserPreference) ?? .muriaticAcid
         alkalinityIncreaserPreference = try container.decodeIfPresent(AlkalinityIncreaserPreference.self, forKey: .alkalinityIncreaserPreference) ?? .sodiumBicarbonate
@@ -95,6 +99,7 @@ struct PoolConfiguration: Codable, Equatable {
         location = try container.decodeIfPresent(String.self, forKey: .location) ?? ""
         latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
+        normalizeChemicalPreferences()
     }
 
     // MARK: - Persistence key
@@ -122,6 +127,36 @@ struct PoolConfiguration: Codable, Equatable {
     /// Removes all saved configuration (sign out)
     static func clearCurrent() {
         UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+
+    mutating func setSaltwater(_ enabled: Bool) {
+        if enabled {
+            if !chlorinePreference.isSaltGenerator {
+                lastNonSaltChlorinePreference = chlorinePreference
+            }
+            chlorinePreference = .saltGenerator
+        } else {
+            if !lastNonSaltChlorinePreference.isValidForSaltwater(false) {
+                lastNonSaltChlorinePreference = .liquidChlorine10
+            }
+            if chlorinePreference.isSaltGenerator || !chlorinePreference.isValidForSaltwater(false) {
+                chlorinePreference = lastNonSaltChlorinePreference
+            }
+        }
+        isSaltwater = enabled
+    }
+
+    mutating func normalizeChemicalPreferences() {
+        if chlorinePreference.isSaltGenerator && !isSaltwater {
+            chlorinePreference = lastNonSaltChlorinePreference.isValidForSaltwater(false) ? lastNonSaltChlorinePreference : .liquidChlorine10
+        }
+        if isSaltwater && chlorinePreference == .tablets {
+            lastNonSaltChlorinePreference = .tablets
+            chlorinePreference = .saltGenerator
+        }
+        if !chlorinePreference.isSaltGenerator {
+            lastNonSaltChlorinePreference = chlorinePreference
+        }
     }
 }
 
@@ -297,6 +332,7 @@ enum TaylorSampleSize: String, CaseIterable, Codable, Identifiable {
 }
 
 enum ChlorinePreference: String, CaseIterable, Codable, Identifiable {
+    case saltGenerator = "salt_generator"
     case tablets = "tablets"
     case calHypo = "cal_hypo"
     case liquidChlorine10 = "liquid_chlorine_10"
@@ -304,14 +340,56 @@ enum ChlorinePreference: String, CaseIterable, Codable, Identifiable {
     case dichlor = "dichlor"
 
     var id: String { rawValue }
+    var productID: ChemicalProductID { ChemicalProductID(rawValue: rawValue) ?? .calHypoGranules }
 
     var displayName: String {
         switch self {
-        case .tablets: return "Chlorine Tablets"
-        case .calHypo: return "Chlorine Granules"
+        case .saltGenerator: return "Salt Chlorine Generator"
+        case .tablets: return "Chlorine Tablets (Trichlor)"
+        case .calHypo: return "Cal-Hypo Granules"
         case .liquidChlorine10: return "Liquid Chlorine 10%"
         case .liquidChlorine12_5: return "Liquid Chlorine 12.5%"
         case .dichlor: return "Dichlor Granules"
+        }
+    }
+
+    var isSaltGenerator: Bool { self == .saltGenerator }
+    var isSaltCompatibleManualProduct: Bool {
+        switch self {
+        case .saltGenerator, .tablets:
+            return false
+        case .calHypo, .liquidChlorine10, .liquidChlorine12_5, .dichlor:
+            return true
+        }
+    }
+
+    static func options(isSaltwater: Bool) -> [ChlorinePreference] {
+        isSaltwater
+            ? [.saltGenerator, .liquidChlorine10, .liquidChlorine12_5, .calHypo, .dichlor]
+            : [.liquidChlorine10, .liquidChlorine12_5, .tablets, .calHypo, .dichlor]
+    }
+
+    func isValidForSaltwater(_ isSaltwater: Bool) -> Bool {
+        Self.options(isSaltwater: isSaltwater).contains(self)
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case "salt_generator", "Salt Chlorine Generator":
+            self = .saltGenerator
+        case "tablets", "Chlorine Tablets", "Chlorine Tablets (Trichlor)":
+            self = .tablets
+        case "cal_hypo", "Chlorine Granules", "Cal-Hypo Granules":
+            self = .calHypo
+        case "liquid_chlorine_10", "Liquid Chlorine 10%":
+            self = .liquidChlorine10
+        case "liquid_chlorine_12_5", "Liquid Chlorine 12.5%":
+            self = .liquidChlorine12_5
+        case "dichlor", "Dichlor Granules":
+            self = .dichlor
+        default:
+            self = .calHypo
         }
     }
 }
@@ -324,22 +402,60 @@ enum PHIncreaserPreference: String, CaseIterable, Codable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .sodaAsh: return "pH Increaser / Soda Ash"
+        case .sodaAsh: return "Soda Ash (Sodium Carbonate)"
         case .borax: return "Borax"
+        }
+    }
+
+    var productID: ChemicalProductID { self == .sodaAsh ? .sodaAsh : .borax }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case "soda_ash", "pH Increaser / Soda Ash", "Soda Ash (Sodium Carbonate)":
+            self = .sodaAsh
+        case "borax", "Borax":
+            self = .borax
+        default:
+            self = .sodaAsh
         }
     }
 }
 
 enum PHDecreaserPreference: String, CaseIterable, Codable, Identifiable {
     case muriaticAcid = "muriatic_acid"
+    case lowFumeMuriaticAcid = "low_fume_muriatic_acid"
     case dryAcid = "dry_acid"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .muriaticAcid: return "pH Decreaser / Muriatic Acid"
-        case .dryAcid: return "pH Decreaser / Dry Acid"
+        case .muriaticAcid: return "Muriatic Acid (31.45%)"
+        case .lowFumeMuriaticAcid: return "Low-Fume Muriatic Acid (20%)"
+        case .dryAcid: return "Dry Acid (Sodium Bisulfate)"
+        }
+    }
+
+    var productID: ChemicalProductID {
+        switch self {
+        case .muriaticAcid: return .muriaticAcid31
+        case .lowFumeMuriaticAcid: return .muriaticAcid20
+        case .dryAcid: return .dryAcid
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case "muriatic_acid", "pH Decreaser / Muriatic Acid", "Muriatic Acid (31.45%)":
+            self = .muriaticAcid
+        case "low_fume_muriatic_acid", "Low-Fume Muriatic Acid (20%)":
+            self = .lowFumeMuriaticAcid
+        case "dry_acid", "pH Decreaser / Dry Acid", "Dry Acid (Sodium Bisulfate)":
+            self = .dryAcid
+        default:
+            self = .muriaticAcid
         }
     }
 }
@@ -348,14 +464,16 @@ enum AlkalinityIncreaserPreference: String, CaseIterable, Codable, Identifiable 
     case sodiumBicarbonate = "sodium_bicarbonate"
 
     var id: String { rawValue }
-    var displayName: String { "Alkalinity Increaser" }
+    var displayName: String { "Baking Soda (Sodium Bicarbonate)" }
+    var productID: ChemicalProductID { .bakingSoda }
 }
 
 enum CalciumIncreaserPreference: String, CaseIterable, Codable, Identifiable {
     case calciumChloride = "calcium_chloride"
 
     var id: String { rawValue }
-    var displayName: String { "Calcium Hardness Increaser" }
+    var displayName: String { "Calcium Chloride" }
+    var productID: ChemicalProductID { .calciumChloride }
 }
 
 enum StabilizerPreference: String, CaseIterable, Codable, Identifiable {
@@ -366,8 +484,119 @@ enum StabilizerPreference: String, CaseIterable, Codable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .granularCYA: return "Pool Stabilizer Granules"
-        case .liquidConditioner: return "Liquid Pool Stabilizer"
+        case .granularCYA: return "Cyanuric Acid (Granular)"
+        case .liquidConditioner: return "Liquid Stabilizer"
+        }
+    }
+
+    var productID: ChemicalProductID { self == .granularCYA ? .granularCYA : .liquidStabilizer }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case "granular_cya", "Pool Stabilizer Granules", "Cyanuric Acid (Granular)":
+            self = .granularCYA
+        case "liquid_conditioner", "Liquid Pool Stabilizer", "Liquid Stabilizer":
+            self = .liquidConditioner
+        default:
+            self = .granularCYA
+        }
+    }
+}
+
+enum ChemicalProductID: String, Codable, CaseIterable, Identifiable {
+    case saltGenerator = "salt_generator"
+    case liquidChlorine10 = "liquid_chlorine_10"
+    case liquidChlorine12_5 = "liquid_chlorine_12_5"
+    case trichlorTablets = "tablets"
+    case calHypoGranules = "cal_hypo"
+    case dichlorGranules = "dichlor"
+    case sodaAsh = "soda_ash"
+    case borax = "borax"
+    case muriaticAcid31 = "muriatic_acid"
+    case muriaticAcid20 = "low_fume_muriatic_acid"
+    case dryAcid = "dry_acid"
+    case bakingSoda = "sodium_bicarbonate"
+    case calciumChloride = "calcium_chloride"
+    case granularCYA = "granular_cya"
+    case liquidStabilizer = "liquid_conditioner"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .saltGenerator: return "Salt Chlorine Generator"
+        case .liquidChlorine10: return "Liquid Chlorine 10%"
+        case .liquidChlorine12_5: return "Liquid Chlorine 12.5%"
+        case .trichlorTablets: return "Chlorine Tablets (Trichlor)"
+        case .calHypoGranules: return "Cal-Hypo Granules"
+        case .dichlorGranules: return "Dichlor Granules"
+        case .sodaAsh: return "Soda Ash (Sodium Carbonate)"
+        case .borax: return "Borax"
+        case .muriaticAcid31: return "Muriatic Acid (31.45%)"
+        case .muriaticAcid20: return "Low-Fume Muriatic Acid (20%)"
+        case .dryAcid: return "Dry Acid (Sodium Bisulfate)"
+        case .bakingSoda: return "Baking Soda (Sodium Bicarbonate)"
+        case .calciumChloride: return "Calcium Chloride"
+        case .granularCYA: return "Cyanuric Acid (Granular)"
+        case .liquidStabilizer: return "Liquid Stabilizer"
+        }
+    }
+
+    var concentrationLabel: String {
+        switch self {
+        case .liquidChlorine10: return "10% sodium hypochlorite"
+        case .liquidChlorine12_5: return "12.5% sodium hypochlorite"
+        case .trichlorTablets: return "trichlor stabilized chlorine"
+        case .calHypoGranules: return "calcium hypochlorite"
+        case .dichlorGranules: return "dichlor stabilized chlorine"
+        case .muriaticAcid31: return "31.45% hydrochloric acid"
+        case .muriaticAcid20: return "20% hydrochloric acid"
+        case .dryAcid: return "sodium bisulfate"
+        case .saltGenerator: return "chlorine production source"
+        default: return displayName
+        }
+    }
+
+    var doseUnitKind: String {
+        switch self {
+        case .saltGenerator:
+            return "generator adjustment"
+        case .liquidChlorine10, .liquidChlorine12_5, .muriaticAcid31, .muriaticAcid20, .liquidStabilizer:
+            return "liquid volume"
+        case .trichlorTablets:
+            return "tablet or label dose"
+        case .calHypoGranules, .dichlorGranules, .sodaAsh, .borax, .dryAcid, .bakingSoda, .calciumChloride, .granularCYA:
+            return "weight"
+        }
+    }
+
+    var chemistryEffects: [String] {
+        switch self {
+        case .saltGenerator:
+            return ["raises FC by generation", "no manual dose"]
+        case .liquidChlorine10, .liquidChlorine12_5:
+            return ["raises FC", "does not raise CYA", "does not meaningfully raise CH"]
+        case .trichlorTablets:
+            return ["raises FC", "raises CYA", "acidic effect"]
+        case .calHypoGranules:
+            return ["raises FC", "raises calcium hardness", "does not raise CYA"]
+        case .dichlorGranules:
+            return ["raises FC", "raises CYA"]
+        case .sodaAsh:
+            return ["raises pH", "raises TA"]
+        case .borax:
+            return ["raises pH", "smaller TA effect than soda ash"]
+        case .muriaticAcid31, .muriaticAcid20:
+            return ["lowers pH", "lowers TA"]
+        case .dryAcid:
+            return ["lowers pH", "lowers TA", "adds sulfate over time"]
+        case .bakingSoda:
+            return ["raises TA", "small pH effect"]
+        case .calciumChloride:
+            return ["raises calcium hardness"]
+        case .granularCYA, .liquidStabilizer:
+            return ["raises CYA"]
         }
     }
 }

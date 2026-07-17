@@ -23,6 +23,8 @@ struct TreatmentPlanSheet: View {
     @State private var showingPermissionAlert: Bool = false
     @State private var openSwipeTreatmentID: UUID? = nil
     @State private var isWhyThisPlanExpanded: Bool = false
+    @State private var showingRecalculateDialog: Bool = false
+    @State private var isRecalculatingRecommendations: Bool = false
 
     private var allTreatments: [Treatment] {
         test.treatments
@@ -108,6 +110,18 @@ struct TreatmentPlanSheet: View {
         } message: {
             Text("Pool Side can remind you when it's time for your next treatment step.")
         }
+        .confirmationDialog(
+            "Recalculate recommendations?",
+            isPresented: $showingRecalculateDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Recalculate") {
+                recalculateRecommendations()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will regenerate the score, status, treatment plan, watchlist, timing, and explanation using the latest engine logic. Your logged test readings and pool conditions will not change.")
+        }
     }
 
     private var content: some View {
@@ -128,7 +142,11 @@ struct TreatmentPlanSheet: View {
                                 } else {
                                     VStack(spacing: 0) {
                                         ForEach(Array(treatmentSteps.enumerated()), id: \.element.id) { index, treatment in
-                                            treatmentStepCard(treatment, showsDivider: index < treatmentSteps.count - 1)
+                                            treatmentStepCard(
+                                                treatment,
+                                                nextActionableTreatment: nextTreatment(after: index),
+                                                showsDivider: index < treatmentSteps.count - 1
+                                            )
                                         }
                                     }
                                 }
@@ -218,7 +236,6 @@ struct TreatmentPlanSheet: View {
 
     private var heroBanner: some View {
         let headerHeight: CGFloat = 250
-        let topPadding: CGFloat = 16
         let contentBottomPadding: CGFloat = 56
 
         return GeometryReader { proxy in
@@ -239,7 +256,7 @@ struct TreatmentPlanSheet: View {
                     Text("We recommend")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.85))
-                    Text("\(allTreatments.count) treatment\(allTreatments.count == 1 ? "" : "s")")
+                    Text(TreatmentPlanSummaryText.heroTitle(actionableTreatmentCount: treatmentSteps.count))
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
@@ -264,10 +281,20 @@ struct TreatmentPlanSheet: View {
                     .padding(.bottom, -40)
             }
         }
-        .padding(.top, topPadding)
-        .frame(height: headerHeight + topPadding)
+        .frame(height: headerHeight)
         .clipShape(RoundedRectangle(cornerRadius: 0))
+        .contentShape(Rectangle())
+        .highPriorityGesture(recalculateLongPressGesture)
         .ignoresSafeArea(edges: .top)
+    }
+
+    private var recalculateLongPressGesture: some Gesture {
+        LongPressGesture(minimumDuration: 1.5)
+            .onEnded { _ in
+                guard TreatmentPlanDeveloperRecalculateAction.canPresent(isRecalculating: isRecalculatingRecommendations) else { return }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showingRecalculateDialog = true
+            }
     }
 
     // MARK: - Section Header
@@ -311,9 +338,14 @@ struct TreatmentPlanSheet: View {
             .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func treatmentStepCard(_ treatment: Treatment, showsDivider: Bool = true) -> some View {
+    private func treatmentStepCard(
+        _ treatment: Treatment,
+        nextActionableTreatment: Treatment? = nil,
+        showsDivider: Bool = true
+    ) -> some View {
         TreatmentCardView(
             treatment: treatment,
+            nextActionableTreatment: nextActionableTreatment,
             allowsActions: true,
             presentation: .row,
             showsDivider: showsDivider,
@@ -323,6 +355,12 @@ struct TreatmentPlanSheet: View {
             onRestore: { t in await restoreTreatment(t) },
             openSwipeTreatmentID: $openSwipeTreatmentID
         )
+    }
+
+    private func nextTreatment(after index: Int) -> Treatment? {
+        let nextIndex = index + 1
+        guard treatmentSteps.indices.contains(nextIndex) else { return nil }
+        return treatmentSteps[nextIndex]
     }
 
     private func watchlistCard(_ treatment: Treatment, showsDivider: Bool = true) -> some View {
@@ -599,7 +637,9 @@ struct TreatmentPlanSheet: View {
             lines.append("Pool conditions were not logged, so this plan is based mostly on chemistry and history.")
         }
 
-        if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) {
+        if let acid = treatmentSteps.first(where: { $0.isAcidTreatment }) {
+            lines.append(acid.actionDescription)
+        } else if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) {
             lines.append("Your pH is safe, so elevated alkalinity is being monitored instead of treated.")
         }
 
@@ -636,7 +676,8 @@ struct TreatmentPlanSheet: View {
         if test.cyanuricAcid > 50 && test.cyanuricAcid < 90 {
             factors.append("CYA is elevated but manageable, so FC must run higher.")
         }
-        if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) {
+        let hasAcidTreatment = treatmentSteps.contains(where: { $0.isAcidTreatment })
+        if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) && !hasAcidTreatment {
             factors.append("pH is safe; acid is not currently needed.")
         }
         if confidenceInput.chlorineDemandScore >= 3 {
@@ -669,6 +710,9 @@ struct TreatmentPlanSheet: View {
         if let chlorine = treatmentSteps.first(where: { $0.targetParameter == "freeChlorine" }) {
             outcomes.append("Adding \(chlorine.amount.formattedTreatmentAmount) \(chlorine.unit) of \(chlorine.chemicalName) should raise FC toward the normal target range.")
         }
+        if let acid = treatmentSteps.first(where: { $0.isAcidTreatment }) {
+            outcomes.append("Adding \(acid.amount.formattedTreatmentAmount) \(acid.unit) of \(acid.chemicalName) should move pH toward the conservative target without chasing alkalinity in the same step.")
+        }
         if !treatmentSteps.contains(where: { $0.isAcidTreatment }) && (7.2...7.8).contains(test.pH) {
             outcomes.append("No acid is recommended because pH is currently safe.")
         }
@@ -679,7 +723,7 @@ struct TreatmentPlanSheet: View {
             outcomes.append("Continue circulation and normal testing so Pool Side can confirm the pool remains stable.")
         }
 
-        outcomes.append("Retest after the recommended wait time so the app can confirm the treatment worked.")
+        outcomes.append("Use treatment verification timing separately from the next routine pool test.")
         return Array(outcomes.prefix(4))
     }
 
@@ -726,7 +770,12 @@ struct TreatmentPlanSheet: View {
         - Has cover: \(config.hasCover ? "Yes" : "No")
         - Pets regularly swim: \(config.petsRegularlySwim ? "Yes" : "No")
         - Robotic cleaner: \(config.usesRoboticCleaner ? "Yes" : "No")
-        - Sanitizer preference: \(config.chlorinePreference.displayName)
+        - Preferred chlorine: \(config.chlorinePreference.displayName) (\(config.chlorinePreference.productID.concentrationLabel))
+        - Preferred pH increaser: \(config.pHIncreaserPreference.displayName)
+        - Preferred pH decreaser: \(config.pHDecreaserPreference.displayName) (\(config.pHDecreaserPreference.productID.concentrationLabel))
+        - Preferred alkalinity increaser: \(config.alkalinityIncreaserPreference.displayName)
+        - Preferred calcium increaser: \(config.calciumIncreaserPreference.displayName)
+        - Preferred stabilizer: \(config.stabilizerPreference.displayName)
         - Default test method: \(config.testMethod.displayName)
         - Location: \(config.location.isEmpty ? "Not provided" : config.location)
 
@@ -793,7 +842,16 @@ struct TreatmentPlanSheet: View {
         11. Suppressed or Avoided Recommendations
         \(suppressedRecommendationsExport())
 
-        12. User Prompt
+        12. Product and Timing Audit
+        \(ExternalReviewExportBuilder.treatmentAuditSection(
+            config: config,
+            test: test,
+            treatments: treatmentSteps,
+            recentHistory: recentHistory,
+            routineNextTestTiming: nextTestTiming
+        ))
+
+        13. User Prompt
         Please review this pool test log and treatment plan. Tell me whether the recommendation is chemically sound, whether anything is missing or over-aggressive, and what I should do next.
         """
     }
@@ -803,14 +861,56 @@ struct TreatmentPlanSheet: View {
         - Title: \(treatment.chemicalName)
           Urgency: \(treatment.urgency.displayName)
           Amount: \(formattedTreatmentAmount(treatment))
-          Product: \(treatment.chemicalName)
+          Product: \(productExportText(for: treatment))
+          Product differs from global preference: \(productDiffersFromGlobalPreference(treatment) ? "Yes" : "No")
+          Calculated dose before safety cap: \(calculatedDoseBeforeCapText(for: treatment))
+          Final recommended dose: \(formattedTreatmentAmount(treatment))
+          Safety cap applied: \(treatment.wasDoseCapped ? "Yes" : "No")
           Target parameter: \(treatment.targetParameter.isEmpty ? "not specified" : treatment.targetParameter)
           Target value: \(targetValueText(for: treatment))
           Why recommended: \(treatment.actionDescription)
           Expected effect: \(expectedEffectText(for: treatment))
+          Optional verification timing: \(verificationTimingText(for: treatment))
+          Recommended next routine test timing: \(nextTestTiming)
           Retest/wait timing: \(waitTimingText(for: treatment))
           Status: \(treatmentStatusText(treatment))
         """
+    }
+
+    private func productExportText(for treatment: Treatment) -> String {
+        guard let productID = treatment.productIdentifier.flatMap(ChemicalProductID.init(rawValue:)) else {
+            return treatment.chemicalName
+        }
+        return "\(productID.displayName) — \(productID.concentrationLabel)"
+    }
+
+    private func productDiffersFromGlobalPreference(_ treatment: Treatment) -> Bool {
+        guard
+            let productID = treatment.productIdentifier,
+            let globalID = treatment.globalPreferenceIdentifier
+        else { return false }
+        return productID != globalID
+    }
+
+    private func calculatedDoseBeforeCapText(for treatment: Treatment) -> String {
+        guard treatment.calculatedDoseBeforeCap > 0 else { return "Not applicable" }
+        return "\(treatment.calculatedDoseBeforeCap.formattedTreatmentAmount) \(treatment.calculatedDoseBeforeCapUnit)"
+    }
+
+    private func verificationTimingText(for treatment: Treatment) -> String {
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            if treatment.urgency == .immediate || test.combinedChlorine > 0.5 || !test.visualIndicators.contains(VisualIndicator.crystalClear.rawValue) {
+                return "Verify FC/CC after about \(NotificationService.waitLabel(minutes: max(60, treatment.minutesBeforeNext))) of circulation."
+            }
+            return "Optional FC check after about 1 hour of circulation; routine next test remains separate."
+        case "pH", "totalAlkalinity":
+            return "Verify pH after circulation, typically about 4 hours for acid or pH increaser."
+        case "cyanuricAcid":
+            return "Granular stabilizer may take several days to show reliably; liquid stabilizer can be checked sooner after circulation."
+        default:
+            return waitTimingText(for: treatment)
+        }
     }
 
     private func watchlistExport(_ treatment: Treatment) -> String {
@@ -987,13 +1087,7 @@ struct TreatmentPlanSheet: View {
     }
 
     private func waitTimingText(for treatment: Treatment) -> String {
-        if treatment.minutesBeforeNext > 0 {
-            return "Wait \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step."
-        }
-        if let retest = NextTestRecommendationEngine().treatmentRetestRecommendation(for: treatment) {
-            return "Retest in \(NotificationService.waitLabel(minutes: max(1, Int(retest.interval / 60))))."
-        }
-        return treatment.targetParameter == "pH" ? "Retest pH after circulation." : "Retest based on plan timing."
+        TreatmentTimingGuidance.waitTimingText(for: treatment)
     }
 
     private func treatmentStatusText(_ treatment: Treatment) -> String {
@@ -1031,12 +1125,10 @@ struct TreatmentPlanSheet: View {
     }
 
     private func scoreLabel(_ score: Int) -> String {
-        switch score {
-        case 85...100: return "Stable"
-        case 70..<85: return "Good / watch"
-        case 60..<70: return "Needs attention"
-        default: return "Problem recovery"
-        }
+        ChemistryEngine.scoreStatusLabel(
+            score: score,
+            status: viewModel.currentStatusSummary(for: test)
+        )
     }
 
     private func bulletedLines(_ lines: [String]) -> String {
@@ -1154,6 +1246,39 @@ struct TreatmentPlanSheet: View {
             }
         } catch {
             viewModel.lastError = error.localizedDescription
+        }
+    }
+
+    private func recalculateRecommendations() {
+        guard TreatmentPlanDeveloperRecalculateAction.canPresent(isRecalculating: isRecalculatingRecommendations) else { return }
+        isRecalculatingRecommendations = true
+
+        Task {
+            do {
+                try await viewModel.recalculateRecommendations(
+                    for: test,
+                    recentTests: recentHistory,
+                    modelContext: modelContext
+                )
+                await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
+                await MainActor.run {
+                    toastMessage = ToastMessage(
+                        text: "Recommendations recalculated.",
+                        icon: "checkmark.circle.fill",
+                        color: PoolColor.statusIdeal
+                    )
+                    isRecalculatingRecommendations = false
+                }
+            } catch {
+                await MainActor.run {
+                    toastMessage = ToastMessage(
+                        text: "Could not recalculate recommendations",
+                        icon: "exclamationmark.triangle.fill",
+                        color: PoolColor.statusOffRange
+                    )
+                    isRecalculatingRecommendations = false
+                }
+            }
         }
     }
 
@@ -1355,6 +1480,137 @@ private extension PoolConditions {
         skimmedDebris == .yes
             || cleaningActivity.organicLoadReductionScore > 0
             || poolBrushed.organicLoadReductionScore > 0
+    }
+}
+
+struct ExternalReviewExportBuilder {
+    static func treatmentAuditSection(
+        config: PoolConfiguration,
+        test: PoolTest,
+        treatments: [Treatment],
+        recentHistory: [PoolTest],
+        routineNextTestTiming: String
+    ) -> String {
+        let saltBehavior = config.isSaltwater && config.chlorinePreference == .saltGenerator
+            ? "Chlorine is expected primarily from the salt generator unless a treatment uses a supplemental product."
+            : "Chlorine is expected from the selected supplemental product."
+        let pHTrend = pHTrendReasoning(test: test, recentHistory: recentHistory)
+        let acidTiming = timeSinceLastCompletedAcidTreatment(recentHistory: recentHistory)
+        let suppressed = suppressedRecommendationReasons(treatments: treatments)
+
+        let treatmentLines = treatments.map { treatment in
+            let selectedProduct = treatment.productIdentifier
+                .flatMap(ChemicalProductID.init(rawValue:))
+            let globalProduct = treatment.globalPreferenceIdentifier
+                .flatMap(ChemicalProductID.init(rawValue:))
+            let concentration = selectedProduct?.concentrationLabel ?? "not available"
+            let substitution = selectedProduct != nil && globalProduct != nil && selectedProduct != globalProduct
+            let preCapDose = treatment.calculatedDoseBeforeCap > 0
+                ? "\(treatment.calculatedDoseBeforeCap.formattedTreatmentAmount) \(treatment.calculatedDoseBeforeCapUnit)"
+                : "not applicable"
+            let finalDose = treatment.amount > 0
+                ? "\(treatment.amount.formattedTreatmentAmount) \(treatment.unit)"
+                : "not applicable"
+
+            return """
+            - Treatment product: \(selectedProduct?.displayName ?? treatment.chemicalName)
+              Global preference: \(globalProduct?.displayName ?? globalPreference(for: treatment, config: config))
+              Product concentration: \(concentration)
+              Differs from global preference: \(substitution ? "Yes" : "No")
+              Calculated dose before safety cap: \(preCapDose)
+              Final recommended dose: \(finalDose)
+              Safety cap applied: \(treatment.wasDoseCapped ? "Yes" : "No")
+              Salt-system behavior: \(saltBehavior)
+              Why now: \(treatment.actionDescription)
+              Optional verification timing: \(verificationTiming(for: treatment, test: test))
+              Recommended next routine test timing: \(routineNextTestTiming)
+            """
+        }.joined(separator: "\n\n")
+
+        return """
+        External Review Treatment Audit
+        - Preferred chlorine: \(config.chlorinePreference.displayName) (\(config.chlorinePreference.productID.concentrationLabel))
+        - Preferred pH decreaser: \(config.pHDecreaserPreference.displayName) (\(config.pHDecreaserPreference.productID.concentrationLabel))
+        - Salt-system status: \(config.isSaltwater ? "On" : "Off")
+        - Salt-system behavior: \(saltBehavior)
+        - Historical pH trend used: \(pHTrend)
+        - Time since last completed acid treatment: \(acidTiming)
+        - Suppressed treatment reasons: \(suppressed)
+
+        \(treatmentLines.isEmpty ? "No active treatment products." : treatmentLines)
+        """
+    }
+
+    private static func globalPreference(for treatment: Treatment, config: PoolConfiguration) -> String {
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return config.chlorinePreference.displayName
+        case "pH":
+            return treatment.expectedDelta < 0
+                ? config.pHDecreaserPreference.displayName
+                : config.pHIncreaserPreference.displayName
+        case "cyanuricAcid":
+            return config.stabilizerPreference.displayName
+        default:
+            return "not applicable"
+        }
+    }
+
+    private static func pHTrendReasoning(test: PoolTest, recentHistory: [PoolTest]) -> String {
+        let ordered = Array(recentHistory.prefix(5).reversed()) + [test]
+        guard ordered.count >= 3 else { return "not enough pH history" }
+        let pHValues = ordered.map(\.pH)
+        let taValues = ordered.map(\.totalAlkalinity)
+        let pHChange = (pHValues.last ?? test.pH) - (pHValues.first ?? test.pH)
+        let elevatedTACount = taValues.filter { $0 >= 140 }.count
+        if pHChange >= 0.25 && elevatedTACount >= 3 {
+            return "pH has gradually risen from \(format(pHValues.first ?? test.pH)) to \(format(pHValues.last ?? test.pH)) while TA remained elevated in \(elevatedTACount) logs."
+        }
+        return "pH history does not show enough upward movement to justify extra acid by trend alone."
+    }
+
+    private static func timeSinceLastCompletedAcidTreatment(recentHistory: [PoolTest]) -> String {
+        let completed = recentHistory
+            .flatMap(\.treatments)
+            .filter { $0.isCompleted && $0.isAcidTreatment }
+            .compactMap(\.completedAt)
+            .max()
+        guard let completed else { return "none found in recent history" }
+        let days = max(0, Int(Date().timeIntervalSince(completed) / 86_400))
+        return days == 0 ? "less than 1 day" : "\(days) day\(days == 1 ? "" : "s")"
+    }
+
+    private static func suppressedRecommendationReasons(treatments: [Treatment]) -> String {
+        let reasons = treatments
+            .filter { $0.isWatchlistItem || $0.amount == 0 }
+            .map(\.actionDescription)
+        return reasons.isEmpty ? "none reported" : reasons.joined(separator: "; ")
+    }
+
+    private static func verificationTiming(for treatment: Treatment, test: PoolTest) -> String {
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            if treatment.urgency == .immediate || test.combinedChlorine > 0.5 || !test.visualIndicators.contains(VisualIndicator.crystalClear.rawValue) {
+                return "Verify FC/CC after circulation before swimming or adding more chlorine."
+            }
+            return "Optional FC verification after about 1 hour of circulation."
+        case "pH", "totalAlkalinity":
+            return "Verify pH after circulation, typically about 4 hours."
+        case "cyanuricAcid":
+            return "Verify based on product type; granular CYA can take several days to register reliably."
+        default:
+            return "Use the treatment wait timing."
+        }
+    }
+
+    private static func format(_ value: Double) -> String {
+        String(format: "%.1f", value)
+    }
+}
+
+struct TreatmentPlanDeveloperRecalculateAction {
+    static func canPresent(isRecalculating: Bool) -> Bool {
+        !isRecalculating
     }
 }
 

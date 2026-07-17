@@ -32,8 +32,10 @@ final class PoolViewModel {
     // MARK: - Config
 
     func saveConfig(_ config: PoolConfiguration) {
-        poolConfig = config
-        PoolConfiguration.current = config
+        var normalized = config
+        normalized.normalizeChemicalPreferences()
+        poolConfig = normalized
+        PoolConfiguration.current = normalized
     }
 
     // MARK: - Chemistry
@@ -135,6 +137,77 @@ final class PoolViewModel {
 
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func recalculateRecommendations(
+        for test: PoolTest,
+        recentTests: [PoolTest],
+        modelContext: ModelContext
+    ) async throws {
+        guard let service = aiService else { return }
+
+        isGeneratingRecommendations = true
+        lastError = nil
+        defer { isGeneratingRecommendations = false }
+
+        var effectiveConfig = poolConfig
+        effectiveConfig.testMethod = test.testMethod
+
+        let request = AIRecommendationRequest(
+            currentTest: test,
+            recentHistory: recentTests,
+            poolConfig: effectiveConfig
+        )
+
+        do {
+            let response = try await service.generateRecommendations(for: request)
+            let stateSnapshots = safelyMatchableTreatmentStates(from: test.treatments)
+
+            test.treatments
+                .filter(\.isAIGenerated)
+                .forEach {
+                    NotificationService.shared.cancelTreatmentReminder(for: $0)
+                    modelContext.delete($0)
+                }
+
+            let regeneratedTreatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
+            let regeneratedKeyCounts = Dictionary(
+                grouping: regeneratedTreatments.compactMap(\.statePreservationKey),
+                by: { $0 }
+            ).mapValues(\.count)
+
+            for treatment in regeneratedTreatments {
+                if
+                    let key = treatment.statePreservationKey,
+                    regeneratedKeyCounts[key] == 1,
+                    let snapshot = stateSnapshots[key] {
+                    treatment.applyStateSnapshot(snapshot)
+                }
+                modelContext.insert(treatment)
+            }
+
+            test.aiAssessment = response.assessmentText
+            try modelContext.save()
+        } catch {
+            lastError = error.localizedDescription
+            throw error
+        }
+    }
+
+    private func safelyMatchableTreatmentStates(from treatments: [Treatment]) -> [String: TreatmentStateSnapshot] {
+        let snapshots = treatments
+            .filter { $0.isAIGenerated && ($0.isCompleted || $0.isSkipped) }
+            .compactMap { treatment -> (String, TreatmentStateSnapshot)? in
+                guard let key = treatment.statePreservationKey else { return nil }
+                return (key, TreatmentStateSnapshot(treatment: treatment))
+            }
+        let grouped = Dictionary(grouping: snapshots, by: \.0)
+
+        return grouped.reduce(into: [:]) { result, item in
+            guard item.value.count == 1, let snapshot = item.value.first?.1 else { return }
+            result[item.key] = snapshot
         }
     }
 
@@ -306,5 +379,38 @@ final class PoolViewModel {
         case .critical:                return 3
         case .testing:                 return -1
         }
+    }
+}
+
+private struct TreatmentStateSnapshot {
+    let isCompleted: Bool
+    let completedAt: Date?
+    let isSkipped: Bool
+    let skippedAt: Date?
+
+    init(treatment: Treatment) {
+        isCompleted = treatment.isCompleted
+        completedAt = treatment.completedAt
+        isSkipped = treatment.isSkipped
+        skippedAt = treatment.skippedAt
+    }
+}
+
+private extension Treatment {
+    var statePreservationKey: String? {
+        guard let productIdentifier, !productIdentifier.isEmpty else { return nil }
+        return [
+            productIdentifier,
+            targetParameter,
+            expectedEffectParameter,
+            unit
+        ].joined(separator: "|")
+    }
+
+    func applyStateSnapshot(_ snapshot: TreatmentStateSnapshot) {
+        isCompleted = snapshot.isCompleted
+        completedAt = snapshot.completedAt
+        isSkipped = snapshot.isSkipped
+        skippedAt = snapshot.skippedAt
     }
 }

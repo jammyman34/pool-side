@@ -18,6 +18,13 @@ final class Treatment {
     /// Unit string (e.g. "lbs", "oz", "cups", "gallons")
     var unit: String
 
+    /// Stable product identity used for treatment substitutions and export.
+    var productIdentifier: String?
+    var globalPreferenceIdentifier: String?
+    var calculatedDoseBeforeCap: Double = 0
+    var calculatedDoseBeforeCapUnit: String = ""
+    var wasDoseCapped: Bool = false
+
     /// Step-by-step instructions
     var instructions: String
 
@@ -65,6 +72,11 @@ final class Treatment {
         actionDescription: String,
         amount: Double,
         unit: String,
+        productIdentifier: String? = nil,
+        globalPreferenceIdentifier: String? = nil,
+        calculatedDoseBeforeCap: Double = 0,
+        calculatedDoseBeforeCapUnit: String = "",
+        wasDoseCapped: Bool = false,
         instructions: String,
         urgency: TreatmentUrgency = .recommended,
         isCompleted: Bool = false,
@@ -91,6 +103,11 @@ final class Treatment {
         self.actionDescription = actionDescription
         self.amount = amount
         self.unit = unit
+        self.productIdentifier = productIdentifier
+        self.globalPreferenceIdentifier = globalPreferenceIdentifier
+        self.calculatedDoseBeforeCap = calculatedDoseBeforeCap
+        self.calculatedDoseBeforeCapUnit = calculatedDoseBeforeCapUnit
+        self.wasDoseCapped = wasDoseCapped
         self.instructions = instructions
         self.urgencyRaw = urgency.rawValue
         self.isCompleted = isCompleted
@@ -139,41 +156,45 @@ enum ChemicalProductCategory: String, CaseIterable, Identifiable {
         }
     }
 
-    var optionDisplayNames: [String] {
+    func options(isSaltwater: Bool = false) -> [ChemicalProductID] {
         switch self {
-        case .chlorine: return ChlorinePreference.allCases.map(\.displayName)
-        case .pHIncreaser: return PHIncreaserPreference.allCases.map(\.displayName)
-        case .pHDecreaser: return PHDecreaserPreference.allCases.map(\.displayName)
-        case .stabilizer: return StabilizerPreference.allCases.map(\.displayName)
+        case .chlorine:
+            return [.liquidChlorine10, .liquidChlorine12_5, .calHypoGranules, .dichlorGranules] + (isSaltwater ? [.saltGenerator] : [.trichlorTablets])
+        case .pHIncreaser:
+            return [.sodaAsh, .borax]
+        case .pHDecreaser:
+            return [.muriaticAcid31, .muriaticAcid20, .dryAcid]
+        case .stabilizer:
+            return [.granularCYA, .liquidStabilizer]
         }
     }
 
-    func currentSelection(from config: PoolConfiguration) -> String {
+    func currentSelection(from config: PoolConfiguration) -> ChemicalProductID {
         switch self {
-        case .chlorine: return config.chlorinePreference.displayName
-        case .pHIncreaser: return config.pHIncreaserPreference.displayName
-        case .pHDecreaser: return config.pHDecreaserPreference.displayName
-        case .stabilizer: return config.stabilizerPreference.displayName
+        case .chlorine: return config.chlorinePreference.productID
+        case .pHIncreaser: return config.pHIncreaserPreference.productID
+        case .pHDecreaser: return config.pHDecreaserPreference.productID
+        case .stabilizer: return config.stabilizerPreference.productID
         }
     }
 
-    func configApplying(selection: String, to config: PoolConfiguration) -> PoolConfiguration {
+    func configApplying(selection: ChemicalProductID, to config: PoolConfiguration) -> PoolConfiguration {
         var updated = config
         switch self {
         case .chlorine:
-            if let value = ChlorinePreference.allCases.first(where: { $0.displayName == selection }) {
+            if let value = ChlorinePreference(rawValue: selection.rawValue) {
                 updated.chlorinePreference = value
             }
         case .pHIncreaser:
-            if let value = PHIncreaserPreference.allCases.first(where: { $0.displayName == selection }) {
+            if let value = PHIncreaserPreference(rawValue: selection.rawValue) {
                 updated.pHIncreaserPreference = value
             }
         case .pHDecreaser:
-            if let value = PHDecreaserPreference.allCases.first(where: { $0.displayName == selection }) {
+            if let value = PHDecreaserPreference(rawValue: selection.rawValue) {
                 updated.pHDecreaserPreference = value
             }
         case .stabilizer:
-            if let value = StabilizerPreference.allCases.first(where: { $0.displayName == selection }) {
+            if let value = StabilizerPreference(rawValue: selection.rawValue) {
                 updated.stabilizerPreference = value
             }
         }
@@ -199,6 +220,20 @@ extension Treatment {
     /// no alternative products exist (hardcoded treatments, visual indicators,
     /// or single-option categories like alkalinity / calcium increasers).
     var productCategory: ChemicalProductCategory? {
+        if let productIdentifier, let productID = ChemicalProductID(rawValue: productIdentifier) {
+            switch productID {
+            case .saltGenerator, .liquidChlorine10, .liquidChlorine12_5, .trichlorTablets, .calHypoGranules, .dichlorGranules:
+                return .chlorine
+            case .sodaAsh, .borax:
+                return .pHIncreaser
+            case .muriaticAcid31, .muriaticAcid20, .dryAcid:
+                return .pHDecreaser
+            case .granularCYA, .liquidStabilizer:
+                return .stabilizer
+            case .bakingSoda, .calciumChloride:
+                return nil
+            }
+        }
         switch targetParameter {
         case "freeChlorine":
             return ChlorinePreference.allCases.contains(where: { $0.displayName == chemicalName }) ? .chlorine : nil
@@ -214,6 +249,79 @@ extension Treatment {
             return StabilizerPreference.allCases.contains(where: { $0.displayName == chemicalName }) ? .stabilizer : nil
         default:
             return nil
+        }
+    }
+}
+
+struct TreatmentTimingGuidance {
+    static func cardTip(for treatment: Treatment, nextActionableTreatment: Treatment? = nil) -> String? {
+        if
+            let nextActionableTreatment,
+            !nextActionableTreatment.isWatchlistItem,
+            nextActionableTreatment.amount > 0,
+            treatment.minutesBeforeNext > 0 {
+            return waitBeforeNextTreatmentTip(for: treatment, nextTreatment: nextActionableTreatment)
+        }
+
+        guard treatment.amount > 0 else { return nil }
+
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return "Circulate ~1 hr before swimming or checking FC."
+        case "pH", "totalAlkalinity":
+            return treatment.expectedDelta < 0 ? "Retest pH in ~4 hrs." : "Retest pH in ~4 hrs."
+        case "cyanuricAcid":
+            return "Retest CYA after it has time to register."
+        default:
+            return nil
+        }
+    }
+
+    static func waitTimingText(for treatment: Treatment) -> String {
+        cardTip(for: treatment) ?? "Retest based on plan timing."
+    }
+
+    private static func waitBeforeNextTreatmentTip(for treatment: Treatment, nextTreatment: Treatment) -> String {
+        let wait = waitLabel(minutes: treatment.minutesBeforeNext)
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return nextTreatment.isAcidTreatment
+                ? "Wait \(wait) before adding acid."
+                : "Wait \(wait) before the next chemical."
+        case "pH", "totalAlkalinity":
+            return "Wait \(wait) before the next chemical."
+        case "cyanuricAcid":
+            return "Wait \(wait) before the next chemical."
+        default:
+            return "Wait \(wait) before the next chemical."
+        }
+    }
+
+    private static func waitLabel(minutes: Int) -> String {
+        if minutes < 60 {
+            return "~\(minutes) min"
+        }
+
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+
+        if remainingMinutes == 0 {
+            return "~\(hours) hr\(hours == 1 ? "" : "s")"
+        }
+
+        return "~\(hours) hr\(hours == 1 ? "" : "s") \(remainingMinutes) min"
+    }
+}
+
+struct TreatmentPlanSummaryText {
+    static func heroTitle(actionableTreatmentCount: Int) -> String {
+        switch actionableTreatmentCount {
+        case 0:
+            return "No treatments needed"
+        case 1:
+            return "1 treatment"
+        default:
+            return "\(actionableTreatmentCount) treatments"
         }
     }
 }

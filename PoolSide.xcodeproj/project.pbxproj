@@ -40,6 +40,16 @@
 		F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1D60BAEFC35408A9A85109 /* ChemistryEngine.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		9BABD651300AB25E007DAEBB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 616F9721861C867647C772C0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 38B26B493746009E613DB89B;
+			remoteInfo = PoolSide;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		03997BD5D8BB0BCD1D084DE1 /* PoolConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConfiguration.swift; sourceTree = "<group>"; };
 		13BFA3F3D097AC3C0C77BD27 /* PoolSideApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolSideApp.swift; sourceTree = "<group>"; };
@@ -60,6 +70,7 @@
 		9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConditions.swift; sourceTree = "<group>"; };
 		9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextTestRecommendationEngine.swift; sourceTree = "<group>"; };
 		9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
+		9BABD64D300AB25E007DAEBB /* Pool SideTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Pool SideTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
 		9BF358082FE2F10C00853A99 /* PoolSide.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PoolSide.entitlements; sourceTree = "<group>"; };
 		A2B1172BBFB76FCBAB212A92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -76,6 +87,24 @@
 		FD1D60BAEFC35408A9A85109 /* ChemistryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChemistryEngine.swift; sourceTree = "<group>"; };
 		FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		9BABD64E300AB25E007DAEBB /* Pool SideTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Pool SideTests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9BABD64A300AB25E007DAEBB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		05B67421F179AA5159E886CD /* Components */ = {
@@ -209,6 +238,7 @@
 			isa = PBXGroup;
 			children = (
 				6273ECD5E22D132B76EBF5EF /* PoolSide */,
+				9BABD64E300AB25E007DAEBB /* Pool SideTests */,
 				E175366B67781B93CA631081 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -217,6 +247,7 @@
 			isa = PBXGroup;
 			children = (
 				6309CFC28AE3D6610CFB9CA4 /* Pool Side.app */,
+				9BABD64D300AB25E007DAEBB /* Pool SideTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -251,6 +282,29 @@
 			productReference = 6309CFC28AE3D6610CFB9CA4 /* Pool Side.app */;
 			productType = "com.apple.product-type.application";
 		};
+		9BABD64C300AB25E007DAEBB /* Pool SideTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9BABD655300AB25E007DAEBB /* Build configuration list for PBXNativeTarget "Pool SideTests" */;
+			buildPhases = (
+				9BABD649300AB25E007DAEBB /* Sources */,
+				9BABD64A300AB25E007DAEBB /* Frameworks */,
+				9BABD64B300AB25E007DAEBB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9BABD652300AB25E007DAEBB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9BABD64E300AB25E007DAEBB /* Pool SideTests */,
+			);
+			name = "Pool SideTests";
+			packageProductDependencies = (
+			);
+			productName = "Pool SideTests";
+			productReference = 9BABD64D300AB25E007DAEBB /* Pool SideTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -258,7 +312,15 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					9BABD64C300AB25E007DAEBB = {
+						CreatedOnToolsVersion = 26.6;
+						LastSwiftMigration = 2660;
+						TestTargetID = 38B26B493746009E613DB89B;
+					};
+				};
 			};
 			buildConfigurationList = 4C0B3A621F7A33B93B4E1E55 /* Build configuration list for PBXProject "PoolSide" */;
 			developmentRegion = en;
@@ -275,6 +337,7 @@
 			projectRoot = "";
 			targets = (
 				38B26B493746009E613DB89B /* PoolSide */,
+				9BABD64C300AB25E007DAEBB /* Pool SideTests */,
 			);
 		};
 /* End PBXProject section */
@@ -289,9 +352,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		9BABD64B300AB25E007DAEBB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		9BABD649300AB25E007DAEBB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D375AF61EC95B4BD3BDD5C40 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -329,6 +406,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9BABD652300AB25E007DAEBB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 38B26B493746009E613DB89B /* PoolSide */;
+			targetProxy = 9BABD651300AB25E007DAEBB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		0AB80C873BC83579F9C6ED08 /* Release */ = {
@@ -489,6 +574,68 @@
 			};
 			name = Release;
 		};
+		9BABD653300AB25E007DAEBB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 5CWYP72CU8;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.goodenough.llc.Pool-SideTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pool Side.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Pool Side";
+			};
+			name = Debug;
+		};
+		9BABD654300AB25E007DAEBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5CWYP72CU8;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.goodenough.llc.Pool-SideTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pool Side.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Pool Side";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		B9F0425AA9238917B1DAC24A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -534,6 +681,15 @@
 			buildConfigurations = (
 				B9F0425AA9238917B1DAC24A /* Debug */,
 				0AB80C873BC83579F9C6ED08 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9BABD655300AB25E007DAEBB /* Build configuration list for PBXNativeTarget "Pool SideTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9BABD653300AB25E007DAEBB /* Debug */,
+				9BABD654300AB25E007DAEBB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

@@ -46,29 +46,29 @@ struct NextTestRecommendationEngine {
         config: PoolConfiguration
     ) -> NextTestRecommendation {
         let confidence = ChemistryEngine().recommendationConfidenceInput(for: test, recentHistory: recentHistory)
-        let pendingSteps = treatmentSteps.filter { !$0.isCompleted && !$0.isSkipped }
+        let pendingSteps = treatmentSteps.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
 
-        if let chlorine = pendingSteps.first(where: { $0.targetParameter == "freeChlorine" && shouldRetestAfterChlorine($0) }) {
+        if let chlorine = pendingSteps.first(where: { $0.targetParameter == "freeChlorine" && requiresSameDayChlorineVerification($0, test: test) }) {
             let minutes = chlorineRetestMinutes(for: chlorine)
             return make(
                 from: test.date,
                 minutes: minutes,
-                reason: "FC needs correction and should be confirmed after circulation.",
+                reason: "FC needs same-day verification after circulation.",
                 title: "Retest FC and CC",
-                body: "Retest FC and CC after adding chlorine so Pool Side can confirm the correction worked.",
+                body: "Retest FC and CC after adding chlorine because conditions make the correction time-sensitive.",
                 urgency: chlorine.urgency == .immediate ? .urgent : .retest,
                 source: .chlorineCorrection
             )
         }
 
-        if let pH = pendingSteps.first(where: { $0.targetParameter == "pH" && $0.effectDelayHours >= 4 }) {
+        if pendingSteps.contains(where: { $0.targetParameter == "pH" && $0.effectDelayHours >= 4 && $0.urgency == .immediate }) {
             return make(
                 from: test.date,
                 minutes: 240,
-                reason: pH.urgency == .immediate ? "pH is unsafe and needs a same-day confirmation." : "pH treatment should be checked after circulation.",
+                reason: "pH is unsafe and needs a same-day confirmation.",
                 title: "Retest pH",
                 body: "Retest pH after circulation before adding more pH product.",
-                urgency: pH.urgency == .immediate ? .urgent : .retest,
+                urgency: .urgent,
                 source: .pHCorrection
             )
         }
@@ -129,10 +129,10 @@ struct NextTestRecommendationEngine {
         return make(
             from: test.date,
             hours: 24,
-            reason: "A treatment plan is active, so Pool Side should confirm the pool response soon.",
+            reason: "A treatment plan is active; routine testing should confirm the overall response tomorrow.",
             title: "Next pool test",
-            body: "Test again in about 24 hours to confirm the treatment plan worked.",
-            urgency: .retest,
+            body: "Test again in about 24 hours to confirm the treatment plan worked. Same-day checks are optional unless a treatment specifically calls for verification.",
+            urgency: .watch,
             source: .treatmentPlan
         )
     }
@@ -192,6 +192,20 @@ struct NextTestRecommendationEngine {
 
     private func shouldRetestAfterChlorine(_ treatment: Treatment) -> Bool {
         treatment.urgency == .immediate || treatment.urgency == .recommended
+    }
+
+    private func requiresSameDayChlorineVerification(_ treatment: Treatment, test: PoolTest) -> Bool {
+        guard treatment.targetParameter == "freeChlorine" else { return false }
+        if treatment.urgency == .immediate && test.freeChlorine <= 0.5 { return true }
+        if test.combinedChlorine >= 0.5 { return true }
+        let indicators = Set(test.visualIndicators)
+        if indicators.contains(VisualIndicator.cloudyWater.rawValue)
+            || indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue) {
+            return true
+        }
+        return false
     }
 
     private func chlorineRetestMinutes(for treatment: Treatment) -> Int {

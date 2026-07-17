@@ -26,6 +26,7 @@ struct AIRecommendationRequest: @unchecked Sendable {
             poolLine += ", location: \(poolConfig.location)"
         }
         parts.append(poolLine)
+        parts.append("PREFERENCES: chlorine \(poolConfig.chlorinePreference.displayName); pH increaser \(poolConfig.pHIncreaserPreference.displayName); pH decreaser \(poolConfig.pHDecreaserPreference.displayName); alkalinity increaser \(poolConfig.alkalinityIncreaserPreference.displayName); calcium increaser \(poolConfig.calciumIncreaserPreference.displayName); stabilizer \(poolConfig.stabilizerPreference.displayName)")
 
         let df = DateFormatter()
         df.dateStyle = .medium

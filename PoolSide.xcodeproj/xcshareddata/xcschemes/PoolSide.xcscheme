@@ -37,6 +37,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9BABD64C300AB25E007DAEBB"
+               BuildableName = "Pool SideTests.xctest"
+               BlueprintName = "Pool SideTests"
+               ReferencedContainer = "container:PoolSide.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
