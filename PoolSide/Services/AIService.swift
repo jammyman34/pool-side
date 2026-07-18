@@ -26,6 +26,7 @@ struct AIRecommendationRequest: @unchecked Sendable {
             poolLine += ", location: \(poolConfig.location)"
         }
         parts.append(poolLine)
+        parts.append("PREFERENCES: chlorine \(poolConfig.chlorinePreference.displayName); pH increaser \(poolConfig.pHIncreaserPreference.displayName); pH decreaser \(poolConfig.pHDecreaserPreference.displayName); alkalinity increaser \(poolConfig.alkalinityIncreaserPreference.displayName); calcium increaser \(poolConfig.calciumIncreaserPreference.displayName); stabilizer \(poolConfig.stabilizerPreference.displayName)")
 
         let df = DateFormatter()
         df.dateStyle = .medium
@@ -46,6 +47,22 @@ struct AIRecommendationRequest: @unchecked Sendable {
         }
         if !currentTest.notes.isEmpty {
             parts.append("  Notes: \(currentTest.notes)")
+        }
+        let conditions = currentTest.resolvedPoolConditions
+        if conditions.hasAnyKnownCondition {
+            parts.append("  Pool Conditions Since Last Test:")
+            parts.append("    Chlorine demand score: \(conditions.chlorineDemandContribution)")
+            parts.append("    Water change score: \(conditions.waterChangeContribution)")
+            parts.append("    Swimming: \(conditions.swimmingLoad.rawValue)")
+            parts.append("    Pet swimming: \(conditions.petSwimmingLoad.rawValue)")
+            parts.append("    Rain: \(conditions.rainLoad.rawValue)")
+            parts.append("    Cover open time: \(conditions.coverOpenTime.rawValue)")
+            parts.append("    Organic debris: \(conditions.organicDebrisLoad.rawValue)")
+            parts.append("    Skimmed debris: \(conditions.skimmedDebris.rawValue)")
+            parts.append("    Backwashed filter: \(conditions.backwashedFilter.rawValue)")
+            parts.append("    Water added: \(conditions.waterAdded.rawValue)")
+            parts.append("    Cleaning: \(conditions.cleaningActivity.rawValue)")
+            parts.append("    Pool brushed: \(conditions.poolBrushed.rawValue)")
         }
         let indicators = currentTest.visualIndicators.compactMap(VisualIndicator.init(rawValue:))
         let positives = indicators.filter { $0.isPositive }

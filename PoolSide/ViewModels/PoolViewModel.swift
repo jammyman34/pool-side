@@ -14,6 +14,7 @@ final class PoolViewModel {
 
     // MARK: - Services
     private let chemistryEngine = ChemistryEngine()
+    private let nextTestRecommendationEngine = NextTestRecommendationEngine()
     private var aiService: AIService?
 
     // MARK: - Init
@@ -31,8 +32,10 @@ final class PoolViewModel {
     // MARK: - Config
 
     func saveConfig(_ config: PoolConfiguration) {
-        poolConfig = config
-        PoolConfiguration.current = config
+        var normalized = config
+        normalized.normalizeChemicalPreferences()
+        poolConfig = normalized
+        PoolConfiguration.current = normalized
     }
 
     // MARK: - Chemistry
@@ -53,8 +56,21 @@ final class PoolViewModel {
         return .ideal
     }
 
-    func overallScore(for test: PoolTest, previousTest: PoolTest? = nil) -> Int {
-        chemistryEngine.overallScore(for: test, previousTest: previousTest, config: poolConfig)
+    func overallScore(
+        for test: PoolTest,
+        previousTest: PoolTest? = nil,
+        recentHistory: [PoolTest] = []
+    ) -> Int {
+        chemistryEngine.overallScore(
+            for: test,
+            previousTest: previousTest,
+            recentHistory: recentHistory,
+            config: poolConfig
+        )
+    }
+
+    func currentStatusSummary(for test: PoolTest) -> String {
+        chemistryEngine.currentStatusSummary(for: test, treatments: test.treatments, config: poolConfig)
     }
 
     func previousTest(before test: PoolTest, in tests: [PoolTest]) -> PoolTest? {
@@ -62,6 +78,15 @@ final class PoolViewModel {
             .filter { $0.id != test.id && $0.date < test.date }
             .sorted { $0.date > $1.date }
             .first
+    }
+
+    func recentHistory(before test: PoolTest, in tests: [PoolTest], limit: Int = 10) -> [PoolTest] {
+        Array(
+            tests
+                .filter { $0.id != test.id && $0.date < test.date }
+                .sorted { $0.date > $1.date }
+                .prefix(limit)
+        )
     }
 
     // MARK: - Generate Recommendations
@@ -97,6 +122,7 @@ final class PoolViewModel {
             test.treatments
                 .filter { $0.isAIGenerated && (replacingCompletedPlan || (!$0.isCompleted && !$0.isSkipped)) }
                 .forEach {
+                    NotificationService.shared.cancelTreatmentReminder(for: $0)
                     modelContext.delete($0)
                 }
 
@@ -114,6 +140,77 @@ final class PoolViewModel {
         }
     }
 
+    @MainActor
+    func recalculateRecommendations(
+        for test: PoolTest,
+        recentTests: [PoolTest],
+        modelContext: ModelContext
+    ) async throws {
+        guard let service = aiService else { return }
+
+        isGeneratingRecommendations = true
+        lastError = nil
+        defer { isGeneratingRecommendations = false }
+
+        var effectiveConfig = poolConfig
+        effectiveConfig.testMethod = test.testMethod
+
+        let request = AIRecommendationRequest(
+            currentTest: test,
+            recentHistory: recentTests,
+            poolConfig: effectiveConfig
+        )
+
+        do {
+            let response = try await service.generateRecommendations(for: request)
+            let stateSnapshots = safelyMatchableTreatmentStates(from: test.treatments)
+
+            test.treatments
+                .filter(\.isAIGenerated)
+                .forEach {
+                    NotificationService.shared.cancelTreatmentReminder(for: $0)
+                    modelContext.delete($0)
+                }
+
+            let regeneratedTreatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
+            let regeneratedKeyCounts = Dictionary(
+                grouping: regeneratedTreatments.compactMap(\.statePreservationKey),
+                by: { $0 }
+            ).mapValues(\.count)
+
+            for treatment in regeneratedTreatments {
+                if
+                    let key = treatment.statePreservationKey,
+                    regeneratedKeyCounts[key] == 1,
+                    let snapshot = stateSnapshots[key] {
+                    treatment.applyStateSnapshot(snapshot)
+                }
+                modelContext.insert(treatment)
+            }
+
+            test.aiAssessment = response.assessmentText
+            try modelContext.save()
+        } catch {
+            lastError = error.localizedDescription
+            throw error
+        }
+    }
+
+    private func safelyMatchableTreatmentStates(from treatments: [Treatment]) -> [String: TreatmentStateSnapshot] {
+        let snapshots = treatments
+            .filter { $0.isAIGenerated && ($0.isCompleted || $0.isSkipped) }
+            .compactMap { treatment -> (String, TreatmentStateSnapshot)? in
+                guard let key = treatment.statePreservationKey else { return nil }
+                return (key, TreatmentStateSnapshot(treatment: treatment))
+            }
+        let grouped = Dictionary(grouping: snapshots, by: \.0)
+
+        return grouped.reduce(into: [:]) { result, item in
+            guard item.value.count == 1, let snapshot = item.value.first?.1 else { return }
+            result[item.key] = snapshot
+        }
+    }
+
     // MARK: - Complete Treatment
 
     @MainActor
@@ -128,14 +225,12 @@ final class PoolViewModel {
     func markTreatmentIncomplete(_ treatment: Treatment) {
         treatment.isCompleted = false
         treatment.completedAt = nil
-        if let identifier = treatment.reminderNotificationIdentifier {
-            NotificationService.shared.cancel(identifier: identifier)
-            treatment.reminderNotificationIdentifier = nil
-        }
+        NotificationService.shared.cancelTreatmentReminder(for: treatment)
     }
 
     @MainActor
     func skipTreatment(_ treatment: Treatment) {
+        NotificationService.shared.cancelTreatmentReminder(for: treatment)
         treatment.isSkipped = true
         treatment.skippedAt = Date()
         treatment.isCompleted = false
@@ -162,6 +257,82 @@ final class PoolViewModel {
             .flatMap { $0.treatments }
             .filter { $0.isCompleted }
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
+    }
+
+    func nextTestRecommendation(for test: PoolTest, in tests: [PoolTest]) -> NextTestRecommendation {
+        let allTreatments = test.treatments
+            .filter { !($0.isSkipped && $0.isWatchlistItem) }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let treatmentSteps = allTreatments.filter { !$0.isWatchlistItem }
+        let watchlist = allTreatments.filter { $0.isWatchlistItem }
+
+        return nextTestRecommendationEngine.recommendation(
+            for: test,
+            treatmentSteps: treatmentSteps,
+            watchlist: watchlist,
+            recentHistory: recentHistory(before: test, in: tests, limit: 10),
+            config: poolConfig
+        )
+    }
+
+    @MainActor
+    func replaceNextPoolTestReminder(for latestTest: PoolTest?, allTests: [PoolTest]) async {
+        guard poolConfig.enableNextPoolTestReminders else {
+            NotificationService.shared.cancelNextPoolTestReminder()
+            return
+        }
+
+        await NotificationService.shared.checkAuthorizationStatus()
+        guard NotificationService.shared.isAuthorized, let latestTest else {
+            NotificationService.shared.cancelNextPoolTestReminder()
+            return
+        }
+
+        let recommendation = nextTestRecommendation(for: latestTest, in: allTests)
+        _ = await NotificationService.shared.replaceNextPoolTestReminder(
+            at: recommendation.recommendedDate,
+            reason: recommendation.scheduledReason
+        )
+    }
+
+    @MainActor
+    func deletePoolTest(_ test: PoolTest, modelContext: ModelContext) throws {
+        for treatment in test.treatments {
+            NotificationService.shared.cancelTreatmentReminder(for: treatment)
+        }
+
+        modelContext.delete(test)
+        try modelContext.save()
+    }
+
+    @MainActor
+    func deletePoolTestAndRefreshHistory(
+        _ test: PoolTest,
+        allTests: [PoolTest],
+        modelContext: ModelContext
+    ) async throws {
+        let deletedID = test.id
+        let deletedDate = test.date
+        let remainingTests = allTests
+            .filter { $0.id != deletedID }
+            .sorted { $0.date < $1.date }
+
+        try deletePoolTest(test, modelContext: modelContext)
+
+        for remainingTest in remainingTests where remainingTest.date > deletedDate {
+            let recentTests = recentHistory(before: remainingTest, in: remainingTests, limit: 10)
+            await generateRecommendations(
+                for: remainingTest,
+                recentTests: recentTests,
+                modelContext: modelContext,
+                replacingCompletedPlan: false
+            )
+        }
+
+        try modelContext.save()
+
+        let latestRemaining = remainingTests.sorted { $0.date > $1.date }.first
+        await replaceNextPoolTestReminder(for: latestRemaining, allTests: remainingTests)
     }
 
     // MARK: - Trend Analysis
@@ -208,5 +379,38 @@ final class PoolViewModel {
         case .critical:                return 3
         case .testing:                 return -1
         }
+    }
+}
+
+private struct TreatmentStateSnapshot {
+    let isCompleted: Bool
+    let completedAt: Date?
+    let isSkipped: Bool
+    let skippedAt: Date?
+
+    init(treatment: Treatment) {
+        isCompleted = treatment.isCompleted
+        completedAt = treatment.completedAt
+        isSkipped = treatment.isSkipped
+        skippedAt = treatment.skippedAt
+    }
+}
+
+private extension Treatment {
+    var statePreservationKey: String? {
+        guard let productIdentifier, !productIdentifier.isEmpty else { return nil }
+        return [
+            productIdentifier,
+            targetParameter,
+            expectedEffectParameter,
+            unit
+        ].joined(separator: "|")
+    }
+
+    func applyStateSnapshot(_ snapshot: TreatmentStateSnapshot) {
+        isCompleted = snapshot.isCompleted
+        completedAt = snapshot.completedAt
+        isSkipped = snapshot.isSkipped
+        skippedAt = snapshot.skippedAt
     }
 }

@@ -117,7 +117,11 @@ final class RuleBasedService: AIService, @unchecked Sendable {
                 targetParameter: "visualIndicators",
                 urgency: .immediate,
                 minutesBeforeNext: 480,
-                sortOrder: 900
+                sortOrder: 900,
+                productID: .liquidChlorine10,
+                globalPreferenceProductID: config.chlorinePreference.productID,
+                calculatedDoseBeforeCap: gallons,
+                calculatedDoseBeforeCapUnit: "gal"
             ))
         }
 

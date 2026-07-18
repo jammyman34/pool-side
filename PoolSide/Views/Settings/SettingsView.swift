@@ -17,7 +17,12 @@ struct SettingsView: View {
     @State private var liquidDropKitBrand: LiquidDropKitBrand = .taylorK2006FASDPD
     @State private var isSaltwater: Bool = false
     @State private var hasCover: Bool = false
+    @State private var petsRegularlySwim: Bool = false
+    @State private var usesRoboticCleaner: Bool = false
+    @State private var enableNextPoolTestReminders: Bool = true
+    @State private var enableTreatmentStepReminders: Bool = true
     @State private var chlorinePreference: ChlorinePreference = .calHypo
+    @State private var lastNonSaltChlorinePreference: ChlorinePreference = .liquidChlorine10
     @State private var pHIncreaserPreference: PHIncreaserPreference = .sodaAsh
     @State private var pHDecreaserPreference: PHDecreaserPreference = .muriaticAcid
     @State private var alkalinityIncreaserPreference: AlkalinityIncreaserPreference = .sodiumBicarbonate
@@ -45,7 +50,12 @@ struct SettingsView: View {
             liquidDropKitBrand: liquidDropKitBrand,
             isSaltwater: isSaltwater,
             hasCover: hasCover,
+            petsRegularlySwim: petsRegularlySwim,
+            usesRoboticCleaner: usesRoboticCleaner,
+            enableNextPoolTestReminders: enableNextPoolTestReminders,
+            enableTreatmentStepReminders: enableTreatmentStepReminders,
             chlorinePreference: chlorinePreference,
+            lastNonSaltChlorinePreference: lastNonSaltChlorinePreference,
             pHIncreaserPreference: pHIncreaserPreference,
             pHDecreaserPreference: pHDecreaserPreference,
             alkalinityIncreaserPreference: alkalinityIncreaserPreference,
@@ -80,13 +90,25 @@ struct SettingsView: View {
                                 rowDivider
                                 toggleRow(label: "Pool Cover", isOn: $hasCover)
                                 rowDivider
+                                toggleRow(label: "Do pets regularly swim in your pool?", isOn: $petsRegularlySwim)
+                                rowDivider
+                                toggleRow(label: "Do you use a robotic pool cleaner?", isOn: $usesRoboticCleaner)
+                                rowDivider
                                 toggleRow(label: "Salt-Chlorine System", isOn: $isSaltwater)
+                            }
+                        }
+
+                        sectionCard(header: "Notifications") {
+                            VStack(spacing: 0) {
+                                toggleRow(label: "Next Pool Test Reminders", isOn: $enableNextPoolTestReminders)
+                                rowDivider
+                                toggleRow(label: "Treatment Step Reminders", isOn: $enableTreatmentStepReminders)
                             }
                         }
 
                         sectionCard(header: "Chemical Preferences") {
                             VStack(spacing: 0) {
-                                preferencePickerRow(label: "Chlorine", selection: $chlorinePreference)
+                                chlorinePreferencePickerRow
                                 rowDivider
                                 preferencePickerRow(label: "pH Increaser", selection: $pHIncreaserPreference)
                                 rowDivider
@@ -200,6 +222,21 @@ struct SettingsView: View {
                 }
             }
         }
+        .onChange(of: isSaltwater) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            var config = currentConfig
+            config.setSaltwater(newValue)
+            chlorinePreference = config.chlorinePreference
+            lastNonSaltChlorinePreference = config.lastNonSaltChlorinePreference
+        }
+        .onChange(of: chlorinePreference) { _, newValue in
+            if !newValue.isSaltGenerator {
+                lastNonSaltChlorinePreference = newValue
+            }
+            if !newValue.isValidForSaltwater(isSaltwater) {
+                chlorinePreference = isSaltwater ? .saltGenerator : lastNonSaltChlorinePreference
+            }
+        }
     }
 
     // MARK: - Section Card
@@ -248,7 +285,10 @@ struct SettingsView: View {
             Spacer()
             Picker(label, selection: selection) {
                 ForEach(Array(T.allCases), id: \.self) { option in
-                    Text(option.description).tag(option)
+                    Text(option.description)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .tag(option)
                 }
             }
             .tint(PoolColor.poolTeal)
@@ -269,6 +309,28 @@ struct SettingsView: View {
             Picker(label, selection: selection) {
                 ForEach(Array(T.allCases), id: \.self) { option in
                     Text(option.description).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(PoolColor.poolTeal)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    private var chlorinePreferencePickerRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Chlorine")
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.primaryText)
+
+            Picker("Chlorine", selection: $chlorinePreference) {
+                ForEach(ChlorinePreference.options(isSaltwater: isSaltwater), id: \.self) { option in
+                    Text(option.displayName)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .tag(option)
                 }
             }
             .pickerStyle(.menu)
@@ -513,7 +575,12 @@ struct SettingsView: View {
         normalizeBrandForCurrentMethod()
         isSaltwater = config.isSaltwater
         hasCover = config.hasCover
+        petsRegularlySwim = config.petsRegularlySwim
+        usesRoboticCleaner = config.usesRoboticCleaner
+        enableNextPoolTestReminders = config.enableNextPoolTestReminders
+        enableTreatmentStepReminders = config.enableTreatmentStepReminders
         chlorinePreference = config.chlorinePreference
+        lastNonSaltChlorinePreference = config.lastNonSaltChlorinePreference
         pHIncreaserPreference = config.pHIncreaserPreference
         pHDecreaserPreference = config.pHDecreaserPreference
         alkalinityIncreaserPreference = config.alkalinityIncreaserPreference
@@ -533,7 +600,15 @@ struct SettingsView: View {
 
     private func save() {
         normalizeBrandForCurrentMethod()
-        viewModel.saveConfig(currentConfig)
+        var updatedConfig = currentConfig
+        updatedConfig.normalizeChemicalPreferences()
+        viewModel.saveConfig(updatedConfig)
+        if !updatedConfig.enableNextPoolTestReminders {
+            NotificationService.shared.cancelNextPoolTestReminder()
+        }
+        if !updatedConfig.enableNextPoolTestReminders && !updatedConfig.enableTreatmentStepReminders {
+            NotificationService.shared.cancelAllPoolSideNotifications()
+        }
         dismiss()
     }
 }

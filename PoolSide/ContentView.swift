@@ -7,41 +7,93 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .dashboard
     @State private var showingAddTest = false
     @State private var showingSettings = false
+    @State private var showingStartupSplash = true
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Tab content — no TabView wrapper, drive visibility manually
-            // to keep the custom tab bar fully in control
-            Group {
-                switch selectedTab {
-                case .dashboard:
-                    DashboardView(
-                        showingAddTest: $showingAddTest,
-                        showingSettings: $showingSettings
-                    )
-                case .insights:
-                    InsightsView()
+        ZStack {
+            ZStack(alignment: .bottom) {
+                // Tab content — no TabView wrapper, drive visibility manually
+                // to keep the custom tab bar fully in control
+                Group {
+                    switch selectedTab {
+                    case .dashboard:
+                        DashboardView(
+                            showingAddTest: $showingAddTest,
+                            showingSettings: $showingSettings
+                        )
+                    case .insights:
+                        InsightsView()
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Custom tab bar
-            PoolTabBar(
-                selectedTab: $selectedTab,
-                showingAddTest: $showingAddTest
-            )
+                // Custom tab bar
+                PoolTabBar(
+                    selectedTab: $selectedTab,
+                    showingAddTest: $showingAddTest
+                )
+            }
+            .ignoresSafeArea(edges: .bottom)
+
+            if showingStartupSplash {
+                StartupSplashView()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
-        .ignoresSafeArea(edges: .bottom)
         .fullScreenCover(isPresented: $showingAddTest) {
             AddTestView()
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }
-        .onAppear {
+        .task {
+            try? await Task.sleep(for: .milliseconds(1000))
+            withAnimation(.easeOut(duration: 0.2)) {
+                showingStartupSplash = false
+            }
             if !PoolConfiguration.isConfigured {
                 showingSettings = true
             }
+        }
+    }
+}
+
+// MARK: - Startup Splash
+
+private struct StartupSplashView: View {
+    var body: some View {
+        ZStack {
+            Image("Pool Water BG")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+
+            Color.white
+                .opacity(0.22)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                Text("PoolSide")
+                    .font(.custom("AvenirNext-DemiBold", size: 42))
+                    .foregroundStyle(PoolColor.deepWater)
+                    .minimumScaleFactor(0.78)
+                    .offset(y: 128)
+
+                Image("Test Data Hero")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 330)
+
+                Text("Know what your pool needs")
+                    .font(.custom("AvenirNext-Medium", size: 20))
+                    .foregroundStyle(PoolColor.deepWater.opacity(0.88))
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.82)
+                    .offset(y: -128)
+            }
+            .padding(.horizontal, 32)
+            .offset(y: 4)
         }
     }
 }

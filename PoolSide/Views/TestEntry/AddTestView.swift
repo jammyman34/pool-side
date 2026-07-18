@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import AudioToolbox
 
 extension LiquidDropKitBrand {
     var icon: Image {
@@ -52,6 +53,24 @@ private enum TaylorDropEntryField: String, Identifiable {
     }
 }
 
+private enum CyaMixingTimerState: Equatable {
+    static let duration: TimeInterval = 30
+
+    case idle
+    case running(endTime: Date)
+    case paused(remaining: TimeInterval)
+
+    var isIdle: Bool {
+        if case .idle = self { return true }
+        return false
+    }
+
+    var isRunning: Bool {
+        if case .running = self { return true }
+        return false
+    }
+}
+
 struct AddTestView: View {
 
     private static let taylorSampleSizeDefaultsKey = "AddTestView.taylorSampleSize"
@@ -69,6 +88,7 @@ struct AddTestView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(PoolViewModel.self) private var viewModel
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
@@ -88,6 +108,16 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
+    @State private var swimmingLoad: SwimmingLoad = .unknown
+    @State private var petSwimmingLoad: PetSwimmingLoad = .unknown
+    @State private var rainLoad: RainLoad = .unknown
+    @State private var coverOpenTime: CoverOpenTime = .unknown
+    @State private var organicDebrisLoad: OrganicDebrisLoad = .unknown
+    @State private var skimmedDebris: SkimmedDebris = .no
+    @State private var backwashedFilter: BackwashedFilter = .no
+    @State private var waterAdded: WaterAdded = .none
+    @State private var cleaningActivity: CleaningActivity = .no
+    @State private var poolBrushed: PoolBrushed = .no
     @State private var originalSnapshot: TestFormSnapshot? = nil
     @State private var chemicalOrder: [ChemicalField] = ChemicalField.defaultDisplayOrder
     @State private var draggedChemical: ChemicalField? = nil
@@ -100,6 +130,8 @@ struct AddTestView: View {
     @State private var directDropEntryField: TaylorDropEntryField? = nil
     @State private var directDropEntryText: String = ""
     @State private var directDropEntryWantsFocus: Bool = false
+    @State private var cyaMixingTimer: CyaMixingTimerState = .idle
+    @State private var showingCyaTimerToast = false
 
     // Post-save
     @State private var savedTest: PoolTest? = nil
@@ -181,6 +213,7 @@ struct AddTestView: View {
             taylorCCDrops: usesDropChlorine ? taylorCCDrops : nil,
             taylorTADrops: usesDropAlkalinity ? taylorTADrops : nil,
             taylorCHDrops: usesDropHardness ? taylorCHDrops : nil,
+            poolConditions: currentPoolConditions,
             notes: notes,
             visualIndicators: orderedVisualIndicators
         )
@@ -369,6 +402,38 @@ struct AddTestView: View {
         return true
     }
 
+    private var currentPoolConditions: PoolConditions {
+        PoolConditions(
+            swimmingLoad: swimmingLoad,
+            petSwimmingLoad: viewModel.poolConfig.petsRegularlySwim ? petSwimmingLoad : .unknown,
+            rainLoad: rainLoad,
+            coverOpenTime: viewModel.poolConfig.hasCover ? coverOpenTime : .unknown,
+            organicDebrisLoad: organicDebrisLoad,
+            skimmedDebris: shouldShowSkimmedDebris ? skimmedDebris : .no,
+            backwashedFilter: backwashedFilter,
+            waterAdded: waterAdded,
+            cleaningActivity: cleaningActivity,
+            poolBrushed: poolBrushed
+        )
+    }
+
+    private var shouldShowPetSwimming: Bool {
+        viewModel.poolConfig.petsRegularlySwim
+    }
+
+    private var shouldShowCoverOpenTime: Bool {
+        viewModel.poolConfig.hasCover
+    }
+
+    private var shouldShowSkimmedDebris: Bool {
+        switch organicDebrisLoad {
+        case .low, .moderate, .high:
+            return true
+        case .unknown, .none:
+            return false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -427,6 +492,10 @@ struct AddTestView: View {
                         .padding(.horizontal, 16)
                         .padding(.top, 16) // overlap with banner bottom
 
+                        poolConditionsCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
+
                         visualIndicatorsCard
                             .padding(.horizontal, 16)
                             .padding(.top, 16)
@@ -439,6 +508,14 @@ struct AddTestView: View {
                 }
                 .scrollDisabled(draggedChemical != nil)
                 .ignoresSafeArea(edges: .top)
+
+                if showingCyaTimerToast {
+                    cyaTimerToast
+                        .padding(.top, 62)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(20)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
 
                 // Treatment button pinned at bottom
                 Button {
@@ -549,6 +626,9 @@ struct AddTestView: View {
             if !liquidDropKitBrand.isAvailable(for: testMethod) {
                 liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
             }
+            if testMethod != .liquidDropKit {
+                resetCyaMixingTimer()
+            }
             if matchesConfigDefaults {
                 saveTestMethodAsDefault = false
             }
@@ -561,17 +641,42 @@ struct AddTestView: View {
         .onChange(of: taylorSampleSize) { _, newValue in
             saveTaylorSampleSize(newValue)
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                checkCyaMixingTimerAfterResume()
+            }
+        }
+        .onChange(of: organicDebrisLoad) { _, newValue in
+            if newValue == .unknown || newValue == .none {
+                skimmedDebris = .no
+            }
+        }
         .task {
             await showInitialTreatmentPlanIfNeeded()
         }
     }
 
+    private var cyaTimerToast: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(PoolColor.statusIdeal)
+            Text("Time to measure!")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        .padding(.horizontal, 16)
+    }
+
     // MARK: - Hero Banner
 
-    private var heroBanner: some View {
-        let headerHeight: CGFloat = 250
-        let topPadding: CGFloat = 16
-        let contentBottomPadding: CGFloat = 56
+private var heroBanner: some View {
+    let headerHeight: CGFloat = 250
+    let topPadding: CGFloat = 0
+    let contentBottomPadding: CGFloat = 56
 
         return GeometryReader { proxy in
             ZStack {
@@ -633,26 +738,7 @@ struct AddTestView: View {
         let meterColor = meterColor(for: status)
 
         return HStack(alignment: .top, spacing: 16) {
-            ChemicalIcon(field: field, size: 54)
-                .contentShape(RoundedRectangle(cornerRadius: 14))
-                .overlay {
-                    if !isTaylorMode {
-                        ReorderLongPressOverlay(
-                            onBegan: {
-                                beginChemicalDrag(for: field)
-                            },
-                            onChanged: { translation in
-                                dragTranslation = translation
-                                updateChemicalOrder(for: field, with: translation)
-                            },
-                            onEnded: {
-                                endChemicalDrag()
-                            }
-                        )
-                    }
-                }
-                .accessibilityLabel(isTaylorMode ? label : "Reorder \(label)")
-                .accessibilityHint(isTaylorMode ? "" : "Touch and hold, then drag up or down to reorder this chemical")
+            chemicalIconColumn(field: field, label: label)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -710,6 +796,157 @@ struct AddTestView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private func chemicalIconColumn(field: ChemicalField, label: String) -> some View {
+        VStack(spacing: 6) {
+            if shouldShowCyaMixingTimer(for: field) {
+                cyaMixingTimerButton(field: field, label: label)
+            } else {
+                ChemicalIcon(field: field, size: 54)
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        if !isTaylorMode {
+                            ReorderLongPressOverlay(
+                                onBegan: {
+                                    beginChemicalDrag(for: field)
+                                },
+                                onChanged: { translation in
+                                    dragTranslation = translation
+                                    updateChemicalOrder(for: field, with: translation)
+                                },
+                                onEnded: {
+                                    endChemicalDrag()
+                                }
+                            )
+                        }
+                    }
+                    .accessibilityLabel(isTaylorMode ? label : "Reorder \(label)")
+                    .accessibilityHint(isTaylorMode ? "" : "Touch and hold, then drag up or down to reorder this chemical")
+            }
+        }
+        .frame(width: 62)
+    }
+
+    private func shouldShowCyaMixingTimer(for field: ChemicalField) -> Bool {
+        field == .cyanuricAcid && testMethod == .liquidDropKit
+    }
+
+    private func cyaMixingTimerButton(field: ChemicalField, label: String) -> some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { context in
+            let isRunning = cyaMixingTimer.isRunning
+            let remainingSeconds = cyaMixingRemainingSeconds(now: context.date)
+
+            VStack(spacing: 6) {
+                ZStack {
+                    ChemicalIcon(field: field, size: 54)
+                        .opacity(isRunning ? 0.60 : 1)
+
+                    if isRunning {
+                        Image(systemName: "pause.circle.fill")
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(Color(hex: "848484").opacity(0.85))
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 14))
+                .onTapGesture {
+                    toggleCyaMixingTimer(now: context.date)
+                }
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    resetCyaMixingTimer(feedback: true)
+                }
+                .accessibilityLabel("CYA mixing timer")
+                .accessibilityHint("Tap to start, pause, or resume. Touch and hold to reset.")
+
+                HStack(spacing: 4) {
+                    if cyaMixingTimer.isIdle {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color(hex: "848484"))
+                    }
+
+                    Text(cyaMixingTimerLabel(remainingSeconds: remainingSeconds))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color(hex: "848484"))
+                        .monospacedDigit()
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(width: 62)
+            }
+            .onChange(of: remainingSeconds) { _, newValue in
+                if cyaMixingTimer.isRunning && newValue <= 0 {
+                    completeCyaMixingTimer()
+                }
+            }
+        }
+    }
+
+    private func toggleCyaMixingTimer(now: Date = Date()) {
+        switch cyaMixingTimer {
+        case .idle:
+            cyaMixingTimer = .running(endTime: now.addingTimeInterval(CyaMixingTimerState.duration))
+        case .running(let endTime):
+            let remaining = max(0, endTime.timeIntervalSince(now))
+            cyaMixingTimer = .paused(remaining: remaining)
+        case .paused(let remaining):
+            cyaMixingTimer = .running(endTime: now.addingTimeInterval(remaining))
+        }
+    }
+
+    private func resetCyaMixingTimer(feedback: Bool = false) {
+        cyaMixingTimer = .idle
+        if feedback {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    private func completeCyaMixingTimer() {
+        guard cyaMixingTimer.isRunning else { return }
+        cyaMixingTimer = .idle
+        showCyaTimerCompletionFeedback()
+    }
+
+    private func checkCyaMixingTimerAfterResume() {
+        guard case .running(let endTime) = cyaMixingTimer else { return }
+        if endTime <= Date() {
+            completeCyaMixingTimer()
+        }
+    }
+
+    private func cyaMixingRemainingSeconds(now: Date = Date()) -> Int {
+        switch cyaMixingTimer {
+        case .idle:
+            return Int(CyaMixingTimerState.duration)
+        case .running(let endTime):
+            return Int(ceil(max(0, endTime.timeIntervalSince(now))))
+        case .paused(let remaining):
+            return Int(ceil(max(0, remaining)))
+        }
+    }
+
+    private func cyaMixingTimerLabel(remainingSeconds: Int) -> String {
+        switch cyaMixingTimer {
+        case .idle:
+            return "\(remainingSeconds) sec"
+        case .running, .paused:
+            return "Mixing\n\(remainingSeconds) sec"
+        }
+    }
+
+    private func showCyaTimerCompletionFeedback() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        AudioServicesPlaySystemSound(1057)
+
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+            showingCyaTimerToast = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showingCyaTimerToast = false
+            }
+        }
     }
 
     private func beginDirectEntry(for field: ChemicalField, value: Double, format: String) {
@@ -1155,6 +1392,10 @@ struct AddTestView: View {
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(PoolColor.secondaryText)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .layoutPriority(1)
             Spacer(minLength: 8)
 
             Button {
@@ -1588,6 +1829,243 @@ struct AddTestView: View {
             .padding(.leading, 60)
     }
 
+    private var poolConditionsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pool Conditions (recommended)")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(PoolColor.primaryText)
+                Text("Since last test log")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+            }
+
+            VStack(spacing: 18) {
+                poolConditionsGroupHeader("Environment")
+
+                poolConditionRow(
+                    title: "Swimming",
+                    selection: $swimmingLoad,
+                    options: [
+                        (.none, "None", "No swimming"),
+                        (.low, "Low", "1-2 swimmers for <1 hr"),
+                        (.moderate, "Mod", "2-5 swimmers for 1-2 hrs"),
+                        (.high, "High", ">5 swimmers or 1-2 swimmers for >2 hrs")
+                    ]
+                )
+
+                if shouldShowPetSwimming {
+                    conditionDivider
+                    poolConditionRow(
+                        title: "Pet Swimming",
+                        selection: $petSwimmingLoad,
+                        options: [
+                            (.none, "None", "No pets"),
+                            (.low, "Low", "1 pet for <15 min"),
+                            (.moderate, "Mod", "1 pet for 15-30 min or 2 pets briefly"),
+                            (.high, "High", ">1 pet or 1 pet for >30 min")
+                        ]
+                    )
+                }
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Rain",
+                    selection: $rainLoad,
+                    options: [
+                        (.none, "None", "No rain"),
+                        (.light, "Light", "Light rain or brief drizzle"),
+                        (.steady, "Steady", "Steady rain"),
+                        (.heavy, "Heavy", "Heavy rain or storms")
+                    ]
+                )
+
+                if shouldShowCoverOpenTime {
+                    conditionDivider
+                    poolConditionRow(
+                        title: "Pool Cover",
+                        selection: $coverOpenTime,
+                        options: [
+                            (.mostlyOpen, "Mostly Open", "Cover was open most of the time"),
+                            (.sixToEighteenHours, "6-18h", "Pool was open for about 6-18 hours"),
+                            (.twoToSixHours, "2-6h", "Pool was open for about 2-6 hours"),
+                            (.lessThanTwoHours, "<2h", "Pool was open for less than 2 hours")
+                        ]
+                    )
+                }
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Organic Debris",
+                    subtitle: "Leaves, bugs, pollen, grass, etc.",
+                    selection: $organicDebrisLoad,
+                    options: [
+                        (.none, "None", "No noticeable debris"),
+                        (.low, "Low", "A few bugs or leaves"),
+                        (.moderate, "Mod", "Noticeable debris across the pool"),
+                        (.high, "High", "Heavy debris or storm cleanup")
+                    ]
+                )
+
+                conditionDivider
+                poolConditionsGroupHeader("Maintenance")
+
+                if shouldShowSkimmedDebris {
+                    poolConditionRow(
+                        title: "Skimmed",
+                        selection: $skimmedDebris,
+                        options: [
+                            (.no, "No", "Debris was not skimmed out"),
+                            (.yes, "Yes", "Debris was skimmed out")
+                        ]
+                    )
+                    conditionDivider
+                }
+
+                poolConditionRow(
+                    title: "Backwashed Filter",
+                    selection: $backwashedFilter,
+                    options: [
+                        (.no, "No", "Filter was not backwashed"),
+                        (.yes, "Yes", "Backwashed and rinsed filter since last test log")
+                    ]
+                )
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Water Added",
+                    selection: $waterAdded,
+                    options: [
+                        (.none, "None", "No water added"),
+                        (.lessThanOneInch, "<1\"", "Small top-off"),
+                        (.oneToTwoInches, "1-2\"", "Added about 1-2 inches"),
+                        (.moreThanTwoInches, ">2\"", "Added more than 2 inches or a large refill")
+                    ]
+                )
+
+                conditionDivider
+                if viewModel.poolConfig.usesRoboticCleaner {
+                    poolConditionRow(
+                        title: "Robot Cleaning",
+                        selection: $cleaningActivity,
+                        options: [
+                            (.no, "No", "Robot was not run"),
+                            (.oneCycle, "1 Cycle", "Robot completed one cleaning cycle"),
+                            (.multipleCycles, "Multiple", "Robot completed more than one cycle")
+                        ]
+                    )
+                } else {
+                    poolConditionRow(
+                        title: "Vacuumed",
+                        selection: $cleaningActivity,
+                        options: [
+                            (.no, "No", "Pool was not vacuumed"),
+                            (.spotVacuumed, "Spot", "Only problem areas were vacuumed"),
+                            (.entirePool, "Entire", "Entire pool was vacuumed")
+                        ]
+                    )
+                }
+
+                conditionDivider
+                poolConditionRow(
+                    title: "Pool Brushed",
+                    selection: $poolBrushed,
+                    options: [
+                        (.no, "No", "Pool was not brushed"),
+                        (.yes, "Yes", "Pool walls or floor were brushed")
+                    ]
+                )
+            }
+
+            Text("These details help Pool Side understand chlorine demand and explain future recommendations.")
+                .font(.caption)
+                .foregroundStyle(PoolColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        }
+        .padding(18)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private var conditionDivider: some View {
+        Rectangle()
+            .fill(PoolColor.divider)
+            .frame(height: 1)
+    }
+
+    private func poolConditionsGroupHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2)
+            .fontWeight(.bold)
+            .foregroundStyle(PoolColor.secondaryText)
+            .tracking(0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func poolConditionRow<Value: Hashable>(
+        title: String,
+        subtitle: String? = nil,
+        selection: Binding<Value>,
+        options: [(value: Value, label: String, explanation: String)]
+    ) -> some View {
+        let selectedExplanation = options.first { $0.value == selection.wrappedValue }?.explanation
+
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(PoolColor.primaryText)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+            }
+
+            HStack(spacing: 4) {
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    let isSelected = option.value == selection.wrappedValue
+
+                    Button {
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+                            selection.wrappedValue = option.value
+                        }
+                    } label: {
+                        Text(option.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? .white : PoolColor.primaryText)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .padding(.horizontal, 4)
+                            .background(
+                                isSelected ? PoolColor.poolTeal : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 9)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(PoolColor.appBackground, in: RoundedRectangle(cornerRadius: 12))
+
+            if let selectedExplanation {
+                Text(selectedExplanation)
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
+        }
+    }
+
     private var visualIndicatorsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
@@ -1697,6 +2175,7 @@ struct AddTestView: View {
             taylorCCDrops = test.taylorCCDrops
             taylorTADrops = test.taylorTADrops
             taylorCHDrops = test.taylorCHDrops
+            applyPoolConditions(test.resolvedPoolConditions)
             saveTestMethodAsDefault = false
             notes = test.notes
             selectedVisualIndicators = Set(test.visualIndicators)
@@ -1727,6 +2206,19 @@ struct AddTestView: View {
         if !liquidDropKitBrand.isAvailable(for: testMethod) {
             liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
         }
+    }
+
+    private func applyPoolConditions(_ conditions: PoolConditions) {
+        swimmingLoad = conditions.swimmingLoad
+        petSwimmingLoad = conditions.petSwimmingLoad
+        rainLoad = conditions.rainLoad
+        coverOpenTime = conditions.coverOpenTime
+        organicDebrisLoad = conditions.organicDebrisLoad
+        skimmedDebris = shouldShowSkimmedDebris ? conditions.skimmedDebris : .no
+        backwashedFilter = conditions.backwashedFilter
+        waterAdded = conditions.waterAdded
+        cleaningActivity = conditions.cleaningActivity
+        poolBrushed = conditions.poolBrushed
     }
 
     private func saveTaylorSampleSize(_ sampleSize: TaylorSampleSize) {
@@ -1790,6 +2282,7 @@ struct AddTestView: View {
             existing.taylorCCDrops = usesDropChlorine ? taylorCCDrops : nil
             existing.taylorTADrops = usesDropAlkalinity ? taylorTADrops : nil
             existing.taylorCHDrops = usesDropHardness ? taylorCHDrops : nil
+            existing.poolConditions = currentPoolConditions
             existing.notes = notes
             existing.visualIndicators = orderedVisualIndicators
             test = existing
@@ -1806,6 +2299,7 @@ struct AddTestView: View {
                 saltLevel: includeSalt ? saltLevel : nil,
                 testMethod: testMethod,
                 liquidDropKitBrand: persistedBrand,
+                poolConditions: currentPoolConditions,
                 notes: notes,
                 visualIndicators: orderedVisualIndicators
             )
@@ -1846,6 +2340,9 @@ struct AddTestView: View {
 
         do {
             try modelContext.save()
+            let testsForReminder = [test] + tests.filter { $0.id != test.id }
+            let latestTest = testsForReminder.sorted { $0.date > $1.date }.first
+            await viewModel.replaceNextPoolTestReminder(for: latestTest, allTests: testsForReminder)
         } catch {
             viewModel.lastError = error.localizedDescription
         }
@@ -1882,6 +2379,7 @@ private struct TestFormSnapshot: Equatable {
     let taylorCCDrops: Int?
     let taylorTADrops: Int?
     let taylorCHDrops: Int?
+    let poolConditions: PoolConditions
     let notes: String
     let visualIndicators: [String]
 }

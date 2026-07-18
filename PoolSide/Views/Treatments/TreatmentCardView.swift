@@ -9,6 +9,7 @@ struct TreatmentCardView: View {
     }
 
     var treatment: Treatment
+    var nextActionableTreatment: Treatment? = nil
     var allowsActions: Bool = true
     var presentation: Presentation = .card
     var showsDivider: Bool = true
@@ -100,7 +101,8 @@ struct TreatmentCardView: View {
             if let category = swappableCategory {
                 ChemicalProductPickerSheet(
                     category: category,
-                    initialSelection: treatment.chemicalName,
+                    initialSelection: treatment.productIdentifier.flatMap(ChemicalProductID.init(rawValue:)) ?? category.currentSelection(from: viewModel.poolConfig),
+                    isSaltwater: viewModel.poolConfig.isSaltwater,
                     onApply: { newSelection, saveAsDefault in
                         applyProductSwap(category: category, selection: newSelection, saveAsDefault: saveAsDefault)
                     }
@@ -147,7 +149,7 @@ struct TreatmentCardView: View {
 
     private func applyProductSwap(
         category: ChemicalProductCategory,
-        selection: String,
+        selection: ChemicalProductID,
         saveAsDefault: Bool
     ) {
         // Don't propose a recomputed template against the saved config if the user only
@@ -157,17 +159,33 @@ struct TreatmentCardView: View {
         guard let test = treatment.poolTest else { return }
 
         let engine = ChemistryEngine()
-        guard let newTemplate = engine.proposedTreatmentTemplate(
+        let proposedTemplate = engine.proposedTreatmentTemplate(
             forTargetParameter: treatment.targetParameter,
             test: test,
             config: updatedConfig
-        ) else { return }
+        )
+        let repricedTemplate = engine.repricedTreatmentTemplate(
+            from: treatment,
+            test: test,
+            productID: selection,
+            config: updatedConfig
+        )
+        guard let newTemplate = repricedTemplate ?? proposedTemplate else { return }
 
         treatment.chemicalName = newTemplate.chemicalName
         treatment.amount = newTemplate.amount
         treatment.unit = newTemplate.unit
         treatment.instructions = newTemplate.instructions
         treatment.actionDescription = newTemplate.actionDescription
+        treatment.expectedDelta = newTemplate.expectedDelta
+        treatment.expectedEffectParameter = newTemplate.expectedEffectParameter
+        treatment.effectDelayHours = newTemplate.effectDelayHours
+        treatment.effectDurationHours = newTemplate.effectDurationHours
+        treatment.productIdentifier = newTemplate.productID?.rawValue
+        treatment.globalPreferenceIdentifier = newTemplate.globalPreferenceProductID?.rawValue
+        treatment.calculatedDoseBeforeCap = newTemplate.calculatedDoseBeforeCap
+        treatment.calculatedDoseBeforeCapUnit = newTemplate.calculatedDoseBeforeCapUnit
+        treatment.wasDoseCapped = newTemplate.wasDoseCapped
 
         try? modelContext.save()
 
@@ -207,8 +225,8 @@ struct TreatmentCardView: View {
                         Label(waitLabel, systemImage: "clock.badge.exclamationmark")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(PoolColor.poolTeal)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
@@ -424,8 +442,8 @@ struct TreatmentCardView: View {
     }
 
     private var waitLabel: String? {
-        guard allowsActions, treatment.minutesBeforeNext > 0, !treatment.isCompleted, !treatment.isSkipped else { return nil }
-        return "Retest in \(NotificationService.waitLabel(minutes: treatment.minutesBeforeNext)) before next step"
+        guard allowsActions, !treatment.isCompleted, !treatment.isSkipped else { return nil }
+        return TreatmentTimingGuidance.cardTip(for: treatment, nextActionableTreatment: nextActionableTreatment)
     }
 }
 
@@ -434,21 +452,24 @@ struct TreatmentCardView: View {
 struct ChemicalProductPickerSheet: View {
 
     let category: ChemicalProductCategory
-    let initialSelection: String
-    let onApply: (String, Bool) -> Void
+    let initialSelection: ChemicalProductID
+    let isSaltwater: Bool
+    let onApply: (ChemicalProductID, Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selection: String
+    @State private var selection: ChemicalProductID
     @State private var saveAsDefault: Bool = false
     @State private var sheetHeight: CGFloat = 320
 
     init(
         category: ChemicalProductCategory,
-        initialSelection: String,
-        onApply: @escaping (String, Bool) -> Void
+        initialSelection: ChemicalProductID,
+        isSaltwater: Bool,
+        onApply: @escaping (ChemicalProductID, Bool) -> Void
     ) {
         self.category = category
         self.initialSelection = initialSelection
+        self.isSaltwater = isSaltwater
         self.onApply = onApply
         _selection = State(initialValue: initialSelection)
     }
@@ -464,8 +485,11 @@ struct ChemicalProductPickerSheet: View {
 
                     HStack {
                         Picker("Product", selection: $selection) {
-                            ForEach(category.optionDisplayNames, id: \.self) { name in
-                                Text(name).tag(name)
+                            ForEach(category.options(isSaltwater: isSaltwater), id: \.self) { productID in
+                                Text(productID.displayName)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .tag(productID)
                             }
                         }
                         .pickerStyle(.menu)
