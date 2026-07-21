@@ -267,9 +267,9 @@ struct TreatmentTimingGuidance {
 
         switch treatment.targetParameter {
         case "freeChlorine":
-            return "Circulate ~1 hr before swimming or checking FC."
+            return "Circulate ~1 hr before swimming."
         case "pH", "totalAlkalinity":
-            return treatment.expectedDelta < 0 ? "Retest pH in ~4 hrs." : "Retest pH in ~4 hrs."
+            return "Circulate ~4 hrs before swimming."
         case "cyanuricAcid":
             return "Retest CYA after it has time to register."
         default:
@@ -323,6 +323,16 @@ struct TreatmentPlanSummaryText {
         default:
             return "\(actionableTreatmentCount) treatments"
         }
+    }
+}
+
+struct WatchlistPresentationText {
+    static func summary(count: Int) -> String {
+        count == 1 ? "1 item to monitor" : "\(count) items to monitor"
+    }
+
+    static func shouldShow(count: Int) -> Bool {
+        count > 0
     }
 }
 

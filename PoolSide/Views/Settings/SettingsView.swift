@@ -129,6 +129,7 @@ struct SettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 48)
                 }
+                .dismissesKeyboardOnScroll()
 
                 if showLocationToast {
                     VStack {
@@ -286,11 +287,10 @@ struct SettingsView: View {
             Picker(label, selection: selection) {
                 ForEach(Array(T.allCases), id: \.self) { option in
                     Text(option.description)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
                         .tag(option)
                 }
             }
+            .pickerStyle(.menu)
             .tint(PoolColor.poolTeal)
         }
         .padding(.horizontal, 18)
@@ -717,7 +717,7 @@ struct FeedbackSheet: View {
                     .padding(.top, 16)
                     .padding(.bottom, 112)
                 }
-                .scrollDismissesKeyboard(.interactively)
+                .dismissesKeyboardOnScroll()
 
                 sendButton
             }
@@ -904,7 +904,7 @@ struct PoolVolumeHelpView: View {
                         .padding(.top, 16)
                         .padding(.bottom, 104)
                     }
-                    .scrollDismissesKeyboard(.interactively)
+                    .dismissesKeyboardOnScroll()
                     .onChange(of: focusedFieldID) { _, newID in
                         guard let newID else { return }
                         Task { @MainActor in

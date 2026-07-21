@@ -1,6 +1,42 @@
 import Foundation
 import SwiftData
 
+enum WaterClarityAssessment: String, Codable, CaseIterable, Identifiable {
+    case clear
+    case cloudy
+    case cannotTell
+    case notRecorded
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .clear: return "Clear"
+        case .cloudy: return "Cloudy"
+        case .cannotTell: return "Cannot tell"
+        case .notRecorded: return "Not recorded"
+        }
+    }
+}
+
+enum VisibleAlgaeAssessment: String, Codable, CaseIterable, Identifiable {
+    case absent
+    case present
+    case cannotTell
+    case notRecorded
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .absent: return "No"
+        case .present: return "Yes"
+        case .cannotTell: return "Cannot tell"
+        case .notRecorded: return "Not recorded"
+        }
+    }
+}
+
 enum VisualIndicator: String, CaseIterable, Identifiable {
     case crystalClear = "Crystal Clear"
     case pleasantSmell = "Pleasant Smell"
@@ -64,6 +100,15 @@ enum VisualIndicator: String, CaseIterable, Identifiable {
             return false
         }
     }
+
+    var representsPrimaryVisualAssessment: Bool {
+        switch self {
+        case .crystalClear, .cloudyWater, .greenWater, .algaeSpots:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 @Model
@@ -109,6 +154,8 @@ final class PoolTest {
     var taylorCHDrops: Int?
     var notes: String
     var visualIndicators: [String] = []
+    var waterClarityAssessmentRaw: String?
+    var visibleAlgaeAssessmentRaw: String?
     var poolConditionsData: Data?
 
     /// AI-generated assessment text stored alongside the test record
@@ -135,6 +182,8 @@ final class PoolTest {
         poolConditions: PoolConditions? = nil,
         notes: String = "",
         visualIndicators: [String] = [],
+        waterClarityAssessment: WaterClarityAssessment = .notRecorded,
+        visibleAlgaeAssessment: VisibleAlgaeAssessment = .notRecorded,
         aiAssessment: String? = nil
     ) {
         self.id = id
@@ -152,6 +201,8 @@ final class PoolTest {
         self.poolConditionsData = try? poolConditions.map { try JSONEncoder().encode($0) }
         self.notes = notes
         self.visualIndicators = visualIndicators
+        self.waterClarityAssessmentRaw = waterClarityAssessment == .notRecorded ? nil : waterClarityAssessment.rawValue
+        self.visibleAlgaeAssessmentRaw = visibleAlgaeAssessment == .notRecorded ? nil : visibleAlgaeAssessment.rawValue
         self.aiAssessment = aiAssessment
         self.treatments = []
     }
@@ -186,6 +237,16 @@ final class PoolTest {
         set {
             poolConditionsData = try? newValue.map { try JSONEncoder().encode($0) }
         }
+    }
+
+    var waterClarityAssessment: WaterClarityAssessment {
+        get { waterClarityAssessmentRaw.flatMap(WaterClarityAssessment.init(rawValue:)) ?? .notRecorded }
+        set { waterClarityAssessmentRaw = newValue == .notRecorded ? nil : newValue.rawValue }
+    }
+
+    var visibleAlgaeAssessment: VisibleAlgaeAssessment {
+        get { visibleAlgaeAssessmentRaw.flatMap(VisibleAlgaeAssessment.init(rawValue:)) ?? .notRecorded }
+        set { visibleAlgaeAssessmentRaw = newValue == .notRecorded ? nil : newValue.rawValue }
     }
 
     var resolvedPoolConditions: PoolConditions {

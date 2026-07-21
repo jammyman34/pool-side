@@ -78,10 +78,16 @@ struct AddTestView: View {
     /// When non-nil, the view is in "edit" mode for an existing test
     var editingTest: PoolTest? = nil
     var startsOnTreatmentPlan: Bool = false
+    var onFirstTestTreatmentPlanDisplayed: (() -> Void)? = nil
 
-    init(editingTest: PoolTest? = nil, startsOnTreatmentPlan: Bool = false) {
+    init(
+        editingTest: PoolTest? = nil,
+        startsOnTreatmentPlan: Bool = false,
+        onFirstTestTreatmentPlanDisplayed: (() -> Void)? = nil
+    ) {
         self.editingTest = editingTest
         self.startsOnTreatmentPlan = startsOnTreatmentPlan
+        self.onFirstTestTreatmentPlanDisplayed = onFirstTestTreatmentPlanDisplayed
         _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
         _taylorSampleSize = State(initialValue: Self.savedTaylorSampleSize)
     }
@@ -108,6 +114,8 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
+    @State private var waterClarityAssessment: WaterClarityAssessment = .notRecorded
+    @State private var visibleAlgaeAssessment: VisibleAlgaeAssessment = .notRecorded
     @State private var swimmingLoad: SwimmingLoad = .unknown
     @State private var petSwimmingLoad: PetSwimmingLoad = .unknown
     @State private var rainLoad: RainLoad = .unknown
@@ -215,7 +223,9 @@ struct AddTestView: View {
             taylorCHDrops: usesDropHardness ? taylorCHDrops : nil,
             poolConditions: currentPoolConditions,
             notes: notes,
-            visualIndicators: orderedVisualIndicators
+            visualIndicators: orderedVisualIndicators,
+            waterClarityAssessment: waterClarityAssessment,
+            visibleAlgaeAssessment: visibleAlgaeAssessment
         )
     }
 
@@ -507,6 +517,7 @@ struct AddTestView: View {
                     .padding(.bottom, 100)
                 }
                 .scrollDisabled(draggedChemical != nil)
+                .dismissesKeyboardOnScroll()
                 .ignoresSafeArea(edges: .top)
 
                 if showingCyaTimerToast {
@@ -566,7 +577,10 @@ struct AddTestView: View {
                         embedsInNavigationStack: false,
                         showsCloseButton: true,
                         showsDoneButton: false,
-                        onClose: { dismiss() }
+                        onClose: {
+                            onFirstTestTreatmentPlanDisplayed?()
+                            dismiss()
+                        }
                     )
                 }
             }
@@ -711,6 +725,7 @@ private var heroBanner: some View {
                     .scaledToFit()
                     .frame(width: 180)
                     .padding(.trailing, 20)
+                    .offset(y: -48)
                     .padding(.bottom, -40)
             }
         }
@@ -1817,9 +1832,30 @@ private var heroBanner: some View {
     }
 
     private var orderedVisualIndicators: [String] {
-        VisualIndicator.allCases
+        var selected = selectedVisualIndicators
+
+        switch waterClarityAssessment {
+        case .clear:
+            selected.insert(VisualIndicator.crystalClear.rawValue)
+        case .cloudy:
+            selected.insert(VisualIndicator.cloudyWater.rawValue)
+        case .cannotTell, .notRecorded:
+            break
+        }
+
+        if visibleAlgaeAssessment == .present {
+            selected.insert(VisualIndicator.algaeSpots.rawValue)
+        }
+
+        return VisualIndicator.allCases
             .map(\.rawValue)
-            .filter { selectedVisualIndicators.contains($0) }
+            .filter { selected.contains($0) }
+    }
+
+    private var supplementalVisualIndicators: [VisualIndicator] {
+        VisualIndicator.allCases.filter { indicator in
+            !indicator.representsPrimaryVisualAssessment
+        }
     }
 
     private var divider: some View {
@@ -2078,25 +2114,114 @@ private var heroBanner: some View {
                     .foregroundStyle(PoolColor.secondaryText)
             }
 
-            let gridIndicators = VisualIndicator.allCases.filter { !$0.requiresFullWidthBadge }
-            let fullWidthIndicators = VisualIndicator.allCases.filter { $0.requiresFullWidthBadge }
+            visualAssessmentQuestion(
+                title: "Water clarity",
+                options: WaterClarityAssessment.allCases.filter { $0 != .notRecorded },
+                selection: $waterClarityAssessment
+            )
 
-            VStack(spacing: 10) {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    ForEach(gridIndicators) { indicator in
+            visualAssessmentQuestion(
+                title: "Visible algae",
+                options: VisibleAlgaeAssessment.allCases.filter { $0 != .notRecorded },
+                selection: $visibleAlgaeAssessment
+            )
+
+            DisclosureGroup("Anything unusual with the pool?") {
+                let gridIndicators = supplementalVisualIndicators.filter { !$0.requiresFullWidthBadge }
+                let fullWidthIndicators = supplementalVisualIndicators.filter { $0.requiresFullWidthBadge }
+
+                VStack(spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        ForEach(gridIndicators) { indicator in
+                            visualIndicatorBadge(indicator)
+                        }
+                    }
+
+                    ForEach(fullWidthIndicators) { indicator in
                         visualIndicatorBadge(indicator)
                     }
                 }
-
-                ForEach(fullWidthIndicators) { indicator in
-                    visualIndicatorBadge(indicator)
-                }
+                .padding(.top, 8)
             }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(PoolColor.primaryText)
+            .tint(PoolColor.poolTeal)
         }
         .padding(18)
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private func visualAssessmentQuestion(
+        title: String,
+        options: [WaterClarityAssessment],
+        selection: Binding<WaterClarityAssessment>
+    ) -> some View {
+        visualAssessmentRow(
+            title: title,
+            options: options.map { ($0.displayName, $0.rawValue) },
+            selectedRawValue: selection.wrappedValue == .notRecorded ? nil : selection.wrappedValue.rawValue
+        ) { rawValue in
+            selection.wrappedValue = selection.wrappedValue.rawValue == rawValue
+                ? .notRecorded
+                : WaterClarityAssessment(rawValue: rawValue) ?? .notRecorded
+        }
+    }
+
+    private func visualAssessmentQuestion(
+        title: String,
+        options: [VisibleAlgaeAssessment],
+        selection: Binding<VisibleAlgaeAssessment>
+    ) -> some View {
+        visualAssessmentRow(
+            title: title,
+            options: options.map { ($0.displayName, $0.rawValue) },
+            selectedRawValue: selection.wrappedValue == .notRecorded ? nil : selection.wrappedValue.rawValue
+        ) { rawValue in
+            selection.wrappedValue = selection.wrappedValue.rawValue == rawValue
+                ? .notRecorded
+                : VisibleAlgaeAssessment(rawValue: rawValue) ?? .notRecorded
+        }
+    }
+
+    private func visualAssessmentRow(
+        title: String,
+        options: [(label: String, rawValue: String)],
+        selectedRawValue: String?,
+        onSelect: @escaping (String) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+
+            HStack(spacing: 8) {
+                ForEach(options, id: \.rawValue) { option in
+                    let isSelected = selectedRawValue == option.rawValue
+                    Button {
+                        onSelect(option.rawValue)
+                    } label: {
+                        Text(option.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? .white : PoolColor.primaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                isSelected ? PoolColor.poolTeal : PoolColor.appBackground,
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(isSelected ? PoolColor.poolTeal : PoolColor.divider, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private func visualIndicatorBadge(_ indicator: VisualIndicator) -> some View {
@@ -2179,6 +2304,8 @@ private var heroBanner: some View {
             saveTestMethodAsDefault = false
             notes = test.notes
             selectedVisualIndicators = Set(test.visualIndicators)
+            waterClarityAssessment = displayWaterClarityAssessment(for: test)
+            visibleAlgaeAssessment = displayVisibleAlgaeAssessment(for: test)
             originalSnapshot = currentSnapshot
         } else if let last = tests.first {
             testMethod = viewModel.poolConfig.testMethod
@@ -2206,6 +2333,31 @@ private var heroBanner: some View {
         if !liquidDropKitBrand.isAvailable(for: testMethod) {
             liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
         }
+    }
+
+    private func displayWaterClarityAssessment(for test: PoolTest) -> WaterClarityAssessment {
+        if test.waterClarityAssessment != .notRecorded {
+            return test.waterClarityAssessment
+        }
+        let indicators = Set(test.visualIndicators)
+        if indicators.contains(VisualIndicator.cloudyWater.rawValue) || indicators.contains(VisualIndicator.greenWater.rawValue) {
+            return .cloudy
+        }
+        if indicators.contains(VisualIndicator.crystalClear.rawValue) {
+            return .clear
+        }
+        return .notRecorded
+    }
+
+    private func displayVisibleAlgaeAssessment(for test: PoolTest) -> VisibleAlgaeAssessment {
+        if test.visibleAlgaeAssessment != .notRecorded {
+            return test.visibleAlgaeAssessment
+        }
+        let indicators = Set(test.visualIndicators)
+        if indicators.contains(VisualIndicator.algaeSpots.rawValue) || indicators.contains(VisualIndicator.greenWater.rawValue) {
+            return .present
+        }
+        return .notRecorded
     }
 
     private func applyPoolConditions(_ conditions: PoolConditions) {
@@ -2285,6 +2437,8 @@ private var heroBanner: some View {
             existing.poolConditions = currentPoolConditions
             existing.notes = notes
             existing.visualIndicators = orderedVisualIndicators
+            existing.waterClarityAssessment = waterClarityAssessment
+            existing.visibleAlgaeAssessment = visibleAlgaeAssessment
             test = existing
         } else {
             test = PoolTest(
@@ -2301,7 +2455,9 @@ private var heroBanner: some View {
                 liquidDropKitBrand: persistedBrand,
                 poolConditions: currentPoolConditions,
                 notes: notes,
-                visualIndicators: orderedVisualIndicators
+                visualIndicators: orderedVisualIndicators,
+                waterClarityAssessment: waterClarityAssessment,
+                visibleAlgaeAssessment: visibleAlgaeAssessment
             )
             if usesDropChlorine || usesDropAlkalinity || usesDropHardness {
                 test.taylorSampleSize = taylorSampleSize
@@ -2382,6 +2538,8 @@ private struct TestFormSnapshot: Equatable {
     let poolConditions: PoolConditions
     let notes: String
     let visualIndicators: [String]
+    let waterClarityAssessment: WaterClarityAssessment
+    let visibleAlgaeAssessment: VisibleAlgaeAssessment
 }
 
 private struct DirectNumericEntryConfig {

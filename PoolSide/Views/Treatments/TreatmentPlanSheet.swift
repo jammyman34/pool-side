@@ -23,6 +23,7 @@ struct TreatmentPlanSheet: View {
     @State private var showingPermissionAlert: Bool = false
     @State private var openSwipeTreatmentID: UUID? = nil
     @State private var isWhyThisPlanExpanded: Bool = false
+    @State private var isWatchlistExpanded: Bool = false
     @State private var showingRecalculateDialog: Bool = false
     @State private var isRecalculatingRecommendations: Bool = false
 
@@ -152,14 +153,8 @@ struct TreatmentPlanSheet: View {
                                 }
                             }
 
-                            if !watchlistItems.isEmpty {
-                                recommendationSectionCard(title: "Watchlist", count: watchlistItems.count) {
-                                    VStack(spacing: 0) {
-                                        ForEach(Array(watchlistItems.enumerated()), id: \.element.id) { index, treatment in
-                                            watchlistCard(treatment, showsDivider: index < watchlistItems.count - 1)
-                                        }
-                                    }
-                                }
+                            if WatchlistPresentationText.shouldShow(count: watchlistItems.count) {
+                                watchlistSectionCard
                             }
 
                             if !skippedTreatments.isEmpty {
@@ -278,6 +273,7 @@ struct TreatmentPlanSheet: View {
                     .scaledToFit()
                     .frame(width: 180)
                     .padding(.trailing, 20)
+                    .offset(y: -48)
                     .padding(.bottom, -40)
             }
         }
@@ -323,6 +319,49 @@ struct TreatmentPlanSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader(title, count: count)
             content()
+        }
+        .padding(16)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private var watchlistSectionCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isWatchlistExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        sectionHeader("Watchlist", count: watchlistItems.count)
+                        Text(WatchlistPresentationText.summary(count: watchlistItems.count))
+                            .font(.caption)
+                            .foregroundStyle(PoolColor.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PoolColor.secondaryText)
+                        .rotationEffect(.degrees(isWatchlistExpanded ? 180 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Watchlist, \(WatchlistPresentationText.summary(count: watchlistItems.count))")
+            .accessibilityValue(isWatchlistExpanded ? "Expanded" : "Collapsed")
+            .accessibilityAddTraits(.isButton)
+
+            if isWatchlistExpanded {
+                VStack(spacing: 0) {
+                    ForEach(Array(watchlistItems.enumerated()), id: \.element.id) { index, treatment in
+                        watchlistCard(treatment, showsDivider: index < watchlistItems.count - 1)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(16)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
@@ -686,10 +725,12 @@ struct TreatmentPlanSheet: View {
         if test.resolvedPoolConditions.hasOrganicLoadReduction {
             factors.append("Skimming, cleaning, or brushing may have reduced some organic load.")
         }
-        if test.resolvedPoolConditions.backwashedFilter == .yes {
-            factors.append("Backwashing and water replacement may explain dilution in CYA, hardness, alkalinity, salt, or chlorine.")
-        } else if confidenceInput.waterChangeScore >= 2 {
-            factors.append("Recent water addition or rain may have diluted stabilizer, hardness, alkalinity, salt, or chlorine.")
+        if test.resolvedPoolConditions.backwashedFilter == .yes && confidenceInput.waterChangeScore >= 3 {
+            let values = viewModel.poolConfig.isSaltwater ? "CYA, hardness, alkalinity, salt, or chlorine" : "CYA, hardness, alkalinity, or chlorine"
+            factors.append("Backwashing and water replacement may explain dilution in \(values).")
+        } else if confidenceInput.waterChangeScore >= 3 {
+            let values = viewModel.poolConfig.isSaltwater ? "stabilizer, hardness, alkalinity, salt, or chlorine" : "stabilizer, hardness, alkalinity, or chlorine"
+            factors.append("Recent water addition or rain may have diluted \(values).")
         }
         if test.visualIndicators.contains(VisualIndicator.crystalClear.rawValue) && test.combinedChlorine <= 0.5 {
             factors.append("Water is clear and CC is low, so this does not look like an algae recovery case.")
@@ -870,7 +911,8 @@ struct TreatmentPlanSheet: View {
           Target value: \(targetValueText(for: treatment))
           Why recommended: \(treatment.actionDescription)
           Expected effect: \(expectedEffectText(for: treatment))
-          Optional verification timing: \(verificationTimingText(for: treatment))
+          Treatment verification classification: \(verificationClassificationText(for: treatment))
+          Treatment verification timing: \(verificationTimingText(for: treatment))
           Recommended next routine test timing: \(nextTestTiming)
           Retest/wait timing: \(waitTimingText(for: treatment))
           Status: \(treatmentStatusText(treatment))
@@ -897,10 +939,32 @@ struct TreatmentPlanSheet: View {
         return "\(treatment.calculatedDoseBeforeCap.formattedTreatmentAmount) \(treatment.calculatedDoseBeforeCapUnit)"
     }
 
+    private func hasProblemWater(_ test: PoolTest) -> Bool {
+        let indicators = Set(test.visualIndicators)
+        return indicators.contains(VisualIndicator.cloudyWater.rawValue)
+            || indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
+    }
+
+    private func verificationClassificationText(for treatment: Treatment) -> String {
+        guard treatment.amount > 0 && !treatment.isWatchlistItem else { return "Routine next test" }
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return treatment.urgency == .immediate || hasProblemWater(test) || (treatment.urgency == .recommended && test.combinedChlorine > 0.5)
+                ? "Required verification"
+                : "Optional verification"
+        case "pH", "totalAlkalinity", "cyanuricAcid":
+            return "Required verification"
+        default:
+            return "Routine next test"
+        }
+    }
+
     private func verificationTimingText(for treatment: Treatment) -> String {
         switch treatment.targetParameter {
         case "freeChlorine":
-            if treatment.urgency == .immediate || test.combinedChlorine > 0.5 || !test.visualIndicators.contains(VisualIndicator.crystalClear.rawValue) {
+            if treatment.urgency == .immediate || test.combinedChlorine > 0.5 || hasProblemWater(test) {
                 return "Verify FC/CC after about \(NotificationService.waitLabel(minutes: max(60, treatment.minutesBeforeNext))) of circulation."
             }
             return "Optional FC check after about 1 hour of circulation; routine next test remains separate."
@@ -978,7 +1042,7 @@ struct TreatmentPlanSheet: View {
         if !treatmentSteps.contains(where: { $0.isAcidTreatment }) && (7.2...7.8).contains(test.pH) {
             lines.append("- Acid/pH decreaser suppressed because pH is safe.")
         }
-        if confidenceInput.waterChangeScore >= 2 {
+        if confidenceInput.waterChangeScore >= 3 {
             lines.append("- Large CYA/CH/TA corrections avoided because recent water change, backwashing, or rain may explain dilution; retest is preferred unless values are unsafe.")
         }
         if !treatmentSteps.contains(where: { $0.chemicalName.localizedCaseInsensitiveContains("shock") })
@@ -1019,7 +1083,7 @@ struct TreatmentPlanSheet: View {
         if confidenceInput.chlorineDemandScore >= 3 {
             drivers.append("pool conditions increased chlorine demand")
         }
-        if confidenceInput.waterChangeScore >= 2 {
+        if confidenceInput.waterChangeScore >= 3 {
             drivers.append(test.resolvedPoolConditions.backwashedFilter == .yes ? "possible dilution from backwashing/water replacement" : "possible dilution")
         }
 
@@ -1119,7 +1183,7 @@ struct TreatmentPlanSheet: View {
         var sources: [String] = []
         if !treatment.targetParameter.isEmpty { sources.append("chemistry") }
         if confidenceInput.hasRecentHistory { sources.append("history") }
-        if confidenceInput.chlorineDemandScore >= 3 || confidenceInput.waterChangeScore >= 2 { sources.append("pool conditions") }
+        if confidenceInput.chlorineDemandScore >= 3 || confidenceInput.waterChangeScore >= 3 { sources.append("pool conditions") }
         if confidenceInput.hasVisualIndicators { sources.append("visual indicators") }
         return sources.isEmpty ? "current test" : sources.joined(separator: ", ")
     }
@@ -1522,7 +1586,8 @@ struct ExternalReviewExportBuilder {
               Safety cap applied: \(treatment.wasDoseCapped ? "Yes" : "No")
               Salt-system behavior: \(saltBehavior)
               Why now: \(treatment.actionDescription)
-              Optional verification timing: \(verificationTiming(for: treatment, test: test))
+              Treatment verification classification: \(verificationClassification(for: treatment, test: test))
+              Treatment verification timing: \(verificationTiming(for: treatment, test: test))
               Recommended next routine test timing: \(routineNextTestTiming)
             """
         }.joined(separator: "\n\n")
@@ -1587,10 +1652,36 @@ struct ExternalReviewExportBuilder {
         return reasons.isEmpty ? "none reported" : reasons.joined(separator: "; ")
     }
 
-    private static func verificationTiming(for treatment: Treatment, test: PoolTest) -> String {
+    private static func verificationClassification(for treatment: Treatment, test: PoolTest) -> String {
+        guard treatment.amount > 0 && !treatment.isWatchlistItem else { return "Routine next test" }
         switch treatment.targetParameter {
         case "freeChlorine":
-            if treatment.urgency == .immediate || test.combinedChlorine > 0.5 || !test.visualIndicators.contains(VisualIndicator.crystalClear.rawValue) {
+            return requiresChlorineVerification(treatment, test: test) ? "Required verification" : "Optional verification"
+        case "pH", "totalAlkalinity", "cyanuricAcid":
+            return "Required verification"
+        default:
+            return "Routine next test"
+        }
+    }
+
+    private static func requiresChlorineVerification(_ treatment: Treatment, test: PoolTest) -> Bool {
+        if treatment.urgency == .immediate { return true }
+        let indicators = Set(test.visualIndicators)
+        let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)
+            || indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
+        if hasProblemWater { return true }
+        return treatment.urgency == .recommended && test.combinedChlorine > 0.5
+    }
+
+    private static func verificationTiming(for treatment: Treatment, test: PoolTest) -> String {
+        guard treatment.amount > 0 && !treatment.isWatchlistItem else {
+            return "No treatment-specific verification; use the recommended next routine test."
+        }
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            if verificationClassification(for: treatment, test: test) == "Required verification" {
                 return "Verify FC/CC after circulation before swimming or adding more chlorine."
             }
             return "Optional FC verification after about 1 hour of circulation."

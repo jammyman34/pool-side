@@ -113,6 +113,7 @@ final class PoolViewModel {
                 recentHistory: recentTests,
                 poolConfig: effectiveConfig
             )
+            runSwimabilityV2ComparisonIfEnabled(for: request)
 
             let response = try await service.generateRecommendations(for: request)
 
@@ -160,6 +161,7 @@ final class PoolViewModel {
             recentHistory: recentTests,
             poolConfig: effectiveConfig
         )
+        runSwimabilityV2ComparisonIfEnabled(for: request)
 
         do {
             let response = try await service.generateRecommendations(for: request)
@@ -209,6 +211,36 @@ final class PoolViewModel {
             guard item.value.count == 1, let snapshot = item.value.first?.1 else { return }
             result[item.key] = snapshot
         }
+    }
+
+    private func runSwimabilityV2ComparisonIfEnabled(for request: AIRecommendationRequest) {
+        guard RecommendationV2FeatureFlags.swimabilityV2ComparisonEnabled else { return }
+
+        #if DEBUG
+        let assessment = SwimabilityV2Engine().assess(request: request)
+        let existingStatus = chemistryEngine.currentStatusSummary(
+            for: request.currentTest,
+            treatments: request.currentTest.treatments,
+            config: request.poolConfig
+        )
+        let existingScore = chemistryEngine.overallScore(
+            for: request.currentTest,
+            previousTest: request.recentHistory.first,
+            recentHistory: request.recentHistory,
+            config: request.poolConfig
+        )
+        let differences = existingStatus == assessment.state.rawValue
+            ? []
+            : ["Current status differs from placeholder v2 state."]
+        let comparison = SwimabilityV2Comparison(
+            existingStatus: existingStatus,
+            existingScore: existingScore,
+            v2Assessment: assessment,
+            meaningfulDifferences: differences,
+            generatedAt: Date()
+        )
+        debugPrint(comparison.developerDescription)
+        #endif
     }
 
     // MARK: - Complete Treatment

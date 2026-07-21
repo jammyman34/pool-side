@@ -85,7 +85,7 @@ struct NextTestRecommendationEngine {
             )
         }
 
-        if confidence.waterChangeScore >= 2 || watchlist.contains(where: { $0.chemicalName.localizedCaseInsensitiveContains("Dilution") }) {
+        if confidence.waterChangeScore >= 3 {
             let backwashed = test.resolvedPoolConditions.backwashedFilter == .yes
             let reason = backwashed
                 ? "Recent backwashing or water replacement can dilute readings."
@@ -196,15 +196,16 @@ struct NextTestRecommendationEngine {
 
     private func requiresSameDayChlorineVerification(_ treatment: Treatment, test: PoolTest) -> Bool {
         guard treatment.targetParameter == "freeChlorine" else { return false }
-        if treatment.urgency == .immediate && test.freeChlorine <= 0.5 { return true }
-        if test.combinedChlorine >= 0.5 { return true }
+        if treatment.urgency == .immediate { return true }
+
         let indicators = Set(test.visualIndicators)
-        if indicators.contains(VisualIndicator.cloudyWater.rawValue)
+        let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)
             || indicators.contains(VisualIndicator.greenWater.rawValue)
             || indicators.contains(VisualIndicator.algaeSpots.rawValue)
-            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue) {
-            return true
-        }
+            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
+        if hasProblemWater { return true }
+
+        if treatment.urgency == .recommended && test.combinedChlorine > 0.5 { return true }
         return false
     }
 

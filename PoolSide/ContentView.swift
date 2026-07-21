@@ -4,45 +4,48 @@ import SwiftData
 struct ContentView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
+
     @State private var selectedTab: Tab = .dashboard
     @State private var showingAddTest = false
     @State private var showingSettings = false
     @State private var showingStartupSplash = true
+    @State private var hasStartedFirstUseSetup = false
+    @State private var firstTestFlowInProgress = false
+    @State private var firstTestTreatmentPlanDisplayed = false
+    @State private var testCountWhenOpeningAddTest = 0
+    @State private var isGraduatingFirstUse = false
+    @State private var showPermanentDashboardDuringGraduation = false
+    @AppStorage("PoolSide.hasShownFirstUseGraduation") private var hasShownFirstUseGraduation = false
+
+    @Namespace private var firstUsePlusNamespace
+
+    private var firstUseState: FirstUseStateResolver.State {
+        FirstUseStateResolver.resolve(
+            isConfigurationPersisted: PoolConfiguration.isConfigured,
+            configuration: viewModel.poolConfig,
+            savedTestCount: tests.count,
+            hasStartedSetup: hasStartedFirstUseSetup,
+            firstTestFlowInProgress: firstTestFlowInProgress,
+            firstTestTreatmentPlanDisplayed: firstTestTreatmentPlanDisplayed
+        )
+    }
 
     var body: some View {
         ZStack {
-            ZStack(alignment: .bottom) {
-                // Tab content — no TabView wrapper, drive visibility manually
-                // to keep the custom tab bar fully in control
-                Group {
-                    switch selectedTab {
-                    case .dashboard:
-                        DashboardView(
-                            showingAddTest: $showingAddTest,
-                            showingSettings: $showingSettings
-                        )
-                    case .insights:
-                        InsightsView()
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Custom tab bar
-                PoolTabBar(
-                    selectedTab: $selectedTab,
-                    showingAddTest: $showingAddTest
-                )
-            }
-            .ignoresSafeArea(edges: .bottom)
+            rootContent
 
             if showingStartupSplash {
                 StartupSplashView()
                     .transition(.opacity)
-                    .zIndex(1)
+                    .zIndex(3)
             }
         }
-        .fullScreenCover(isPresented: $showingAddTest) {
-            AddTestView()
+        .fullScreenCover(isPresented: $showingAddTest, onDismiss: handleAddTestDismissed) {
+            AddTestView(onFirstTestTreatmentPlanDisplayed: {
+                firstTestTreatmentPlanDisplayed = true
+            })
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
@@ -52,9 +55,126 @@ struct ContentView: View {
             withAnimation(.easeOut(duration: 0.2)) {
                 showingStartupSplash = false
             }
-            if !PoolConfiguration.isConfigured {
-                showingSettings = true
+        }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        if isGraduatingFirstUse {
+            graduationContent
+        } else {
+            switch firstUseState {
+            case .welcome:
+                FirstUseWelcomeView {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                        hasStartedFirstUseSetup = true
+                    }
+                }
+            case .poolSetup:
+                FirstUsePoolSetupView {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                        hasStartedFirstUseSetup = false
+                    }
+                }
+            case .firstTestEmptyDashboard, .firstTestInProgress, .firstTestCompletedTreatmentPlan:
+                firstTestDashboard(isTransitioning: false)
+            case .normalDashboard:
+                normalDashboard
             }
+        }
+    }
+
+    private var normalDashboard: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                switch selectedTab {
+                case .dashboard:
+                    DashboardView(
+                        showingAddTest: $showingAddTest,
+                        showingSettings: $showingSettings
+                    )
+                case .insights:
+                    InsightsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            PoolTabBar(
+                selectedTab: $selectedTab,
+                showingAddTest: $showingAddTest,
+                onAddTest: openAddTest,
+                plusNamespace: isGraduatingFirstUse ? firstUsePlusNamespace : nil,
+                isAddButtonEnabled: !isGraduatingFirstUse
+            )
+        }
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var graduationContent: some View {
+        ZStack {
+            normalDashboard
+                .opacity(showPermanentDashboardDuringGraduation ? 1 : 0)
+
+            firstTestDashboard(isTransitioning: true)
+                .opacity(showPermanentDashboardDuringGraduation ? 0 : 1)
+        }
+    }
+
+    private func firstTestDashboard(isTransitioning: Bool) -> some View {
+        FirstTestEmptyDashboardView(
+            onAddFirstTest: openAddTest,
+            isTransitioning: isTransitioning,
+            plusNamespace: isGraduatingFirstUse ? firstUsePlusNamespace : nil
+        )
+    }
+
+    private func openAddTest() {
+        testCountWhenOpeningAddTest = tests.count
+        firstTestFlowInProgress = tests.isEmpty
+        firstTestTreatmentPlanDisplayed = false
+        showingAddTest = true
+    }
+
+    private func handleAddTestDismissed() {
+        defer {
+            firstTestFlowInProgress = false
+            firstTestTreatmentPlanDisplayed = false
+        }
+
+        guard FirstUseStateResolver.isGraduationEligible(
+            previousTestCount: testCountWhenOpeningAddTest,
+            currentTestCount: tests.count,
+            hasShownGraduation: hasShownFirstUseGraduation
+        ) else {
+            return
+        }
+
+        runFirstUseGraduation()
+    }
+
+    private func runFirstUseGraduation() {
+        guard !reduceMotion else {
+            hasShownFirstUseGraduation = true
+            isGraduatingFirstUse = false
+            showPermanentDashboardDuringGraduation = true
+            selectedTab = .dashboard
+            return
+        }
+
+        selectedTab = .dashboard
+        isGraduatingFirstUse = true
+        showPermanentDashboardDuringGraduation = false
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            withAnimation(.spring(response: 0.72, dampingFraction: 0.86)) {
+                showPermanentDashboardDuringGraduation = true
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            hasShownFirstUseGraduation = true
+            isGraduatingFirstUse = false
+            showPermanentDashboardDuringGraduation = false
         }
     }
 }
@@ -78,19 +198,19 @@ private struct StartupSplashView: View {
                     .font(.custom("AvenirNext-DemiBold", size: 42))
                     .foregroundStyle(PoolColor.deepWater)
                     .minimumScaleFactor(0.78)
-                    .offset(y: 128)
+//                    .offset(y: 128)
 
                 Image("Test Data Hero")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 330)
 
-                Text("Know what your pool needs")
+                Text("Know when it’s ready to swim")
                     .font(.custom("AvenirNext-Medium", size: 20))
                     .foregroundStyle(PoolColor.deepWater.opacity(0.88))
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.82)
-                    .offset(y: -128)
+                    //.offset(y: 0)
             }
             .padding(.horizontal, 32)
             .offset(y: 4)
@@ -109,6 +229,9 @@ enum Tab: Hashable {
 struct PoolTabBar: View {
     @Binding var selectedTab: Tab
     @Binding var showingAddTest: Bool
+    var onAddTest: (() -> Void)? = nil
+    var plusNamespace: Namespace.ID? = nil
+    var isAddButtonEnabled: Bool = true
 
     private let raisedHeight: CGFloat = 24
     private let buttonSize: CGFloat = 80
@@ -154,9 +277,14 @@ struct PoolTabBar: View {
         .frame(width: 84)
     }
 
+    @ViewBuilder
     private var addButton: some View {
-        Button {
-            showingAddTest = true
+        let button = Button {
+            if let onAddTest {
+                onAddTest()
+            } else {
+                showingAddTest = true
+            }
         } label: {
             ZStack {
                 Circle()
@@ -167,6 +295,13 @@ struct PoolTabBar: View {
                     .foregroundStyle(.white)
             }
             .shadow(color: PoolColor.sunshine.opacity(0.35), radius: 14, y: 8)
+        }
+        .disabled(!isAddButtonEnabled)
+
+        if let plusNamespace {
+            button.matchedGeometryEffect(id: "firstUsePlus", in: plusNamespace)
+        } else {
+            button
         }
     }
 }

@@ -268,13 +268,13 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
         XCTAssertEqual(
             TreatmentTimingGuidance.cardTip(for: chlorine),
-            "Circulate ~1 hr before swimming or checking FC.",
-            "Final or only chlorine treatment should not mention a next treatment."
+            "Circulate ~1 hr before swimming.",
+            "Final or only chlorine treatment should not mention a next treatment or optional FC check."
         )
         XCTAssertEqual(
             TreatmentTimingGuidance.cardTip(for: acid),
-            "Retest pH in ~4 hrs.",
-            "Final acid treatment should point to pH verification."
+            "Circulate ~4 hrs before swimming.",
+            "Final acid treatment should communicate circulation/swim timing without scheduling a pH test."
         )
         XCTAssertEqual(
             TreatmentTimingGuidance.cardTip(for: acid, nextActionableTreatment: calcium),
@@ -283,7 +283,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
         XCTAssertEqual(
             TreatmentTimingGuidance.cardTip(for: chlorine, nextActionableTreatment: watchlist),
-            "Circulate ~1 hr before swimming or checking FC.",
+            "Circulate ~1 hr before swimming.",
             "Watchlist rows must not be treated as subsequent actionable treatments."
         )
     }
@@ -347,6 +347,99 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
     func testTreatmentPlanDeveloperRecalculateActionEligibility() {
         XCTAssertTrue(TreatmentPlanDeveloperRecalculateAction.canPresent(isRecalculating: false))
         XCTAssertFalse(TreatmentPlanDeveloperRecalculateAction.canPresent(isRecalculating: true))
+    }
+
+    func testMaintenanceTopOffDoesNotCreateMandatorySameDayVerification() throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 4.5,
+            totalChlorine: 5.0,
+            totalAlkalinity: 170,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        test.poolConditions = PoolConditions(
+            rainLoad: .light,
+            waterAdded: .oneToTwoInches
+        )
+
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        let chlorine = try XCTUnwrap(treatments.first { $0.targetParameter == "freeChlorine" && $0.amount > 0 })
+        XCTAssertEqual(chlorine.urgency, .optional)
+        XCTAssertTrue(chlorine.actionDescription.contains("Maintenance top-off"))
+        XCTAssertTrue(chlorine.instructions.contains("Circulate for 60 minutes before swimming."))
+
+        let savedTreatments = treatments.map { $0.toTreatment(linkedTo: test) }
+        let treatmentSteps = savedTreatments.filter { !$0.isWatchlistItem }
+        let watchlist = savedTreatments.filter { $0.isWatchlistItem }
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: treatmentSteps,
+            watchlist: watchlist,
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertEqual(recommendation.source, .treatmentPlan)
+        XCTAssertEqual(recommendation.title, "Next pool test")
+        XCTAssertEqual(recommendation.interval, 86_400)
+        XCTAssertFalse(recommendation.reason.contains("same-day verification"))
+    }
+
+    func testDogfoodWatchlistCopyStaysNonurgentAndProportional() {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 4.5,
+            totalChlorine: 5.0,
+            totalAlkalinity: 170,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        test.poolConditions = PoolConditions(
+            rainLoad: .light,
+            waterAdded: .oneToTwoInches
+        )
+
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Monitor Elevated pH" })
+        XCTAssertTrue(treatments.contains { $0.chemicalName == "Monitor pH Trend" })
+        XCTAssertTrue(treatments.contains { $0.actionDescription.contains("pH is currently acceptable") })
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Manage Elevated CYA" })
+        XCTAssertTrue(treatments.contains { $0.chemicalName == "Maintain Higher FC for Current CYA" })
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Possible Dilution" })
+        XCTAssertFalse(treatments.contains { $0.instructions.localizedCaseInsensitiveContains("salt") })
+    }
+
+    func testGenuinelyLowChlorineStillRequiresSameDayVerification() {
+        let config = ChemistryTestFixtures.config()
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 0.5,
+            totalChlorine: 1.2,
+            totalAlkalinity: 100,
+            cyanuricAcid: 55,
+            visualIndicators: [VisualIndicator.cloudyWater.rawValue]
+        )
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+            .map { $0.toTreatment(linkedTo: test) }
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: treatments.filter { !$0.isWatchlistItem },
+            watchlist: treatments.filter { $0.isWatchlistItem },
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertEqual(recommendation.source, .chlorineCorrection)
+        XCTAssertLessThanOrEqual(recommendation.interval, 3_600)
+    }
+
+    func testWatchlistPresentationText() {
+        XCTAssertFalse(WatchlistPresentationText.shouldShow(count: 0))
+        XCTAssertEqual(WatchlistPresentationText.summary(count: 1), "1 item to monitor")
+        XCTAssertEqual(WatchlistPresentationText.summary(count: 5), "5 items to monitor")
     }
 
     private func actionableTreatment(

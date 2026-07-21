@@ -362,7 +362,7 @@ struct ChemistryEngine {
         let elevatedCombinedChlorine = test.combinedChlorine >= 0.5
         let hardnessIssue = calciumHardnessStatus(test.calciumHardness, surface: config.surfaceType) != .ideal
         let saltIssue = config.isSaltwater && test.saltLevel.map { saltStatus($0) != .ideal } == true
-        let possibleDilution = test.resolvedPoolConditions.waterChangeContribution >= 2
+        let possibleDilution = test.resolvedPoolConditions.waterChangeContribution >= 3
             || treatments.contains { $0.chemicalName.localizedCaseInsensitiveContains("Dilution") }
 
         let issueCount = [
@@ -828,7 +828,7 @@ struct ChemistryEngine {
             || hasCloudyWater(test)
             || test.pH < 7.0
             || test.pH > 8.0
-            || test.combinedChlorine > 0.5
+            || test.combinedChlorine >= 1.0
             || test.freeChlorine < fcMinimum * 0.5
             || repeatedFailedChlorine
             || hasMajorScalingOrCorrosionRisk(test, config: config) {
@@ -920,7 +920,7 @@ struct ChemistryEngine {
             penalty += test.freeChlorine < freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound ? 3 : 2
         }
 
-        if waterChange >= 2 {
+        if waterChange >= 3 {
             penalty += 2
         }
 
@@ -1352,11 +1352,11 @@ struct ChemistryEngine {
                 )
             } else {
                 return TreatmentTemplate(
-                    chemicalName: "Monitor Elevated pH",
-                    actionDescription: "pH is only mildly elevated; retest before adding acid.",
+                    chemicalName: "Monitor pH Trend",
+                    actionDescription: "pH is currently acceptable, but elevated alkalinity may cause it to rise.",
                     amount: 0,
                     unit: "",
-                    instructions: "Keep circulation running and retest pH. Do not add acid unless pH reaches 7.8 or higher, pH keeps rising, or scaling appears.",
+                    instructions: "Keep circulation running and watch the next pH result. Do not add acid unless pH reaches 7.8 or higher, pH keeps rising, or scaling appears.",
                     targetParameter: "pH",
                     urgency: .advisory,
                     expectedEffectParameter: "pH",
@@ -1488,13 +1488,13 @@ struct ChemistryEngine {
             } else {
                 let action = test.pH >= 7.8
                     ? "TA is elevated; handle pH with the active pH recommendation rather than adding a separate TA acid dose."
-                    : "TA is elevated, but pH does not currently justify acid."
+                    : "pH is currently acceptable, but elevated alkalinity may cause it to rise."
                 return TreatmentTemplate(
-                    chemicalName: "Monitor Elevated Alkalinity",
+                    chemicalName: test.pH >= 7.8 ? "Monitor Elevated Alkalinity" : "Monitor pH Trend",
                     actionDescription: action,
                     amount: 0,
                     unit: "",
-                    instructions: "Do not add muriatic acid solely for TA while pH is in or near the safe range. Watch for repeated pH rise or scaling; correct TA only if pH keeps drifting upward or scaling appears.",
+                    instructions: "Do not add acid solely for TA while pH is in or near the safe range. Watch for repeated pH rise or scaling; correct TA only if pH keeps drifting upward or scaling appears.",
                     targetParameter: "totalAlkalinity",
                     urgency: .advisory,
                     expectedEffectParameter: "totalAlkalinity",
@@ -1849,7 +1849,17 @@ struct ChemistryEngine {
             parts.append("Cal-hypo adds calcium, so avoid repeated use when calcium hardness is high or scaling is present.")
         }
 
-        parts.append("Retest FC and CC in \(chlorineRetestWaitMinutes(for: product.name)) minutes.")
+        let waitMinutes = chlorineRetestWaitMinutes(for: product.name)
+        let needsVerification = hasVisibleAlgae(test)
+            || hasCloudyWater(test)
+            || hasStrongChlorineSmell(test)
+            || test.combinedChlorine > 0.5
+            || test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid) * 0.5
+        if needsVerification {
+            parts.append("Retest FC and CC in \(waitMinutes) minutes.")
+        } else {
+            parts.append("Circulate for \(waitMinutes) minutes before swimming.")
+        }
 
         return parts.joined(separator: " ")
     }
@@ -1966,8 +1976,8 @@ struct ChemistryEngine {
 
         if test.cyanuricAcid >= 50 && test.cyanuricAcid < 90 {
             templates.append(TreatmentTemplate(
-                chemicalName: "Manage Elevated CYA",
-                actionDescription: "CYA is manageable, but FC must run higher.",
+                chemicalName: "Maintain Higher FC for Current CYA",
+                actionDescription: "Current CYA is manageable, but it requires a higher ongoing FC target.",
                 amount: 0,
                 unit: "",
                 instructions: "Maintain FC around \(freeChlorineIdealRangeLabel(cyanuricAcid: test.cyanuricAcid)). Avoid dichlor and trichlor, which add more CYA. Dilution is only needed if CYA keeps rising or the higher FC target is impractical.",
@@ -2013,14 +2023,15 @@ struct ChemistryEngine {
             ))
         }
 
-        if waterChange >= 2 && !templates.contains(where: { $0.chemicalName == "Possible Dilution" }) {
+        if waterChange >= 3 && !templates.contains(where: { $0.chemicalName == "Possible Dilution" }) {
             let backwashed = test.resolvedPoolConditions.backwashedFilter == .yes
             let actionDescription = backwashed
                 ? "Recent backwashing or water replacement may dilute chemistry."
-                : "Recent water addition or rain may dilute chemistry."
+                : "Recent water addition or rain may have changed chemistry."
+            let dilutedValues = config.isSaltwater ? "stabilizer, hardness, alkalinity, salt, and chlorine" : "stabilizer, hardness, alkalinity, and chlorine"
             let instructions = backwashed
-                ? "Backwashing removes pool water and replacement water may dilute stabilizer, hardness, alkalinity, salt, and chlorine. Retest before making large corrections unless values are unsafe."
-                : "Recent water addition or rain may dilute stabilizer, hardness, alkalinity, salt, and chlorine. Retest before making large corrections unless values are unsafe."
+                ? "Backwashing removes pool water and replacement water may affect \(dilutedValues). Retest before making large corrections unless values are unsafe."
+                : "Recent water addition or rain may affect \(dilutedValues). Retest before making large corrections unless values are unsafe."
             templates.append(TreatmentTemplate(
                 chemicalName: "Possible Dilution",
                 actionDescription: actionDescription,
