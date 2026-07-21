@@ -125,6 +125,7 @@ struct DashboardView: View {
             .task(id: weatherTaskID) {
                 await refreshWeatherIfPossible()
             }
+            .dashboardWalkthrough(isEligible: latestTest != nil)
             // Full history sheet
             .sheet(isPresented: $showingHistory) {
                 HistoryView()

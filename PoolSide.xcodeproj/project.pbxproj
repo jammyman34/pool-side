@@ -35,6 +35,10 @@
 		9B3B1249300E7D780016D855 /* FirstUseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1248300E7D780016D855 /* FirstUseState.swift */; };
 		9B3B124C300E7DC80016D855 /* FirstUseViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B124B300E7DC80016D855 /* FirstUseViews.swift */; };
 		9B3B1252300E9DA90016D855 /* KeyboardDismissal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1251300E9DA90016D855 /* KeyboardDismissal.swift */; };
+		9B3B1255300FA11F0016D855 /* TestEntryContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1254300FA11F0016D855 /* TestEntryContext.swift */; };
+		9B3B125A300FB2E00016D855 /* ContextualEducation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1259300FB2E00016D855 /* ContextualEducation.swift */; };
+		9B3B125D300FB2EA0016D855 /* ContextualEducationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B125C300FB2EA0016D855 /* ContextualEducationStore.swift */; };
+		9B3B125F300FB3070016D855 /* ContextualEducationTipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B125E300FB3070016D855 /* ContextualEducationTipView.swift */; };
 		9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */; };
 		9B8AF63D2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */; };
 		9B8AF63F2FFE992100CB6A85 /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */; };
@@ -85,6 +89,10 @@
 		9B3B1248300E7D780016D855 /* FirstUseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstUseState.swift; sourceTree = "<group>"; };
 		9B3B124B300E7DC80016D855 /* FirstUseViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstUseViews.swift; sourceTree = "<group>"; };
 		9B3B1251300E9DA90016D855 /* KeyboardDismissal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismissal.swift; sourceTree = "<group>"; };
+		9B3B1254300FA11F0016D855 /* TestEntryContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestEntryContext.swift; sourceTree = "<group>"; };
+		9B3B1259300FB2E00016D855 /* ContextualEducation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualEducation.swift; sourceTree = "<group>"; };
+		9B3B125C300FB2EA0016D855 /* ContextualEducationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualEducationStore.swift; sourceTree = "<group>"; };
+		9B3B125E300FB3070016D855 /* ContextualEducationTipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualEducationTipView.swift; sourceTree = "<group>"; };
 		9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConditions.swift; sourceTree = "<group>"; };
 		9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextTestRecommendationEngine.swift; sourceTree = "<group>"; };
 		9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
@@ -131,6 +139,7 @@
 				49E9A2DCAFE611D5B8D72E73 /* StatusBadge.swift */,
 				413760B903EFB0B7EE3867F8 /* ToastView.swift */,
 				9B3B1251300E9DA90016D855 /* KeyboardDismissal.swift */,
+				9B3B125E300FB3070016D855 /* ContextualEducationTipView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -144,6 +153,8 @@
 				9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */,
 				9B3B1235300CC6050016D855 /* RecommendationV2 */,
 				9B3B1247300E7D6F0016D855 /* FirstUse */,
+				9B3B1253300FA11F0016D855 /* TestEntry */,
+				9B3B1258300FB2E00016D855 /* Education */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -255,6 +266,30 @@
 			path = FirstUse;
 			sourceTree = "<group>";
 		};
+		9B3B1253300FA11F0016D855 /* TestEntry */ = {
+			isa = PBXGroup;
+			children = (
+				9B3B1254300FA11F0016D855 /* TestEntryContext.swift */,
+			);
+			path = TestEntry;
+			sourceTree = "<group>";
+		};
+		9B3B1258300FB2E00016D855 /* Education */ = {
+			isa = PBXGroup;
+			children = (
+				9B3B1259300FB2E00016D855 /* ContextualEducation.swift */,
+			);
+			path = Education;
+			sourceTree = "<group>";
+		};
+		9B3B125B300FB2EA0016D855 /* Education */ = {
+			isa = PBXGroup;
+			children = (
+				9B3B125C300FB2EA0016D855 /* ContextualEducationStore.swift */,
+			);
+			path = Education;
+			sourceTree = "<group>";
+		};
 		9FE651517B2EAC666399DAC8 /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -281,6 +316,7 @@
 				9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */,
 				9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */,
 				9B3B1236300CC6060016D855 /* RecommendationV2 */,
+				9B3B125B300FB2EA0016D855 /* Education */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -436,6 +472,7 @@
 				1E976E6D4D68EE4771BF17E2 /* AIService.swift in Sources */,
 				9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */,
 				AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */,
+				9B3B125F300FB3070016D855 /* ContextualEducationTipView.swift in Sources */,
 				46DF8F5D092C7092A89DFB48 /* ChemicalStatusCard.swift in Sources */,
 				F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */,
 				9B3B1244300D2B150016D855 /* PoolStateNormalizer.swift in Sources */,
@@ -447,15 +484,18 @@
 				9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */,
 				5325E4C01AF239F5FCF4E84D /* DashboardView.swift in Sources */,
 				0607AFB2A4783B87439B2DDC /* Date+Extensions.swift in Sources */,
+				9B3B125A300FB2E00016D855 /* ContextualEducation.swift in Sources */,
 				27DC9C214EC1AB86E6D987EC /* FoundationModelsService.swift in Sources */,
 				3FB2B6145D90E90F1624A8E1 /* HistoryView.swift in Sources */,
 				2F48CE6D03AB6C55D0C02293 /* InsightsView.swift in Sources */,
+				9B3B1255300FA11F0016D855 /* TestEntryContext.swift in Sources */,
 				8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */,
 				5CEEAD65D92EA288E7C811C9 /* PoolConfiguration.swift in Sources */,
 				9B3B1242300D2ADE0016D855 /* NormalizedPoolState.swift in Sources */,
 				9B3B1238300CC6310016D855 /* SwimabilityV2Models.swift in Sources */,
 				CC1096109839EA7AB5077BD2 /* PoolSideApp.swift in Sources */,
 				2E3A41EFA7183A9AED322134 /* PoolTest.swift in Sources */,
+				9B3B125D300FB2EA0016D855 /* ContextualEducationStore.swift in Sources */,
 				1F297DA8D2C19DA99D2635CD /* PoolViewModel.swift in Sources */,
 				9B3B1249300E7D780016D855 /* FirstUseState.swift in Sources */,
 				2D00654786C4660B3CF01925 /* RuleBasedService.swift in Sources */,
@@ -500,7 +540,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -721,7 +761,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";

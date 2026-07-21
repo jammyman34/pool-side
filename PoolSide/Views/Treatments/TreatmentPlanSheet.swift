@@ -26,6 +26,8 @@ struct TreatmentPlanSheet: View {
     @State private var isWatchlistExpanded: Bool = false
     @State private var showingRecalculateDialog: Bool = false
     @State private var isRecalculatingRecommendations: Bool = false
+    @State private var activeEducationTipIDs: [ContextualTipID] = []
+    @State private var activeEducationTipIndex: Int = 0
 
     private var allTreatments: [Treatment] {
         test.treatments
@@ -77,6 +79,11 @@ struct TreatmentPlanSheet: View {
         viewModel.nextTestRecommendation(for: test, in: tests)
     }
 
+    private var activeTreatmentEducationTipID: ContextualTipID? {
+        guard activeEducationTipIDs.indices.contains(activeEducationTipIndex) else { return nil }
+        return activeEducationTipIDs[activeEducationTipIndex]
+    }
+
     private func shouldSuppressSavedAcidTreatment(_ treatment: Treatment) -> Bool {
         test.pH <= 7.4
             && !test.visualIndicators.contains(VisualIndicator.scaling.rawValue)
@@ -123,6 +130,41 @@ struct TreatmentPlanSheet: View {
         } message: {
             Text("This will regenerate the score, status, treatment plan, watchlist, timing, and explanation using the latest engine logic. Your logged test readings and pool conditions will not change.")
         }
+        .overlay {
+            if let tipID = activeTreatmentEducationTipID {
+                ZStack {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .ignoresSafeArea()
+
+                    VStack(spacing: 0) {
+                        ContextualEducationTipView(
+                            content: ContextualTipContent.content(for: tipID),
+                            showsCloseButton: true,
+                            primaryActionTitle: activeEducationTipIndex == activeEducationTipIDs.count - 1 ? "Got It" : "Next",
+                            onClose: dismissTreatmentEducationWalkthrough,
+                            onPrimaryAction: advanceTreatmentEducationWalkthrough
+                        )
+                        .frame(maxWidth: 420)
+
+                        if activeEducationTipIndex > 0 {
+                            Button("Previous") {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    activeEducationTipIndex -= 1
+                                }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(PoolColor.poolTeal)
+                            .padding(.bottom, 20)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .zIndex(100)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: activeEducationTipIDs)
     }
 
     private var content: some View {
@@ -224,14 +266,19 @@ struct TreatmentPlanSheet: View {
         .onAppear {
             isWhyThisPlanExpanded = savedWhyThisPlanExpandedState
             Task { await NotificationService.shared.checkAuthorizationStatus() }
+            scheduleNextEducationTip()
         }
+        .onChange(of: treatmentSteps.count) { _, _ in scheduleNextEducationTip() }
+        .onChange(of: skippedTreatments.count) { _, _ in scheduleNextEducationTip() }
+        .onChange(of: watchlistItems.count) { _, _ in scheduleNextEducationTip() }
     }
 
     // MARK: - Hero Banner
 
     private var heroBanner: some View {
-        let headerHeight: CGFloat = 250
-        let contentBottomPadding: CGFloat = 56
+        let headerHeight: CGFloat = 290
+        let contentTopPadding: CGFloat = 24
+        let contentBottomPadding: CGFloat = 48
 
         return GeometryReader { proxy in
             ZStack {
@@ -265,6 +312,7 @@ struct TreatmentPlanSheet: View {
                 }
                 .padding(.leading, 20)
                 .padding(.trailing, 210)
+                .padding(.top, contentTopPadding)
                 .padding(.bottom, contentBottomPadding)
             }
             .overlay(alignment: .bottomTrailing) {
@@ -274,7 +322,7 @@ struct TreatmentPlanSheet: View {
                     .frame(width: 180)
                     .padding(.trailing, 20)
                     .offset(y: -48)
-                    .padding(.bottom, -40)
+                    .padding(.bottom, -24)
             }
         }
         .frame(height: headerHeight)
@@ -427,6 +475,58 @@ struct TreatmentPlanSheet: View {
             onRestore: { t in await restoreTreatment(t) },
             openSwipeTreatmentID: $openSwipeTreatmentID
         )
+    }
+
+    private func scheduleNextEducationTip() {
+        guard activeEducationTipIDs.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            guard activeEducationTipIDs.isEmpty else { return }
+            let tips = eligibleTreatmentEducationTips()
+            guard !tips.isEmpty else { return }
+            activeEducationTipIndex = 0
+            activeEducationTipIDs = tips
+        }
+    }
+
+    private func eligibleTreatmentEducationTips() -> [ContextualTipID] {
+        let store = ContextualEducationStore.shared
+        let candidates: [ContextualTipID] = [
+            .firstTreatmentPlanOverview,
+            .firstTreatmentCompletion,
+            .firstTreatmentSkip,
+            .firstTreatmentReinstate,
+            .firstWatchlist,
+            .firstNextPoolTest
+        ]
+
+        return candidates.filter { tipID in
+            !store.hasSeen(tipID)
+                && ContextualEducationRules.isTipEligible(
+                    tipID,
+                    actionableTreatmentCount: treatmentSteps.count,
+                    skippedTreatmentCount: skippedTreatments.count,
+                    watchlistCount: watchlistItems.count,
+                    hasNextPoolTest: true
+                )
+        }
+    }
+
+    private func advanceTreatmentEducationWalkthrough() {
+        if activeEducationTipIndex < activeEducationTipIDs.count - 1 {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                activeEducationTipIndex += 1
+            }
+        } else {
+            dismissTreatmentEducationWalkthrough()
+        }
+    }
+
+    private func dismissTreatmentEducationWalkthrough() {
+        activeEducationTipIDs.forEach { ContextualEducationStore.shared.markSeen($0) }
+        withAnimation(.easeOut(duration: 0.18)) {
+            activeEducationTipIDs = []
+            activeEducationTipIndex = 0
+        }
     }
 
     // MARK: - Empty State

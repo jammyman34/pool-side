@@ -156,6 +156,8 @@ final class PoolTest {
     var visualIndicators: [String] = []
     var waterClarityAssessmentRaw: String?
     var visibleAlgaeAssessmentRaw: String?
+    var algaeFollowUpResponseRaw: String?
+    var cloudinessFollowUpResponseRaw: String?
     var poolConditionsData: Data?
 
     /// AI-generated assessment text stored alongside the test record
@@ -184,6 +186,8 @@ final class PoolTest {
         visualIndicators: [String] = [],
         waterClarityAssessment: WaterClarityAssessment = .notRecorded,
         visibleAlgaeAssessment: VisibleAlgaeAssessment = .notRecorded,
+        algaeFollowUpResponse: VisualFollowUpResponse = .notRecorded,
+        cloudinessFollowUpResponse: VisualFollowUpResponse = .notRecorded,
         aiAssessment: String? = nil
     ) {
         self.id = id
@@ -203,6 +207,8 @@ final class PoolTest {
         self.visualIndicators = visualIndicators
         self.waterClarityAssessmentRaw = waterClarityAssessment == .notRecorded ? nil : waterClarityAssessment.rawValue
         self.visibleAlgaeAssessmentRaw = visibleAlgaeAssessment == .notRecorded ? nil : visibleAlgaeAssessment.rawValue
+        self.algaeFollowUpResponseRaw = algaeFollowUpResponse == .notRecorded ? nil : algaeFollowUpResponse.rawValue
+        self.cloudinessFollowUpResponseRaw = cloudinessFollowUpResponse == .notRecorded ? nil : cloudinessFollowUpResponse.rawValue
         self.aiAssessment = aiAssessment
         self.treatments = []
     }
@@ -247,6 +253,16 @@ final class PoolTest {
     var visibleAlgaeAssessment: VisibleAlgaeAssessment {
         get { visibleAlgaeAssessmentRaw.flatMap(VisibleAlgaeAssessment.init(rawValue:)) ?? .notRecorded }
         set { visibleAlgaeAssessmentRaw = newValue == .notRecorded ? nil : newValue.rawValue }
+    }
+
+    var algaeFollowUpResponse: VisualFollowUpResponse {
+        get { algaeFollowUpResponseRaw.flatMap(VisualFollowUpResponse.init(rawValue:)) ?? .notRecorded }
+        set { algaeFollowUpResponseRaw = newValue == .notRecorded ? nil : newValue.rawValue }
+    }
+
+    var cloudinessFollowUpResponse: VisualFollowUpResponse {
+        get { cloudinessFollowUpResponseRaw.flatMap(VisualFollowUpResponse.init(rawValue:)) ?? .notRecorded }
+        set { cloudinessFollowUpResponseRaw = newValue == .notRecorded ? nil : newValue.rawValue }
     }
 
     var resolvedPoolConditions: PoolConditions {

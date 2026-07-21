@@ -41,12 +41,4 @@ struct FirstUseStateResolver {
     static func isSetupComplete(_ configuration: PoolConfiguration, isPersisted: Bool) -> Bool {
         isPersisted && configuration.volumeGallons > 0
     }
-
-    static func isGraduationEligible(
-        previousTestCount: Int,
-        currentTestCount: Int,
-        hasShownGraduation: Bool
-    ) -> Bool {
-        previousTestCount == 0 && currentTestCount > 0 && !hasShownGraduation
-    }
 }

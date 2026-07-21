@@ -107,18 +107,25 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         if indicators.contains(VisualIndicator.greenWater.rawValue) || indicators.contains(VisualIndicator.algaeSpots.rawValue) {
             let slamTarget = min(max(test.cyanuricAcid * 0.40, 10), 30)
             let ppmIncrease = max(0, slamTarget - test.freeChlorine)
-            let gallons = (ppmIncrease * config.volumeGallons / 10000 / 10).roundedLiquidChlorineDose()
+            let productID = algaeRecoveryChlorineProductID(for: config)
+            let concentration = productID == .liquidChlorine12_5 ? 12.5 : 10
+            let gallons = (ppmIncrease * config.volumeGallons / 10000 / concentration).roundedLiquidChlorineDose()
             treatments.append(TreatmentTemplate(
-                chemicalName: "Liquid Chlorine 10%",
+                chemicalName: productID.displayName,
                 actionDescription: "Raise chlorine to algae recovery level based on CYA",
                 amount: gallons,
                 unit: "gal",
                 instructions: "Brush affected surfaces, run the pump continuously, and raise FC toward about \(Int(slamTarget.rounded())) ppm for the current CYA. Avoid dichlor or trichlor during algae recovery when CYA is already elevated. Retest FC and CC frequently.",
-                targetParameter: "visualIndicators",
+                targetParameter: "freeChlorine",
                 urgency: .immediate,
                 minutesBeforeNext: 480,
                 sortOrder: 900,
-                productID: .liquidChlorine10,
+                expectedEffectParameter: "freeChlorine",
+                expectedDelta: ppmIncrease,
+                effectDelayHours: 2,
+                effectDurationHours: 24,
+                doNotRepeatHours: 4,
+                productID: productID,
                 globalPreferenceProductID: config.chlorinePreference.productID,
                 calculatedDoseBeforeCap: gallons,
                 calculatedDoseBeforeCapUnit: "gal"
@@ -141,5 +148,14 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         }
 
         return treatments
+    }
+
+    private func algaeRecoveryChlorineProductID(for config: PoolConfiguration) -> ChemicalProductID {
+        switch config.chlorinePreference {
+        case .liquidChlorine12_5:
+            return .liquidChlorine12_5
+        default:
+            return .liquidChlorine10
+        }
     }
 }

@@ -64,30 +64,18 @@ final class FirstUseStateTests: XCTestCase {
         XCTAssertEqual(state, .normalDashboard)
     }
 
-    func testGraduationAnimationEligibleOnlyAfterFirstSavedTest() {
-        XCTAssertTrue(FirstUseStateResolver.isGraduationEligible(
-            previousTestCount: 0,
-            currentTestCount: 1,
-            hasShownGraduation: false
-        ))
-        XCTAssertFalse(FirstUseStateResolver.isGraduationEligible(
-            previousTestCount: 1,
-            currentTestCount: 2,
-            hasShownGraduation: false
-        ))
-        XCTAssertFalse(FirstUseStateResolver.isGraduationEligible(
-            previousTestCount: 0,
-            currentTestCount: 0,
-            hasShownGraduation: false
-        ))
-    }
+    func testRemovingGraduationAnimationDoesNotAffectFirstUseStateSelection() {
+        let config = completeConfiguration()
 
-    func testGraduationAnimationDoesNotRepeatAfterStoredFlag() {
-        XCTAssertFalse(FirstUseStateResolver.isGraduationEligible(
-            previousTestCount: 0,
-            currentTestCount: 1,
-            hasShownGraduation: true
-        ))
+        let state = FirstUseStateResolver.resolve(
+            isConfigurationPersisted: true,
+            configuration: config,
+            savedTestCount: 1,
+            firstTestFlowInProgress: false,
+            firstTestTreatmentPlanDisplayed: true
+        )
+
+        XCTAssertEqual(state, .normalDashboard)
     }
 
     func testDeclinedNotificationPermissionDoesNotBlockSetupCompletion() {

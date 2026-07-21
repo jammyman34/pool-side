@@ -4,7 +4,6 @@ import SwiftData
 struct ContentView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     @State private var selectedTab: Tab = .dashboard
@@ -15,11 +14,6 @@ struct ContentView: View {
     @State private var firstTestFlowInProgress = false
     @State private var firstTestTreatmentPlanDisplayed = false
     @State private var testCountWhenOpeningAddTest = 0
-    @State private var isGraduatingFirstUse = false
-    @State private var showPermanentDashboardDuringGraduation = false
-    @AppStorage("PoolSide.hasShownFirstUseGraduation") private var hasShownFirstUseGraduation = false
-
-    @Namespace private var firstUsePlusNamespace
 
     private var firstUseState: FirstUseStateResolver.State {
         FirstUseStateResolver.resolve(
@@ -60,27 +54,23 @@ struct ContentView: View {
 
     @ViewBuilder
     private var rootContent: some View {
-        if isGraduatingFirstUse {
-            graduationContent
-        } else {
-            switch firstUseState {
-            case .welcome:
-                FirstUseWelcomeView {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
-                        hasStartedFirstUseSetup = true
-                    }
+        switch firstUseState {
+        case .welcome:
+            FirstUseWelcomeView {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                    hasStartedFirstUseSetup = true
                 }
-            case .poolSetup:
-                FirstUsePoolSetupView {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
-                        hasStartedFirstUseSetup = false
-                    }
-                }
-            case .firstTestEmptyDashboard, .firstTestInProgress, .firstTestCompletedTreatmentPlan:
-                firstTestDashboard(isTransitioning: false)
-            case .normalDashboard:
-                normalDashboard
             }
+        case .poolSetup:
+            FirstUsePoolSetupView {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                    hasStartedFirstUseSetup = false
+                }
+            }
+        case .firstTestEmptyDashboard, .firstTestInProgress, .firstTestCompletedTreatmentPlan:
+            firstTestDashboard
+        case .normalDashboard:
+            normalDashboard
         }
     }
 
@@ -103,28 +93,18 @@ struct ContentView: View {
                 selectedTab: $selectedTab,
                 showingAddTest: $showingAddTest,
                 onAddTest: openAddTest,
-                plusNamespace: isGraduatingFirstUse ? firstUsePlusNamespace : nil,
-                isAddButtonEnabled: !isGraduatingFirstUse
+                plusNamespace: nil,
+                isAddButtonEnabled: true
             )
         }
         .ignoresSafeArea(edges: .bottom)
     }
 
-    private var graduationContent: some View {
-        ZStack {
-            normalDashboard
-                .opacity(showPermanentDashboardDuringGraduation ? 1 : 0)
-
-            firstTestDashboard(isTransitioning: true)
-                .opacity(showPermanentDashboardDuringGraduation ? 0 : 1)
-        }
-    }
-
-    private func firstTestDashboard(isTransitioning: Bool) -> some View {
+    private var firstTestDashboard: some View {
         FirstTestEmptyDashboardView(
             onAddFirstTest: openAddTest,
-            isTransitioning: isTransitioning,
-            plusNamespace: isGraduatingFirstUse ? firstUsePlusNamespace : nil
+            isTransitioning: false,
+            plusNamespace: nil
         )
     }
 
@@ -141,40 +121,8 @@ struct ContentView: View {
             firstTestTreatmentPlanDisplayed = false
         }
 
-        guard FirstUseStateResolver.isGraduationEligible(
-            previousTestCount: testCountWhenOpeningAddTest,
-            currentTestCount: tests.count,
-            hasShownGraduation: hasShownFirstUseGraduation
-        ) else {
-            return
-        }
-
-        runFirstUseGraduation()
-    }
-
-    private func runFirstUseGraduation() {
-        guard !reduceMotion else {
-            hasShownFirstUseGraduation = true
-            isGraduatingFirstUse = false
-            showPermanentDashboardDuringGraduation = true
+        if testCountWhenOpeningAddTest == 0 && tests.count > 0 {
             selectedTab = .dashboard
-            return
-        }
-
-        selectedTab = .dashboard
-        isGraduatingFirstUse = true
-        showPermanentDashboardDuringGraduation = false
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            withAnimation(.spring(response: 0.72, dampingFraction: 0.86)) {
-                showPermanentDashboardDuringGraduation = true
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
-            hasShownFirstUseGraduation = true
-            isGraduatingFirstUse = false
-            showPermanentDashboardDuringGraduation = false
         }
     }
 }

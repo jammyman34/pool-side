@@ -322,14 +322,21 @@ struct FirstUsePoolSetupView: View {
     }
 
     private var chlorinePreferenceRow: some View {
-        Picker("Chlorine", selection: $chlorinePreference) {
-            ForEach(ChlorinePreference.options(isSaltwater: isSaltwater)) { option in
-                Text(option.displayName)
-                    .tag(option)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Chlorine")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+
+            Picker("Chlorine", selection: $chlorinePreference) {
+                ForEach(ChlorinePreference.options(isSaltwater: isSaltwater)) { option in
+                    Text(option.displayName)
+                        .tag(option)
+                }
             }
+            .pickerStyle(.menu)
+            .tint(PoolColor.poolTeal)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .pickerStyle(.menu)
-        .tint(PoolColor.poolTeal)
     }
 
     private var divider: some View {
@@ -394,14 +401,21 @@ struct FirstUsePoolSetupView: View {
     }
 
     private func pickerRow<Option: Identifiable & Hashable>(_ title: String, selection: Binding<Option>, options: [Option]) -> some View where Option.ID == String {
-        Picker(title, selection: selection) {
-            ForEach(options) { option in
-                Text(displayName(for: option))
-                    .tag(option)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+
+            Picker(title, selection: selection) {
+                ForEach(options) { option in
+                    Text(displayName(for: option))
+                        .tag(option)
+                }
             }
+            .pickerStyle(.menu)
+            .tint(PoolColor.poolTeal)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .pickerStyle(.menu)
-        .tint(PoolColor.poolTeal)
     }
 
     private func displayName<Option>(for option: Option) -> String {

@@ -77,6 +77,42 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertTrue(liquid.instructions.contains("Liquid conditioner"))
     }
 
+    func testAlgaeRecoveryChlorineUsesConfiguredLiquidStrengthAndCanBeRepriced() async throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 4,
+            totalChlorine: 4,
+            totalAlkalinity: 100,
+            cyanuricAcid: 60,
+            visualIndicators: [VisualIndicator.algaeSpots.rawValue]
+        )
+        let service = RuleBasedService()
+        let response = try await service.generateRecommendations(
+            for: AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        )
+        let recovery = try XCTUnwrap(response.treatments.first {
+            $0.actionDescription.contains("algae recovery")
+        })
+
+        XCTAssertEqual(recovery.productID, .liquidChlorine12_5)
+        XCTAssertEqual(recovery.chemicalName, "Liquid Chlorine 12.5%")
+        XCTAssertEqual(recovery.targetParameter, "freeChlorine")
+        XCTAssertEqual(recovery.expectedEffectParameter, "freeChlorine")
+        XCTAssertGreaterThan(recovery.expectedDelta, 0)
+
+        let liquid10 = try XCTUnwrap(engine.repricedTreatmentTemplate(
+            from: recovery.toTreatment(linkedTo: test),
+            test: test,
+            productID: .liquidChlorine10,
+            config: config
+        ))
+
+        XCTAssertEqual(liquid10.productID, .liquidChlorine10)
+        XCTAssertGreaterThan(liquid10.amount, recovery.amount)
+        XCTAssertEqual(liquid10.expectedDelta, recovery.expectedDelta)
+    }
+
     func testAcidDosingUsesProductUnitsPreCapAndConservativeTarget() throws {
         let test = ChemistryTestFixtures.currentPool()
         let history = ChemistryTestFixtures.pHDriftHistory()
@@ -341,7 +377,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
     func testTreatmentPlanHeroCountUsesActionableTreatmentCount() {
         XCTAssertEqual(TreatmentPlanSummaryText.heroTitle(actionableTreatmentCount: 2), "2 treatments")
         XCTAssertEqual(TreatmentPlanSummaryText.heroTitle(actionableTreatmentCount: 1), "1 treatment")
-        XCTAssertEqual(TreatmentPlanSummaryText.heroTitle(actionableTreatmentCount: 0), "No treatments needed")
+        XCTAssertEqual(TreatmentPlanSummaryText.heroTitle(actionableTreatmentCount: 0), "No treatments today")
     }
 
     func testTreatmentPlanDeveloperRecalculateActionEligibility() {

@@ -317,7 +317,7 @@ struct TreatmentPlanSummaryText {
     static func heroTitle(actionableTreatmentCount: Int) -> String {
         switch actionableTreatmentCount {
         case 0:
-            return "No treatments needed"
+            return "No treatments today"
         case 1:
             return "1 treatment"
         default:

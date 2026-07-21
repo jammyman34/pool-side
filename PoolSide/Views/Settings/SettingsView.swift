@@ -39,6 +39,7 @@ struct SettingsView: View {
     @State private var showLocationToast: Bool = false
     @State private var locationToastMessage: String = ""
     @State private var showingFeedback: Bool = false
+    @State private var showingResetInfoTipsConfirmation: Bool = false
 
     private var currentConfig: PoolConfiguration {
         PoolConfiguration(
@@ -122,6 +123,10 @@ struct SettingsView: View {
                             }
                         }
 
+                        sectionCard(header: "Help") {
+                            resetInfoTipsRow
+                        }
+
                         feedbackCard
                         versionFooter
                     }
@@ -194,6 +199,18 @@ struct SettingsView: View {
                 }
             } message: {
                 Text(locationService.errorMessage ?? "")
+            }
+            .confirmationDialog(
+                "Reset info tips?",
+                isPresented: $showingResetInfoTipsConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Reset", role: .destructive) {
+                    ContextualEducationStore.shared.resetAll()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Pool Side will show first-time guidance again as you use the app.")
             }
         }
         .onAppear(perform: loadCurrentConfig)
@@ -386,6 +403,42 @@ struct SettingsView: View {
         feedbackButton
             .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
             .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private var resetInfoTipsRow: some View {
+        Button {
+            showingResetInfoTipsConfirmation = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.poolTeal)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reset Info Tips")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(PoolColor.primaryText)
+                    Text("Show first-time tips again as you use Pool Side.")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText.opacity(0.7))
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reset Info Tips")
+        .accessibilityHint("Show first-time tips again as you use Pool Side.")
     }
 
     private var versionFooter: some View {
