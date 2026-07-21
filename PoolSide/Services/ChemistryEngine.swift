@@ -1102,11 +1102,11 @@ struct ChemistryEngine {
             : ""
 
         return TreatmentTemplate(
-            chemicalName: "Retest Free Chlorine",
+            chemicalName: "Chlorine Still Circulating",
             actionDescription: "A recent chlorine dose is still mixing.",
             amount: 0,
             unit: "",
-            instructions: "Wait about \(remainingMinutes) more minutes before adding more chlorine, then retest FC and CC.\(expectedRise) Unchecked or skipped chlorine cards are not counted as completed.",
+            instructions: "Wait about \(remainingMinutes) more minutes before adding more chlorine. Use the Next Pool Test card for testing timing.\(expectedRise) Unchecked or skipped chlorine cards are not counted as completed.",
             targetParameter: "freeChlorine",
             urgency: .advisory,
             expectedEffectParameter: "freeChlorine",

@@ -14,7 +14,11 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             config: request.poolConfig,
             recentHistory: request.recentHistory
         )
-        treatments.append(contentsOf: visualIndicatorTreatments(for: request.currentTest, config: request.poolConfig))
+        treatments.append(contentsOf: visualIndicatorTreatments(
+            for: request.currentTest,
+            config: request.poolConfig,
+            existingTreatments: &treatments
+        ))
         let assessment = buildAssessment(for: request, treatments: treatments)
         return AIRecommendationResponse(treatments: treatments, assessmentText: assessment)
     }
@@ -97,14 +101,30 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         return parts.joined(separator: " ")
     }
 
-    private func visualIndicatorTreatments(for test: PoolTest, config: PoolConfiguration) -> [TreatmentTemplate] {
+    private func visualIndicatorTreatments(
+        for test: PoolTest,
+        config: PoolConfiguration,
+        existingTreatments: inout [TreatmentTemplate]
+    ) -> [TreatmentTemplate] {
         var treatments: [TreatmentTemplate] = []
         let indicators = Set(test.visualIndicators)
         let hasCrystalClear = indicators.contains(VisualIndicator.crystalClear.rawValue)
+        let hasAlgae = indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+        let hasCloudyWater = indicators.contains(VisualIndicator.cloudyWater.rawValue) && !hasCrystalClear
 
         // Algae/green water still triggers a shock even if the user marked Crystal Clear too —
         // visible algae is hard to misobserve and the chemistry impact is severe.
-        if indicators.contains(VisualIndicator.greenWater.rawValue) || indicators.contains(VisualIndicator.algaeSpots.rawValue) {
+        if hasAlgae, let chlorineIndex = existingTreatments.firstIndex(where: { $0.targetParameter == "freeChlorine" && $0.amount > 0 }) {
+            existingTreatments[chlorineIndex].urgency = .immediate
+            existingTreatments[chlorineIndex].actionDescription = recoveryChlorineReason(
+                lowSanitizer: test.freeChlorine < 2,
+                elevatedCombinedChlorine: test.combinedChlorine > 0.5,
+                cloudyWater: hasCloudyWater,
+                algae: true
+            )
+            existingTreatments[chlorineIndex].instructions = "Brush affected surfaces, run the pump continuously, and add this chlorine dose for the combined low-sanitizer and algae recovery conditions. Avoid dichlor or trichlor during algae recovery when CYA is already elevated. Use the Next Pool Test card for verification timing."
+        } else if hasAlgae {
             let slamTarget = min(max(test.cyanuricAcid * 0.40, 10), 30)
             let ppmIncrease = max(0, slamTarget - test.freeChlorine)
             let productID = algaeRecoveryChlorineProductID(for: config)
@@ -112,10 +132,15 @@ final class RuleBasedService: AIService, @unchecked Sendable {
             let gallons = (ppmIncrease * config.volumeGallons / 10000 / concentration).roundedLiquidChlorineDose()
             treatments.append(TreatmentTemplate(
                 chemicalName: productID.displayName,
-                actionDescription: "Raise chlorine to algae recovery level based on CYA",
+                actionDescription: recoveryChlorineReason(
+                    lowSanitizer: test.freeChlorine < 2,
+                    elevatedCombinedChlorine: test.combinedChlorine > 0.5,
+                    cloudyWater: hasCloudyWater,
+                    algae: true
+                ),
                 amount: gallons,
                 unit: "gal",
-                instructions: "Brush affected surfaces, run the pump continuously, and raise FC toward about \(Int(slamTarget.rounded())) ppm for the current CYA. Avoid dichlor or trichlor during algae recovery when CYA is already elevated. Retest FC and CC frequently.",
+                instructions: "Brush affected surfaces, run the pump continuously, and raise FC toward about \(Int(slamTarget.rounded())) ppm for the current CYA. Avoid dichlor or trichlor during algae recovery when CYA is already elevated. Use the Next Pool Test card for verification timing.",
                 targetParameter: "freeChlorine",
                 urgency: .immediate,
                 minutesBeforeNext: 480,
@@ -133,13 +158,13 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         }
 
         // Diagnose cloudy water with sanitation and filtration before adding clarifier.
-        if indicators.contains(VisualIndicator.cloudyWater.rawValue) && !hasCrystalClear {
+        if hasCloudyWater {
             treatments.append(TreatmentTemplate(
-                chemicalName: "Filter and Retest Cloudy Water",
-                actionDescription: "Cloudiness usually needs circulation, filtration, and sanitizer verification first",
+                chemicalName: "Keep Filtering Cloudy Water",
+                actionDescription: "Cloudiness usually needs circulation and filtration while sanitizer is verified by the Next Pool Test.",
                 amount: 0,
                 unit: "",
-                instructions: "Clean or backwash the filter, run circulation continuously, brush the pool, and verify FC/CC after circulation. Use clarifier only after sanitizer is in range and filtration has had time to work.",
+                instructions: "Clean or backwash the filter, run circulation continuously, and brush the pool. Use clarifier only after sanitizer is in range and filtration has had time to work.",
                 targetParameter: "visualIndicators",
                 urgency: .recommended,
                 minutesBeforeNext: 0,
@@ -148,6 +173,22 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         }
 
         return treatments
+    }
+
+    private func recoveryChlorineReason(
+        lowSanitizer: Bool,
+        elevatedCombinedChlorine: Bool,
+        cloudyWater: Bool,
+        algae: Bool
+    ) -> String {
+        var reasons: [String] = []
+        if lowSanitizer { reasons.append("low sanitizer") }
+        if algae { reasons.append("algae recovery") }
+        if elevatedCombinedChlorine { reasons.append("elevated combined chlorine") }
+        if cloudyWater { reasons.append("cloudy/problem water") }
+        return reasons.isEmpty
+            ? "Raise chlorine for recovery conditions"
+            : "Raise chlorine for " + reasons.joined(separator: ", ")
     }
 
     private func algaeRecoveryChlorineProductID(for config: PoolConfiguration) -> ChemicalProductID {

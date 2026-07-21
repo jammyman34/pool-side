@@ -322,6 +322,135 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             "Circulate ~1 hr before swimming.",
             "Watchlist rows must not be treated as subsequent actionable treatments."
         )
+        XCTAssertEqual(
+            TreatmentTimingGuidance.cardTip(for: chlorine, requiresVerificationBeforeSwimming: true),
+            "Test before swimming.",
+            "Recovery or mandatory-verification chlorine must not imply circulation alone grants swim readiness."
+        )
+    }
+
+    func testRecoveryChlorineAndCloudyWaterActionsDoNotDuplicateTestingAuthority() async throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 1,
+            totalChlorine: 2,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 60,
+            visualIndicators: [
+                VisualIndicator.cloudyWater.rawValue,
+                VisualIndicator.algaeSpots.rawValue
+            ]
+        )
+        let response = try await RuleBasedService().generateRecommendations(
+            for: AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        )
+        let treatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
+        let chlorineTreatments = treatments.filter { $0.targetParameter == "freeChlorine" && $0.amount > 0 }
+        let recovery = try XCTUnwrap(treatments.first {
+            $0.targetParameter == "freeChlorine" && $0.actionDescription.contains("algae recovery")
+        })
+        let cloudy = try XCTUnwrap(treatments.first {
+            $0.targetParameter == "visualIndicators" && $0.chemicalName.contains("Cloudy Water")
+        })
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: treatments.filter { !$0.isWatchlistItem },
+            watchlist: treatments.filter { $0.isWatchlistItem },
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertEqual(chlorineTreatments.count, 1)
+        XCTAssertEqual(recovery.productIdentifier, ChemicalProductID.liquidChlorine12_5.rawValue)
+        XCTAssertEqual(recovery.amount, 6)
+        XCTAssertTrue(recovery.actionDescription.contains("low sanitizer"))
+        XCTAssertTrue(recovery.actionDescription.contains("algae recovery"))
+        XCTAssertTrue(recovery.actionDescription.contains("elevated combined chlorine"))
+        XCTAssertTrue(recovery.actionDescription.contains("cloudy/problem water"))
+        XCTAssertEqual(
+            TreatmentTimingGuidance.cardTip(
+                for: recovery,
+                nextActionableTreatment: cloudy,
+                requiresVerificationBeforeSwimming: true
+            ),
+            "Test before swimming."
+        )
+        XCTAssertNotEqual(
+            TreatmentTimingGuidance.cardTip(for: recovery, nextActionableTreatment: cloudy),
+            "Wait ~1 hr before the next chemical."
+        )
+        XCTAssertFalse(recovery.instructions.localizedCaseInsensitiveContains("retest FC"))
+        XCTAssertFalse(recovery.instructions.localizedCaseInsensitiveContains("retest FC and CC"))
+        XCTAssertEqual(cloudy.chemicalName, "Keep Filtering Cloudy Water")
+        XCTAssertEqual(cloudy.amount, 0)
+        XCTAssertFalse(cloudy.chemicalName.localizedCaseInsensitiveContains("retest"))
+        XCTAssertFalse(cloudy.instructions.localizedCaseInsensitiveContains("retest"))
+        XCTAssertEqual(recommendation.source, .chlorineCorrection)
+        XCTAssertEqual(recommendation.title, "Retest FC and CC")
+    }
+
+    func testMultipleRecoverySignalsProduceOneMergedChlorineTreatment() async throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 1,
+            totalChlorine: 2,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 60,
+            visualIndicators: [
+                VisualIndicator.cloudyWater.rawValue,
+                VisualIndicator.algaeSpots.rawValue
+            ]
+        )
+        test.poolConditions = PoolConditions(
+            swimmingLoad: .none,
+            rainLoad: .none,
+            coverOpenTime: .twoToSixHours,
+            organicDebrisLoad: .low,
+            skimmedDebris: .no,
+            backwashedFilter: .no,
+            waterAdded: .none,
+            cleaningActivity: .oneCycle,
+            poolBrushed: .no
+        )
+
+        let response = try await RuleBasedService().generateRecommendations(
+            for: AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        )
+        let chlorineTreatments = response.treatments.filter { $0.targetParameter == "freeChlorine" && $0.amount > 0 }
+        let cloudyActions = response.treatments.filter { $0.chemicalName == "Keep Filtering Cloudy Water" }
+
+        XCTAssertEqual(chlorineTreatments.count, 1, "Overlapping low-FC, CC, algae, and cloudy-water signals should reconcile to one current chlorine dose.")
+        XCTAssertEqual(chlorineTreatments.first?.amount, 6)
+        XCTAssertEqual(chlorineTreatments.first?.productID, .liquidChlorine12_5)
+        XCTAssertTrue(chlorineTreatments.first?.actionDescription.contains("low sanitizer") ?? false)
+        XCTAssertTrue(chlorineTreatments.first?.actionDescription.contains("algae recovery") ?? false)
+        XCTAssertTrue(chlorineTreatments.first?.actionDescription.contains("elevated combined chlorine") ?? false)
+        XCTAssertTrue(chlorineTreatments.first?.actionDescription.contains("cloudy/problem water") ?? false)
+        XCTAssertEqual(cloudyActions.count, 1)
+        XCTAssertEqual(cloudyActions.first?.amount, 0)
+    }
+
+    func testLowFCWithoutCloudyOrAlgaeProducesSingleNormalChlorineTreatment() async throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 1,
+            totalChlorine: 1,
+            totalAlkalinity: 100,
+            cyanuricAcid: 60,
+            visualIndicators: [VisualIndicator.crystalClear.rawValue]
+        )
+        let response = try await RuleBasedService().generateRecommendations(
+            for: AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        )
+        let chlorineTreatments = response.treatments.filter { $0.targetParameter == "freeChlorine" && $0.amount > 0 }
+
+        XCTAssertEqual(chlorineTreatments.count, 1)
+        XCTAssertFalse(chlorineTreatments.first?.actionDescription.contains("algae recovery") ?? true)
     }
 
     func testNextPoolTestSeparatesRoutineTestingFromSameDayVerification() {
@@ -470,6 +599,50 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
 
         XCTAssertEqual(recommendation.source, .chlorineCorrection)
         XCTAssertLessThanOrEqual(recommendation.interval, 3_600)
+    }
+
+    func testRecentChlorineMixingWatchlistDoesNotCreateRetestFCAction() {
+        let config = ChemistryTestFixtures.config()
+        let current = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 4,
+            totalChlorine: 4,
+            totalAlkalinity: 100,
+            cyanuricAcid: 60
+        )
+        let previous = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 2,
+            totalChlorine: 2,
+            totalAlkalinity: 100,
+            cyanuricAcid: 60
+        )
+        previous.date = Date().addingTimeInterval(-1_800)
+        previous.treatments = [
+            Treatment(
+                createdAt: Date().addingTimeInterval(-1_800),
+                chemicalName: "Liquid Chlorine 12.5%",
+                actionDescription: "Recent chlorine correction",
+                amount: 1,
+                unit: "gal",
+                productIdentifier: ChemicalProductID.liquidChlorine12_5.rawValue,
+                globalPreferenceIdentifier: ChemicalProductID.liquidChlorine12_5.rawValue,
+                instructions: "",
+                urgency: .optional,
+                isCompleted: true,
+                completedAt: Date().addingTimeInterval(-1_800),
+                targetParameter: "freeChlorine",
+                expectedEffectParameter: "freeChlorine",
+                expectedDelta: 2
+            )
+        ]
+
+        let treatments = engine.validatedTreatments(for: current, config: config, recentHistory: [previous])
+        let mixing = treatments.first { $0.actionDescription.contains("still mixing") }
+
+        XCTAssertEqual(mixing?.chemicalName, "Chlorine Still Circulating")
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Retest Free Chlorine" })
+        XCTAssertFalse(mixing?.instructions.localizedCaseInsensitiveContains("then retest") ?? true)
     }
 
     func testWatchlistPresentationText() {

@@ -254,7 +254,11 @@ extension Treatment {
 }
 
 struct TreatmentTimingGuidance {
-    static func cardTip(for treatment: Treatment, nextActionableTreatment: Treatment? = nil) -> String? {
+    static func cardTip(
+        for treatment: Treatment,
+        nextActionableTreatment: Treatment? = nil,
+        requiresVerificationBeforeSwimming: Bool = false
+    ) -> String? {
         if
             let nextActionableTreatment,
             !nextActionableTreatment.isWatchlistItem,
@@ -267,18 +271,21 @@ struct TreatmentTimingGuidance {
 
         switch treatment.targetParameter {
         case "freeChlorine":
+            if requiresVerificationBeforeSwimming {
+                return "Test before swimming."
+            }
             return "Circulate ~1 hr before swimming."
         case "pH", "totalAlkalinity":
             return "Circulate ~4 hrs before swimming."
         case "cyanuricAcid":
-            return "Retest CYA after it has time to register."
+            return "Allow CYA time to register."
         default:
             return nil
         }
     }
 
     static func waitTimingText(for treatment: Treatment) -> String {
-        cardTip(for: treatment) ?? "Retest based on plan timing."
+        cardTip(for: treatment) ?? "Use Next Pool Test timing."
     }
 
     private static func waitBeforeNextTreatmentTip(for treatment: Treatment, nextTreatment: Treatment) -> String {

@@ -443,7 +443,26 @@ struct TreatmentCardView: View {
 
     private var waitLabel: String? {
         guard allowsActions, !treatment.isCompleted, !treatment.isSkipped else { return nil }
-        return TreatmentTimingGuidance.cardTip(for: treatment, nextActionableTreatment: nextActionableTreatment)
+        return TreatmentTimingGuidance.cardTip(
+            for: treatment,
+            nextActionableTreatment: nextActionableTreatment,
+            requiresVerificationBeforeSwimming: requiresVerificationBeforeSwimming
+        )
+    }
+
+    private var requiresVerificationBeforeSwimming: Bool {
+        guard treatment.targetParameter == "freeChlorine" else { return false }
+        if treatment.urgency == .immediate { return true }
+        guard let test = treatment.poolTest else { return false }
+
+        let indicators = Set(test.visualIndicators)
+        let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)
+            || indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
+        if hasProblemWater { return true }
+
+        return treatment.urgency == .recommended && test.combinedChlorine > 0.5
     }
 }
 
