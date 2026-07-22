@@ -43,6 +43,64 @@ final class PoolConfigurationMigrationTests: XCTestCase {
         XCTAssertEqual(config.chlorinePreference, .liquidChlorine12_5, "Repeated toggling should not corrupt the remembered manual product.")
     }
 
+    func testPartialConfigUpdatePreservesCoverAndRoboticCleanerSettings() {
+        let originalData = UserDefaults.standard.data(forKey: PoolConfiguration.defaultsKey)
+        defer {
+            if let originalData {
+                UserDefaults.standard.set(originalData, forKey: PoolConfiguration.defaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: PoolConfiguration.defaultsKey)
+            }
+        }
+
+        PoolConfiguration.current = PoolConfiguration(
+            volumeGallons: 32_583,
+            surfaceType: .plaster,
+            testMethod: .liquidDropKit,
+            isSaltwater: false,
+            hasCover: true,
+            petsRegularlySwim: true,
+            usesRoboticCleaner: true,
+            chlorinePreference: .liquidChlorine12_5
+        )
+        let viewModel = PoolViewModel()
+
+        viewModel.updateConfig { config in
+            config.chlorinePreference = .liquidChlorine10
+        }
+
+        let updated = PoolConfiguration.current
+        XCTAssertTrue(updated.hasCover)
+        XCTAssertTrue(updated.petsRegularlySwim)
+        XCTAssertTrue(updated.usesRoboticCleaner)
+        XCTAssertEqual(updated.chlorinePreference, .liquidChlorine10)
+        XCTAssertEqual(updated.volumeGallons, 32_583)
+        XCTAssertEqual(updated.testMethod, .liquidDropKit)
+    }
+
+    func testTreatmentProductDefaultUpdatePreservesUnrelatedPoolConfiguration() {
+        var config = PoolConfiguration(
+            volumeGallons: 32_583,
+            surfaceType: .plaster,
+            testMethod: .liquidDropKit,
+            isSaltwater: false,
+            hasCover: true,
+            petsRegularlySwim: false,
+            usesRoboticCleaner: true,
+            chlorinePreference: .liquidChlorine12_5
+        )
+
+        config = ChemicalProductCategory.chlorine.configApplying(
+            selection: .liquidChlorine10,
+            to: config
+        )
+
+        XCTAssertTrue(config.hasCover)
+        XCTAssertTrue(config.usesRoboticCleaner)
+        XCTAssertFalse(config.petsRegularlySwim)
+        XCTAssertEqual(config.chlorinePreference, .liquidChlorine10)
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, from string: String) throws -> T {
         let data = try JSONEncoder().encode(string)
         return try JSONDecoder().decode(T.self, from: data)

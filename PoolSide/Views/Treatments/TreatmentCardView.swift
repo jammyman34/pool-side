@@ -19,6 +19,7 @@ struct TreatmentCardView: View {
     var onRestore: @MainActor (Treatment) async -> Void
     @Binding var openSwipeTreatmentID: UUID?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.modelContext) private var modelContext
     @Environment(PoolViewModel.self) private var viewModel
 
@@ -190,7 +191,9 @@ struct TreatmentCardView: View {
         try? modelContext.save()
 
         if saveAsDefault {
-            viewModel.saveConfig(updatedConfig)
+            viewModel.updateConfig { config in
+                config = category.configApplying(selection: selection, to: config)
+            }
         }
     }
 
@@ -225,12 +228,15 @@ struct TreatmentCardView: View {
                         Label(waitLabel, systemImage: "clock.badge.exclamationmark")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(PoolColor.poolTeal)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.9)
+                            .labelStyle(.titleAndIcon)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityElement(children: .combine)
                             .padding(.top, 2)
                     }
                 }
@@ -451,6 +457,11 @@ struct TreatmentCardView: View {
     }
 
     private var requiresVerificationBeforeSwimming: Bool {
+        if treatment.targetParameter == "pH" {
+            guard let test = treatment.poolTest else { return treatment.urgency == .immediate }
+            return !(7.2...7.8).contains(test.pH)
+        }
+
         guard treatment.targetParameter == "freeChlorine" else { return false }
         if treatment.urgency == .immediate { return true }
         guard let test = treatment.poolTest else { return false }

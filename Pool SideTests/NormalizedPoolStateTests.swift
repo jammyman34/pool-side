@@ -167,14 +167,23 @@ final class NormalizedPoolStateTests: XCTestCase {
         XCTAssertFalse(propertyNames.contains("testingRequired"))
     }
 
-    func testSwimabilityV2EngineStillReturnsPlaceholderAssessment() {
-        let assessment = SwimabilityV2Engine().assess(request: request(test: makeTest()))
+    func testSwimabilityV2EngineProducesObservedAssessment() {
+        let assessment = SwimabilityV2Engine().assess(
+            request: request(test: makeTest(
+                freeChlorine: 5.0,
+                totalChlorine: 5.0,
+                waterClarityAssessment: .clear,
+                visibleAlgaeAssessment: .absent,
+                visualIndicators: []
+            )),
+            evaluationDate: evaluationDate
+        )
 
-        XCTAssertEqual(assessment.state, .moreInformationNeeded)
-        XCTAssertEqual(assessment.evidenceType, .unknown)
-        XCTAssertEqual(assessment.confidence, .insufficient)
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertEqual(assessment.evidenceType, .observed)
+        XCTAssertEqual(assessment.confidence, .high)
         XCTAssertFalse(assessment.testingRequired)
-        XCTAssertTrue(assessment.gateResults.isEmpty)
+        XCTAssertFalse(assessment.gateResults.isEmpty)
     }
 
     private func normalize(test: PoolTest, recentHistory: [PoolTest] = []) -> NormalizedPoolState {

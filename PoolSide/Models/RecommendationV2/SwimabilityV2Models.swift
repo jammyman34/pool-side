@@ -54,10 +54,37 @@ struct SwimabilityV2Assessment: Codable, Equatable, Sendable {
     let state: SwimabilityState
     let evidenceType: SwimabilityEvidenceType
     let confidence: SwimabilityConfidence
+    let predictionConfidence: SwimabilityConfidence?
     let gateResults: [SwimReadinessGateResult]
     let invalidationReasons: [String]
     let testingRequired: Bool
+    let earliestPredictedReadyTime: Date?
+    let treatmentAwareContext: V2TreatmentAwareContext?
     let summary: String
+
+    init(
+        state: SwimabilityState,
+        evidenceType: SwimabilityEvidenceType,
+        confidence: SwimabilityConfidence,
+        predictionConfidence: SwimabilityConfidence? = nil,
+        gateResults: [SwimReadinessGateResult],
+        invalidationReasons: [String],
+        testingRequired: Bool,
+        earliestPredictedReadyTime: Date? = nil,
+        treatmentAwareContext: V2TreatmentAwareContext? = nil,
+        summary: String
+    ) {
+        self.state = state
+        self.evidenceType = evidenceType
+        self.confidence = confidence
+        self.predictionConfidence = predictionConfidence
+        self.gateResults = gateResults
+        self.invalidationReasons = invalidationReasons
+        self.testingRequired = testingRequired
+        self.earliestPredictedReadyTime = earliestPredictedReadyTime
+        self.treatmentAwareContext = treatmentAwareContext
+        self.summary = summary
+    }
 
     var failedGates: [SwimReadinessGateResult] {
         gateResults.filter { $0.state == .fail }

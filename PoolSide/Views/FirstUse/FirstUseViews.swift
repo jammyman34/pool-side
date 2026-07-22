@@ -434,6 +434,7 @@ struct FirstUsePoolSetupView: View {
     }
 
     private func loadDefaults() {
+        viewModel.refreshConfigFromStorage()
         let config = viewModel.poolConfig
         poolName = config.name
         volumeGallons = config.volumeGallons

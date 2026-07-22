@@ -2781,18 +2781,11 @@ private var heroBanner: some View {
         }
 
         if saveTestMethodAsDefault {
-            var updatedConfig = viewModel.poolConfig
-            var changed = false
-            if updatedConfig.testMethod != testMethod {
-                updatedConfig.testMethod = testMethod
-                changed = true
-            }
-            if testMethod.usesBrandPicker, updatedConfig.liquidDropKitBrand != liquidDropKitBrand {
-                updatedConfig.liquidDropKitBrand = liquidDropKitBrand
-                changed = true
-            }
-            if changed {
-                viewModel.saveConfig(updatedConfig)
+            viewModel.updateConfig { config in
+                config.testMethod = testMethod
+                if testMethod.usesBrandPicker {
+                    config.liquidDropKitBrand = liquidDropKitBrand
+                }
             }
         }
 

@@ -31,11 +31,21 @@ final class PoolViewModel {
 
     // MARK: - Config
 
+    func refreshConfigFromStorage() {
+        poolConfig = PoolConfiguration.current
+    }
+
     func saveConfig(_ config: PoolConfiguration) {
         var normalized = config
         normalized.normalizeChemicalPreferences()
         poolConfig = normalized
         PoolConfiguration.current = normalized
+    }
+
+    func updateConfig(_ update: (inout PoolConfiguration) -> Void) {
+        var latest = PoolConfiguration.current
+        update(&latest)
+        saveConfig(latest)
     }
 
     // MARK: - Chemistry
@@ -113,28 +123,25 @@ final class PoolViewModel {
                 recentHistory: recentTests,
                 poolConfig: effectiveConfig
             )
-            runSwimabilityV2ComparisonIfEnabled(for: request)
 
             let response = try await service.generateRecommendations(for: request)
 
             // Remove the previous AI-generated plan. Completed steps are preserved for normal regeneration,
             // skipped steps are preserved for normal regeneration, but both are replaced when
             // edited test readings require a fresh treatment plan.
-            test.treatments
+            let treatmentsToDelete = test.treatments
                 .filter { $0.isAIGenerated && (replacingCompletedPlan || (!$0.isCompleted && !$0.isSkipped)) }
-                .forEach {
-                    NotificationService.shared.cancelTreatmentReminder(for: $0)
-                    modelContext.delete($0)
-                }
+            deleteTreatments(treatmentsToDelete, from: test, modelContext: modelContext)
 
             // Insert new treatments
             for template in response.treatments {
                 let treatment = template.toTreatment(linkedTo: test)
-                modelContext.insert(treatment)
+                insertAndLinkTreatment(treatment, to: test, modelContext: modelContext)
             }
 
             // Store the assessment text
             test.aiAssessment = response.assessmentText
+            runSwimabilityV2ComparisonIfEnabled(for: request, context: "Normal Generation")
 
         } catch {
             lastError = error.localizedDescription
@@ -161,18 +168,13 @@ final class PoolViewModel {
             recentHistory: recentTests,
             poolConfig: effectiveConfig
         )
-        runSwimabilityV2ComparisonIfEnabled(for: request)
 
         do {
             let response = try await service.generateRecommendations(for: request)
             let stateSnapshots = safelyMatchableTreatmentStates(from: test.treatments)
 
-            test.treatments
-                .filter(\.isAIGenerated)
-                .forEach {
-                    NotificationService.shared.cancelTreatmentReminder(for: $0)
-                    modelContext.delete($0)
-                }
+            let treatmentsToDelete = test.treatments.filter(\.isAIGenerated)
+            deleteTreatments(treatmentsToDelete, from: test, modelContext: modelContext)
 
             let regeneratedTreatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
             let regeneratedKeyCounts = Dictionary(
@@ -187,14 +189,33 @@ final class PoolViewModel {
                     let snapshot = stateSnapshots[key] {
                     treatment.applyStateSnapshot(snapshot)
                 }
-                modelContext.insert(treatment)
+                insertAndLinkTreatment(treatment, to: test, modelContext: modelContext)
             }
 
             test.aiAssessment = response.assessmentText
             try modelContext.save()
+            runSwimabilityV2ComparisonIfEnabled(for: request, context: "Recalculation")
         } catch {
             lastError = error.localizedDescription
             throw error
+        }
+    }
+
+    @MainActor
+    private func deleteTreatments(_ treatments: [Treatment], from test: PoolTest, modelContext: ModelContext) {
+        let deletedIDs = Set(treatments.map(\.id))
+        treatments.forEach {
+            NotificationService.shared.cancelTreatmentReminder(for: $0)
+            modelContext.delete($0)
+        }
+        test.treatments.removeAll { deletedIDs.contains($0.id) }
+    }
+
+    @MainActor
+    private func insertAndLinkTreatment(_ treatment: Treatment, to test: PoolTest, modelContext: ModelContext) {
+        modelContext.insert(treatment)
+        if !test.treatments.contains(where: { $0.id == treatment.id }) {
+            test.treatments.append(treatment)
         }
     }
 
@@ -213,11 +234,84 @@ final class PoolViewModel {
         }
     }
 
-    private func runSwimabilityV2ComparisonIfEnabled(for request: AIRecommendationRequest) {
+    private func runSwimabilityV2ComparisonIfEnabled(for request: AIRecommendationRequest, context: String) {
         guard RecommendationV2FeatureFlags.swimabilityV2ComparisonEnabled else { return }
 
         #if DEBUG
-        let assessment = SwimabilityV2Engine().assess(request: request)
+        print(swimabilityV2Comparison(for: request, context: context).developerDescription)
+        #endif
+    }
+
+    @MainActor
+    @discardableResult
+    func runSwimabilityV2ComparisonAfterTreatmentStateChange(
+        for test: PoolTest,
+        recentTests: [PoolTest],
+        context: String,
+        generatedAt: Date = Date()
+    ) -> SwimabilityV2Comparison? {
+        guard RecommendationV2FeatureFlags.swimabilityV2ComparisonEnabled else { return nil }
+
+        var effectiveConfig = poolConfig
+        effectiveConfig.testMethod = test.testMethod
+        let request = AIRecommendationRequest(
+            currentTest: test,
+            recentHistory: recentTests,
+            poolConfig: effectiveConfig
+        )
+        let comparison = swimabilityV2Comparison(
+            for: request,
+            context: context,
+            generatedAt: generatedAt
+        )
+
+        #if DEBUG
+        print(comparison.developerDescription)
+        #endif
+
+        return comparison
+    }
+
+    @MainActor
+    @discardableResult
+    func runSwimabilityV2JumpAheadComparison(
+        for test: PoolTest,
+        recentTests: [PoolTest],
+        offset: TreatmentPlanDeveloperJumpAheadOffset,
+        actualDate: Date = Date()
+    ) -> SwimabilityV2Comparison? {
+        guard RecommendationV2FeatureFlags.swimabilityV2ComparisonEnabled else { return nil }
+
+        var effectiveConfig = poolConfig
+        effectiveConfig.testMethod = test.testMethod
+        let request = AIRecommendationRequest(
+            currentTest: test,
+            recentHistory: recentTests,
+            poolConfig: effectiveConfig
+        )
+        let simulatedDate = actualDate.addingTimeInterval(offset.timeInterval)
+        let comparison = swimabilityV2Comparison(
+            for: request,
+            context: "Developer Jump Ahead \(offset.displayName)",
+            generatedAt: simulatedDate,
+            actualEvaluationTimestamp: actualDate
+        )
+
+        #if DEBUG
+        print(comparison.developerDescription)
+        #endif
+
+        return comparison
+    }
+
+    func swimabilityV2Comparison(
+        for request: AIRecommendationRequest,
+        context: String,
+        generatedAt: Date = Date(),
+        actualEvaluationTimestamp: Date? = nil
+    ) -> SwimabilityV2Comparison {
+        let normalizedState = PoolStateNormalizer().normalize(request: request, evaluationDate: generatedAt)
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: generatedAt)
         let existingStatus = chemistryEngine.currentStatusSummary(
             for: request.currentTest,
             treatments: request.currentTest.treatments,
@@ -231,16 +325,17 @@ final class PoolViewModel {
         )
         let differences = existingStatus == assessment.state.rawValue
             ? []
-            : ["Current status differs from placeholder v2 state."]
-        let comparison = SwimabilityV2Comparison(
+            : ["V1 status and v2 observed Swimability use different decision models."]
+        return SwimabilityV2Comparison(
             existingStatus: existingStatus,
             existingScore: existingScore,
             v2Assessment: assessment,
             meaningfulDifferences: differences,
-            generatedAt: Date()
+            generatedAt: generatedAt,
+            actualEvaluationTimestamp: actualEvaluationTimestamp,
+            normalizedPoolState: normalizedState,
+            evaluationContext: context
         )
-        debugPrint(comparison.developerDescription)
-        #endif
     }
 
     // MARK: - Complete Treatment

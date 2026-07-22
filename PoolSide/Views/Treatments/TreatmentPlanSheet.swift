@@ -24,8 +24,10 @@ struct TreatmentPlanSheet: View {
     @State private var openSwipeTreatmentID: UUID? = nil
     @State private var isWhyThisPlanExpanded: Bool = false
     @State private var isWatchlistExpanded: Bool = false
-    @State private var showingRecalculateDialog: Bool = false
+    @State private var showingDeveloperTools: Bool = false
     @State private var isRecalculatingRecommendations: Bool = false
+    @State private var selectedDeveloperToolMode: TreatmentPlanDeveloperToolMode = .recalculate
+    @State private var selectedJumpAheadOffset: TreatmentPlanDeveloperJumpAheadOffset = .oneHour
     @State private var activeEducationTipIDs: [ContextualTipID] = []
     @State private var activeEducationTipIndex: Int = 0
 
@@ -118,17 +120,20 @@ struct TreatmentPlanSheet: View {
         } message: {
             Text("Pool Side can remind you when it's time for your next treatment step.")
         }
-        .confirmationDialog(
-            "Recalculate recommendations?",
-            isPresented: $showingRecalculateDialog,
-            titleVisibility: .visible
-        ) {
-            Button("Recalculate") {
-                recalculateRecommendations()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will regenerate the score, status, treatment plan, watchlist, timing, and explanation using the latest engine logic. Your logged test readings and pool conditions will not change.")
+        .sheet(isPresented: $showingDeveloperTools) {
+            TreatmentPlanDeveloperToolsSheet(
+                selectedMode: $selectedDeveloperToolMode,
+                selectedJumpAheadOffset: $selectedJumpAheadOffset,
+                isRecalculating: isRecalculatingRecommendations,
+                onRecalculate: {
+                    showingDeveloperTools = false
+                    recalculateRecommendations()
+                },
+                onJumpAhead: { offset in
+                    runJumpAheadEvaluation(offset)
+                    showingDeveloperTools = false
+                }
+            )
         }
         .overlay {
             if let tipID = activeTreatmentEducationTipID {
@@ -337,7 +342,9 @@ struct TreatmentPlanSheet: View {
             .onEnded { _ in
                 guard TreatmentPlanDeveloperRecalculateAction.canPresent(isRecalculating: isRecalculatingRecommendations) else { return }
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                showingRecalculateDialog = true
+                selectedDeveloperToolMode = .recalculate
+                selectedJumpAheadOffset = .oneHour
+                showingDeveloperTools = true
             }
     }
 
@@ -1399,6 +1406,11 @@ struct TreatmentPlanSheet: View {
         do {
             try modelContext.save()
             await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
+            viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
+                for: test,
+                recentTests: recentHistory,
+                context: "Treatment Completed"
+            )
             if !scheduledMessages.isEmpty {
                 toastMessage = ToastMessage.notificationSet(label: scheduledMessages.joined(separator: ", "))
             } else if minutesToWait > 0, nextPending != nil {
@@ -1447,6 +1459,20 @@ struct TreatmentPlanSheet: View {
     }
 
     @MainActor
+    private func runJumpAheadEvaluation(_ offset: TreatmentPlanDeveloperJumpAheadOffset) {
+        viewModel.runSwimabilityV2JumpAheadComparison(
+            for: test,
+            recentTests: recentHistory,
+            offset: offset
+        )
+        toastMessage = ToastMessage(
+            text: "Jump Ahead \(offset.displayName) evaluation printed.",
+            icon: "terminal.fill",
+            color: PoolColor.poolTeal
+        )
+    }
+
+    @MainActor
     private func markTreatmentIncomplete(_ treatment: Treatment) async {
         let reminderCanceled = treatment.reminderNotificationIdentifier != nil
             || treatment.stepReminderNotificationIdentifier != nil
@@ -1455,6 +1481,11 @@ struct TreatmentPlanSheet: View {
         do {
             try modelContext.save()
             await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
+            viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
+                for: test,
+                recentTests: recentHistory,
+                context: "Treatment Marked Incomplete"
+            )
             if reminderCanceled {
                 toastMessage = ToastMessage.treatmentIncomplete(reminderCanceled: true)
             }
@@ -1469,6 +1500,11 @@ struct TreatmentPlanSheet: View {
         do {
             try modelContext.save()
             await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
+            viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
+                for: test,
+                recentTests: recentHistory,
+                context: "Treatment Skipped"
+            )
         } catch {
             viewModel.lastError = error.localizedDescription
         }
@@ -1480,6 +1516,11 @@ struct TreatmentPlanSheet: View {
         do {
             try modelContext.save()
             await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
+            viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
+                for: test,
+                recentTests: recentHistory,
+                context: "Treatment Restored"
+            )
         } catch {
             viewModel.lastError = error.localizedDescription
         }
@@ -1801,7 +1842,163 @@ struct ExternalReviewExportBuilder {
 
 struct TreatmentPlanDeveloperRecalculateAction {
     static func canPresent(isRecalculating: Bool) -> Bool {
+        #if DEBUG
         !isRecalculating
+        #else
+        false
+        #endif
+    }
+}
+
+enum TreatmentPlanDeveloperToolMode: String, CaseIterable, Identifiable {
+    case recalculate = "Recalculate"
+    case jumpAhead = "Jump Ahead"
+
+    var id: String { rawValue }
+}
+
+enum TreatmentPlanDeveloperJumpAheadOffset: String, CaseIterable, Identifiable {
+    case fifteenMinutes
+    case thirtyMinutes
+    case oneHour
+    case twoHours
+    case fourHours
+    case eightHours
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fifteenMinutes: return "+15 min"
+        case .thirtyMinutes: return "+30 min"
+        case .oneHour: return "+1 hr"
+        case .twoHours: return "+2 hr"
+        case .fourHours: return "+4 hr"
+        case .eightHours: return "+8 hr"
+        }
+    }
+
+    var timeInterval: TimeInterval {
+        switch self {
+        case .fifteenMinutes: return 15 * 60
+        case .thirtyMinutes: return 30 * 60
+        case .oneHour: return 60 * 60
+        case .twoHours: return 2 * 60 * 60
+        case .fourHours: return 4 * 60 * 60
+        case .eightHours: return 8 * 60 * 60
+        }
+    }
+}
+
+struct TreatmentPlanDeveloperToolsSheet: View {
+    @Binding var selectedMode: TreatmentPlanDeveloperToolMode
+    @Binding var selectedJumpAheadOffset: TreatmentPlanDeveloperJumpAheadOffset
+
+    let isRecalculating: Bool
+    let onRecalculate: () -> Void
+    let onJumpAhead: (TreatmentPlanDeveloperJumpAheadOffset) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Picker("Developer tool", selection: $selectedMode) {
+                    ForEach(TreatmentPlanDeveloperToolMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Developer tool")
+
+                switch selectedMode {
+                case .recalculate:
+                    developerToolContent(
+                        title: "Recalculate recommendations",
+                        body: "Regenerates the score, status, treatment plan, watchlist, timing, and explanation using the latest engine logic. Logged test readings and pool conditions will not change."
+                    ) {
+                        Button {
+                            onRecalculate()
+                        } label: {
+                            Text("Recalculate")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .disabled(isRecalculating)
+                    }
+                case .jumpAhead:
+                    developerToolContent(
+                        title: "Simulate a later evaluation time",
+                        body: "Runs Swimability v2 as though this amount of time has passed. It does not change the test, treatment completion time, phone clock, or saved data."
+                    ) {
+                        Picker("Jump ahead amount", selection: $selectedJumpAheadOffset) {
+                            ForEach(TreatmentPlanDeveloperJumpAheadOffset.allCases) { offset in
+                                Text(offset.displayName).tag(offset)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityLabel("Jump ahead amount")
+
+                        Button {
+                            onJumpAhead(selectedJumpAheadOffset)
+                        } label: {
+                            Text("Evaluate \(selectedJumpAheadOffset.displayName)")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 14))
+                        }
+                        .accessibilityLabel("Evaluate \(selectedJumpAheadOffset.displayName)")
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(PoolColor.sand.ignoresSafeArea())
+            .navigationTitle("Developer Tools")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundStyle(PoolColor.poolTeal)
+                }
+            }
+        }
+        .presentationDetents([.height(360), .medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func developerToolContent<Content: View>(
+        title: String,
+        body: String,
+        @ViewBuilder controls: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(PoolColor.primaryText)
+
+                Text(body)
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            controls()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 }
 

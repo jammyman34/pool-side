@@ -39,6 +39,9 @@
 		9B3B125A300FB2E00016D855 /* ContextualEducation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1259300FB2E00016D855 /* ContextualEducation.swift */; };
 		9B3B125D300FB2EA0016D855 /* ContextualEducationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B125C300FB2EA0016D855 /* ContextualEducationStore.swift */; };
 		9B3B125F300FB3070016D855 /* ContextualEducationTipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B125E300FB3070016D855 /* ContextualEducationTipView.swift */; };
+		9B3B1263300FEF910016D855 /* SwimReadinessGateEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1262300FEF910016D855 /* SwimReadinessGateEvaluator.swift */; };
+		9B3B1265301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1264301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift */; };
+		9B3B1267301006100016D855 /* V2TreatmentClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1266301006100016D855 /* V2TreatmentClassifier.swift */; };
 		9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */; };
 		9B8AF63D2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */; };
 		9B8AF63F2FFE992100CB6A85 /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */; };
@@ -93,6 +96,9 @@
 		9B3B1259300FB2E00016D855 /* ContextualEducation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualEducation.swift; sourceTree = "<group>"; };
 		9B3B125C300FB2EA0016D855 /* ContextualEducationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualEducationStore.swift; sourceTree = "<group>"; };
 		9B3B125E300FB3070016D855 /* ContextualEducationTipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualEducationTipView.swift; sourceTree = "<group>"; };
+		9B3B1262300FEF910016D855 /* SwimReadinessGateEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwimReadinessGateEvaluator.swift; sourceTree = "<group>"; };
+		9B3B1264301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentAwareSwimabilityV2Models.swift; sourceTree = "<group>"; };
+		9B3B1266301006100016D855 /* V2TreatmentClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2TreatmentClassifier.swift; sourceTree = "<group>"; };
 		9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConditions.swift; sourceTree = "<group>"; };
 		9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextTestRecommendationEngine.swift; sourceTree = "<group>"; };
 		9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
@@ -235,6 +241,7 @@
 			children = (
 				9B3B1237300CC6310016D855 /* SwimabilityV2Models.swift */,
 				9B3B1241300D2ADE0016D855 /* NormalizedPoolState.swift */,
+				9B3B1264301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift */,
 			);
 			path = RecommendationV2;
 			sourceTree = "<group>";
@@ -246,6 +253,8 @@
 				9B3B123B300CC6320016D855 /* SwimabilityV2Engine.swift */,
 				9B3B123D300CC6330016D855 /* SwimabilityV2Comparison.swift */,
 				9B3B1243300D2B150016D855 /* PoolStateNormalizer.swift */,
+				9B3B1262300FEF910016D855 /* SwimReadinessGateEvaluator.swift */,
+				9B3B1266301006100016D855 /* V2TreatmentClassifier.swift */,
 			);
 			path = RecommendationV2;
 			sourceTree = "<group>";
@@ -484,6 +493,7 @@
 				9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */,
 				5325E4C01AF239F5FCF4E84D /* DashboardView.swift in Sources */,
 				0607AFB2A4783B87439B2DDC /* Date+Extensions.swift in Sources */,
+				9B3B1265301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift in Sources */,
 				9B3B125A300FB2E00016D855 /* ContextualEducation.swift in Sources */,
 				27DC9C214EC1AB86E6D987EC /* FoundationModelsService.swift in Sources */,
 				3FB2B6145D90E90F1624A8E1 /* HistoryView.swift in Sources */,
@@ -492,6 +502,7 @@
 				8E82E1C51EB98BF601EC712A /* NotificationService.swift in Sources */,
 				5CEEAD65D92EA288E7C811C9 /* PoolConfiguration.swift in Sources */,
 				9B3B1242300D2ADE0016D855 /* NormalizedPoolState.swift in Sources */,
+				9B3B1267301006100016D855 /* V2TreatmentClassifier.swift in Sources */,
 				9B3B1238300CC6310016D855 /* SwimabilityV2Models.swift in Sources */,
 				CC1096109839EA7AB5077BD2 /* PoolSideApp.swift in Sources */,
 				2E3A41EFA7183A9AED322134 /* PoolTest.swift in Sources */,
@@ -507,6 +518,7 @@
 				371DB45C369032F616431D02 /* Treatment.swift in Sources */,
 				32D56213A60E1192149474EE /* TreatmentCardView.swift in Sources */,
 				9B3B123A300CC6310016D855 /* RecommendationV2FeatureFlags.swift in Sources */,
+				9B3B1263300FEF910016D855 /* SwimReadinessGateEvaluator.swift in Sources */,
 				F2C1272549890EA59FCED8E3 /* TreatmentPlanSheet.swift in Sources */,
 				C53647315EEDAFB8B43D7D00 /* TreatmentRowView.swift in Sources */,
 				4AB9D1BD1174154655552DC6 /* TreatmentsView.swift in Sources */,
@@ -540,7 +552,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -761,7 +773,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.2.2;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.justinmandell.poolside;
 				PRODUCT_NAME = "Pool Side";
 				PROVISIONING_PROFILE_SPECIFIER = "";

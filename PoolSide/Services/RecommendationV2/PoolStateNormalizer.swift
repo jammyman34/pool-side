@@ -13,7 +13,8 @@ struct PoolStateNormalizer {
             .filter { $0.id != test.id && $0.date < test.date }
             .sorted { $0.date > $1.date }
         let treatments = test.treatments
-        let completedTreatments = treatments.filter(\.isCompleted)
+        let actionableTreatments = treatments.filter { !$0.isWatchlistItem }
+        let completedTreatments = actionableTreatments.filter(\.isCompleted)
 
         return NormalizedPoolState(
             currentTestID: test.id,
@@ -47,9 +48,9 @@ struct PoolStateNormalizer {
             recentBackwash: backwashState(from: conditions),
             recentHeavyBatherLoad: heavyBatherState(from: conditions),
             recentContaminationConcern: .notRecorded,
-            activeTreatmentCount: treatments.filter { !$0.isCompleted && !$0.isSkipped }.count,
+            activeTreatmentCount: actionableTreatments.filter { !$0.isCompleted && !$0.isSkipped }.count,
             completedTreatmentCount: completedTreatments.count,
-            skippedTreatmentCount: treatments.filter(\.isSkipped).count,
+            skippedTreatmentCount: actionableTreatments.filter(\.isSkipped).count,
             mostRecentTreatmentCompletionDate: completedTreatments.compactMap(\.completedAt).max(),
             circulationStatus: .notRecorded,
             knownPumpRunningSince: nil,

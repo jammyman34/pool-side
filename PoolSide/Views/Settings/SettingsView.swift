@@ -618,6 +618,7 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func loadCurrentConfig() {
+        viewModel.refreshConfigFromStorage()
         let config = viewModel.poolConfig
         poolName = config.name
         volumeGallons = config.volumeGallons

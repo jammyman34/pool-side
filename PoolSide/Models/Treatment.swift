@@ -259,6 +259,54 @@ struct TreatmentTimingGuidance {
         nextActionableTreatment: Treatment? = nil,
         requiresVerificationBeforeSwimming: Bool = false
     ) -> String? {
+        compactCardTip(
+            for: treatment,
+            nextActionableTreatment: nextActionableTreatment,
+            requiresVerificationBeforeSwimming: requiresVerificationBeforeSwimming
+        )
+    }
+
+    static func compactCardTip(
+        for treatment: Treatment,
+        nextActionableTreatment: Treatment? = nil,
+        requiresVerificationBeforeSwimming: Bool = false
+    ) -> String? {
+        if
+            let nextActionableTreatment,
+            !nextActionableTreatment.isWatchlistItem,
+            nextActionableTreatment.amount > 0,
+            treatment.minutesBeforeNext > 0 {
+            return compactWaitBeforeNextTreatmentTip(for: treatment, nextTreatment: nextActionableTreatment)
+        }
+
+        guard treatment.amount > 0 else { return nil }
+
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return requiresVerificationBeforeSwimming ? "Test before swimming" : "Swim after ~1 hr"
+        case "pH":
+            return requiresVerificationBeforeSwimming ? "Test pH after ~4 hrs" : "Swim after ~4 hrs"
+        case "totalAlkalinity":
+            if treatment.isAcidTreatment {
+                return requiresVerificationBeforeSwimming ? "Test after ~4 hrs" : "Swim after ~4 hrs"
+            }
+            return "Wait ~4 hrs before adjusting again"
+        case "cyanuricAcid":
+            return "CYA registers later"
+        default:
+            return nil
+        }
+    }
+
+    static func waitTimingText(for treatment: Treatment) -> String {
+        timingGuidance(for: treatment) ?? "Use Next Pool Test timing."
+    }
+
+    static func timingGuidance(
+        for treatment: Treatment,
+        nextActionableTreatment: Treatment? = nil,
+        requiresVerificationBeforeSwimming: Bool = false
+    ) -> String? {
         if
             let nextActionableTreatment,
             !nextActionableTreatment.isWatchlistItem,
@@ -275,8 +323,19 @@ struct TreatmentTimingGuidance {
                 return "Test before swimming."
             }
             return "Circulate ~1 hr before swimming."
-        case "pH", "totalAlkalinity":
+        case "pH":
+            if requiresVerificationBeforeSwimming {
+                return "Circulate ~4 hrs, then test pH before swimming."
+            }
             return "Circulate ~4 hrs before swimming."
+        case "totalAlkalinity":
+            if treatment.isAcidTreatment {
+                if requiresVerificationBeforeSwimming {
+                    return "Circulate ~4 hrs, then test before swimming."
+                }
+                return "Circulate ~4 hrs before swimming."
+            }
+            return "Allow ~4 hrs to circulate before making another alkalinity adjustment."
         case "cyanuricAcid":
             return "Allow CYA time to register."
         default:
@@ -284,8 +343,16 @@ struct TreatmentTimingGuidance {
         }
     }
 
-    static func waitTimingText(for treatment: Treatment) -> String {
-        cardTip(for: treatment) ?? "Use Next Pool Test timing."
+    private static func compactWaitBeforeNextTreatmentTip(for treatment: Treatment, nextTreatment: Treatment) -> String {
+        let wait = waitLabel(minutes: treatment.minutesBeforeNext)
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return nextTreatment.isAcidTreatment
+                ? "Wait \(wait) before acid"
+                : "Wait \(wait) before next chemical"
+        default:
+            return "Wait \(wait) before next chemical"
+        }
     }
 
     private static func waitBeforeNextTreatmentTip(for treatment: Treatment, nextTreatment: Treatment) -> String {

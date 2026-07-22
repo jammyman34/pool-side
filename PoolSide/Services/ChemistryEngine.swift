@@ -161,6 +161,10 @@ struct ChemistryEngine {
         return target...upper
     }
 
+    func freeChlorineSwimReadinessMinimum(cyanuricAcid: Double?) -> Double {
+        freeChlorineMinimum(cyanuricAcid: cyanuricAcid)
+    }
+
     func freeChlorineIdealRangeLabel(cyanuricAcid: Double?) -> String {
         let range = freeChlorineTargetRange(cyanuricAcid: cyanuricAcid)
         return "\(formatRangeBound(range.lowerBound)) – \(formatRangeBound(range.upperBound)) ppm"
@@ -991,7 +995,7 @@ struct ChemistryEngine {
     ) -> [TreatmentTemplate] {
         var templates = ruleTreatments(for: test, config: config, recentHistory: recentHistory)
         templates = suppressRecentlyCompletedEffects(templates, recentHistory: recentHistory)
-        templates = suppressChlorineDuringMixingWindow(templates, recentHistory: recentHistory)
+        templates = suppressChlorineDuringMixingWindow(templates, for: test, recentHistory: recentHistory)
         templates = suppressLowConfidenceOptionalTreatments(templates, config: config)
         templates = suppressAcidTreatmentsWhenPHIsLowNormal(templates, for: test)
         templates = appendActiveAcidWaitAdvisoryIfNeeded(templates, recentHistory: recentHistory)
@@ -1066,26 +1070,28 @@ struct ChemistryEngine {
 
     private func suppressChlorineDuringMixingWindow(
         _ templates: [TreatmentTemplate],
+        for test: PoolTest,
         recentHistory: [PoolTest]
     ) -> [TreatmentTemplate] {
         guard templates.contains(where: { $0.targetParameter == "freeChlorine" }) else {
             return templates
         }
 
-        guard let advisory = recentCompletedChlorineWaitAdvisory(recentHistory: recentHistory) else {
+        guard let advisory = recentCompletedChlorineWaitAdvisory(for: test, recentHistory: recentHistory) else {
             return templates
         }
 
         return templates.filter { $0.targetParameter != "freeChlorine" } + [advisory]
     }
 
-    private func recentCompletedChlorineWaitAdvisory(recentHistory: [PoolTest]) -> TreatmentTemplate? {
+    private func recentCompletedChlorineWaitAdvisory(for test: PoolTest, recentHistory: [PoolTest]) -> TreatmentTemplate? {
         let now = Date()
         let completedChlorine = recentHistory
             .flatMap { $0.treatments }
             .filter { $0.isCompleted && $0.targetParameter == "freeChlorine" }
             .compactMap { treatment -> (Treatment, TimeInterval)? in
                 guard let completedAt = treatment.completedAt else { return nil }
+                guard test.date <= completedAt else { return nil }
                 return (treatment, now.timeIntervalSince(completedAt))
             }
             .sorted { $0.1 < $1.1 }
@@ -1444,7 +1450,9 @@ struct ChemistryEngine {
                 if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
                     return possibleDilutionRetestTemplate(for: "Total Alkalinity")
                 }
-                let lbs = kGal * 1.4 * ((80 - reading.value) / 10)
+                let alkalinityIncrease = 80 - reading.value
+                // Sodium bicarbonate raises TA by about 10 ppm with 1.4 lb per 10,000 gallons.
+                let lbs = (volume / 10_000) * 1.4 * (alkalinityIncrease / 10)
                 return TreatmentTemplate(
                     chemicalName: config.alkalinityIncreaserPreference.displayName,
                     actionDescription: "Raise low alkalinity so pH is less likely to swing",
@@ -1454,7 +1462,7 @@ struct ChemistryEngine {
                     targetParameter: "totalAlkalinity",
                     urgency: reading.status.treatmentUrgency ?? .recommended,
                     expectedEffectParameter: "totalAlkalinity",
-                    expectedDelta: 80 - reading.value,
+                    expectedDelta: alkalinityIncrease,
                     effectDelayHours: 12,
                     effectDurationHours: 48,
                     doNotRepeatHours: 24,
