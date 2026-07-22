@@ -541,6 +541,31 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(assessment.treatmentAwareContext?.classifications.first?.category, .poolCare)
     }
 
+    func testTC7StabilizerRemainsPoolCareAndReadyToSwim() {
+        let test = makeReadyTest(
+            pH: 7.5,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 20
+        )
+        test.treatments.append(makeTreatment(
+            chemicalName: "Cyanuric Acid (Granular)",
+            amount: 5.3,
+            unit: "lbs",
+            targetParameter: "cyanuricAcid",
+            urgency: .optional
+        ))
+
+        let assessment = assess(test: test)
+
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertFalse(assessment.swimmingBlocked)
+        XCTAssertFalse(assessment.testingRequired)
+        XCTAssertEqual(assessment.treatmentAwareContext?.classifications.first?.category, .poolCare)
+    }
+
     func testKeepFilteringCloudyWaterDoesNotCreateChemicalBlocker() {
         let test = makeReadyTest(waterClarityAssessment: .cloudy)
         test.treatments.append(makeTreatment(

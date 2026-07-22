@@ -189,6 +189,87 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertEqual(tenThousandGallonTA50.unit, "lbs")
     }
 
+    func testTC7LowCYAGeneratesPlausibleStabilizerDoseOnly() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583, stabilizer: .granularCYA)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 20
+        )
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        let stabilizer = try XCTUnwrap(treatments.first { $0.targetParameter == "cyanuricAcid" && $0.amount > 0 })
+
+        XCTAssertEqual(stabilizer.chemicalName, "Cyanuric Acid (Granular)")
+        XCTAssertEqual(stabilizer.expectedDelta, 20, accuracy: 0.001)
+        XCTAssertEqual(stabilizer.amount, 5.3, accuracy: 0.001)
+        XCTAssertEqual(stabilizer.unit, "lbs")
+        XCTAssertEqual(stabilizer.calculatedDoseBeforeCap, 5.3, accuracy: 0.001)
+        XCTAssertFalse(stabilizer.wasDoseCapped)
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Remove Chlorine Source" })
+    }
+
+    func testCYADoseScalesWithVolumeAndRequiredIncrease() throws {
+        let tenThousandGallonCYA20 = try actionableTreatment(
+            target: "cyanuricAcid",
+            config: ChemistryTestFixtures.config(volume: 10_000, stabilizer: .granularCYA),
+            test: ChemistryTestFixtures.currentPool(pH: 7.5, freeChlorine: 6.5, totalChlorine: 7.0, totalAlkalinity: 100, cyanuricAcid: 20),
+            history: []
+        )
+        let twentyThousandGallonCYA20 = try actionableTreatment(
+            target: "cyanuricAcid",
+            config: ChemistryTestFixtures.config(volume: 20_000, stabilizer: .granularCYA),
+            test: ChemistryTestFixtures.currentPool(pH: 7.5, freeChlorine: 6.5, totalChlorine: 7.0, totalAlkalinity: 100, cyanuricAcid: 20),
+            history: []
+        )
+        let tenThousandGallonCYA10 = try actionableTreatment(
+            target: "cyanuricAcid",
+            config: ChemistryTestFixtures.config(volume: 10_000, stabilizer: .granularCYA),
+            test: ChemistryTestFixtures.currentPool(pH: 7.5, freeChlorine: 6.5, totalChlorine: 7.0, totalAlkalinity: 100, cyanuricAcid: 10),
+            history: []
+        )
+
+        XCTAssertEqual(tenThousandGallonCYA20.amount, 1.6, accuracy: 0.001)
+        XCTAssertEqual(twentyThousandGallonCYA20.amount, 3.3, accuracy: 0.001)
+        XCTAssertEqual(tenThousandGallonCYA10.amount, 2.4, accuracy: 0.001)
+    }
+
+    func testElevatedButBelowShockChlorineDoesNotGenerateRemovalAction() {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 20
+        )
+
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Remove Chlorine Source" })
+    }
+
+    func testGenuinelyExcessiveChlorineStillGeneratesProtectionAction() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 10.5,
+            totalChlorine: 10.5,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 20
+        )
+
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        let removal = try XCTUnwrap(treatments.first { $0.chemicalName == "Remove Chlorine Source" })
+
+        XCTAssertEqual(removal.amount, 0)
+        XCTAssertTrue(removal.actionDescription.contains("CYA-adjusted recovery level"))
+    }
+
     func testPoolCareBakingSodaTimingDoesNotBlockSwimming() throws {
         let bakingSoda = timingTreatment(
             name: "Baking Soda (Sodium Bicarbonate)",
@@ -281,6 +362,114 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let supplemental = try XCTUnwrap(urgentTreatments.first { $0.productID == .liquidChlorine12_5 })
         XCTAssertGreaterThan(supplemental.amount, 0)
         XCTAssertTrue(supplemental.actionDescription.contains("faster recovery than the salt generator"))
+    }
+
+    func testTC8CalciumHardnessDoseUsesTenThousandGallonScaling() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 100,
+            calciumHardness: 100,
+            cyanuricAcid: 60
+        )
+        let treatment = try actionableTreatment(target: "calciumHardness", config: config, test: test, history: [])
+
+        XCTAssertEqual(treatment.chemicalName, "Calcium Hardness Increaser (Calcium Chloride)")
+        XCTAssertEqual(treatment.expectedDelta, 100, accuracy: 0.001)
+        XCTAssertEqual(treatment.amount, 40.7, accuracy: 0.001)
+        XCTAssertEqual(treatment.unit, "lbs")
+        XCTAssertEqual(treatment.calculatedDoseBeforeCap, 40.7, accuracy: 0.001)
+        XCTAssertFalse(treatment.wasDoseCapped)
+        XCTAssertLessThan(treatment.amount, 60)
+    }
+
+    func testMuriaticAcidDoseForHighPHUsesAuditedLiquidUnits() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583, pHDecreaser: .muriaticAcid)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 8.0,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 140,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        let treatment = try actionableTreatment(target: "pH", config: config, test: test, history: ChemistryTestFixtures.pHDriftHistory())
+
+        XCTAssertEqual(treatment.chemicalName, "Muriatic Acid (31.45%)")
+        XCTAssertEqual(treatment.expectedDelta, -0.5, accuracy: 0.001)
+        XCTAssertEqual(treatment.amount, 3.5, accuracy: 0.001)
+        XCTAssertEqual(treatment.unit, "qt")
+        XCTAssertEqual(treatment.calculatedDoseBeforeCap, 3.5, accuracy: 0.001)
+        XCTAssertFalse(treatment.wasDoseCapped)
+    }
+
+    func testDryAcidDoseForHighPHUsesAuditedWeightUnits() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583, pHDecreaser: .dryAcid)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 8.0,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 140,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        let treatment = try actionableTreatment(target: "pH", config: config, test: test, history: ChemistryTestFixtures.pHDriftHistory())
+
+        XCTAssertEqual(treatment.chemicalName, "Dry Acid (Sodium Bisulfate)")
+        XCTAssertEqual(treatment.expectedDelta, -0.5, accuracy: 0.001)
+        XCTAssertEqual(treatment.amount, 2.4, accuracy: 0.001)
+        XCTAssertEqual(treatment.unit, "lbs")
+        XCTAssertEqual(treatment.calculatedDoseBeforeCap, 2.4, accuracy: 0.001)
+        XCTAssertFalse(treatment.wasDoseCapped)
+        XCTAssertLessThan(treatment.amount, 6)
+    }
+
+    func testSaltAdditionDoseUsesTenThousandGallonScaling() throws {
+        var config = ChemistryTestFixtures.config(volume: 10_000, isSaltwater: true)
+        config.setSaltwater(true)
+        let test = PoolTest(
+            date: ChemistryTestFixtures.baseDate,
+            pH: 7.5,
+            freeChlorine: 6.5,
+            totalChlorine: 7.0,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 60,
+            saltLevel: 2_500,
+            testMethod: .liquidDropKit,
+            visualIndicators: [VisualIndicator.crystalClear.rawValue]
+        )
+        let treatment = try actionableTreatment(target: "saltLevel", config: config, test: test, history: [])
+
+        XCTAssertEqual(treatment.chemicalName, "Pool Salt")
+        XCTAssertEqual(treatment.expectedDelta, 700, accuracy: 0.001)
+        XCTAssertEqual(treatment.amount, 58.3, accuracy: 0.001)
+        XCTAssertEqual(treatment.unit, "lbs")
+        XCTAssertEqual(treatment.calculatedDoseBeforeCap, 58.3, accuracy: 0.001)
+        XCTAssertFalse(treatment.wasDoseCapped)
+    }
+
+    func testDryChlorineSubstitutionsUseAuditedWeightUnits() throws {
+        let config = ChemistryTestFixtures.config(volume: 10_000, chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 3.5,
+            totalChlorine: 3.5,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        let chlorine = try actionableTreatment(target: "freeChlorine", config: config, test: test, history: [])
+        let calHypo = try XCTUnwrap(engine.repricedTreatmentTemplate(from: chlorine, test: test, productID: .calHypoGranules, config: config))
+        let dichlor = try XCTUnwrap(engine.repricedTreatmentTemplate(from: chlorine, test: test, productID: .dichlorGranules, config: config))
+
+        XCTAssertEqual(chlorine.expectedDelta, 3.5, accuracy: 0.001)
+        XCTAssertEqual(calHypo.amount, 0.44, accuracy: 0.001)
+        XCTAssertEqual(calHypo.unit, "lbs")
+        XCTAssertEqual(dichlor.amount, 0.55, accuracy: 0.001)
+        XCTAssertEqual(dichlor.unit, "lbs")
     }
 
     func testStatusLabelsAvoidRecoveryForMaintenanceCaseAndReserveRecoveryForProblemWater() {
