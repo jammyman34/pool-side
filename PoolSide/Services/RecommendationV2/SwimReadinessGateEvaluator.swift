@@ -3,9 +3,9 @@ import Foundation
 struct SwimReadinessGateEvaluator {
     private let chemistryEngine = ChemistryEngine()
 
-    /// Provisional v2 observed-readiness pH range. This is intentionally separate from the app's
-    /// preferred balance range and requires qualified standards/product review before production UI use.
-    private let provisionalPHReadinessRange = 7.2...7.8
+    /// Pool Side observed-readiness pH range. Public-health references commonly allow pH up to 7.8;
+    /// Pool Side keeps 7.2 as the lower readiness bound to preserve sanitizer effectiveness and swimmer comfort.
+    private let pHReadinessRange = 7.2...7.8
 
     /// Reuses the existing app behavior that treats CC above 0.5 ppm as concerning.
     private let acceptableCombinedChlorineMaximum = 0.5
@@ -74,11 +74,11 @@ struct SwimReadinessGateEvaluator {
             return result(.pH, .unknown, "pH was not recorded.", blocksSwimming: true, requiresTesting: true)
         }
 
-        if provisionalPHReadinessRange.contains(pH) {
-            return result(.pH, .pass, "pH \(format(pH)) is within the provisional observed-readiness range.", blocksSwimming: false, requiresTesting: false)
+        if pHReadinessRange.contains(pH) {
+            return result(.pH, .pass, "pH \(format(pH)) is within the Pool Side observed-readiness range.", blocksSwimming: false, requiresTesting: false)
         }
 
-        return result(.pH, .fail, "pH \(format(pH)) is outside the provisional observed-readiness range.", blocksSwimming: true, requiresTesting: true)
+        return result(.pH, .fail, "pH \(format(pH)) is outside the Pool Side observed-readiness range.", blocksSwimming: true, requiresTesting: true)
     }
 
     private func combinedChlorineGate(for state: NormalizedPoolState) -> SwimReadinessGateResult {
@@ -142,6 +142,16 @@ struct SwimReadinessGateEvaluator {
         treatmentContext: V2TreatmentAwareContext?
     ) -> SwimReadinessGateResult {
         if let treatmentContext {
+            if treatmentContext.hasUnknownReentryRequirement {
+                return result(
+                    .treatmentCompletion,
+                    .unknown,
+                    "A pending swim-blocking treatment has unknown completion or re-entry requirements.",
+                    blocksSwimming: true,
+                    requiresTesting: false
+                )
+            }
+
             if treatmentContext.hasSwimBlockingActiveTreatment {
                 return result(
                     .treatmentCompletion,
@@ -205,6 +215,16 @@ struct SwimReadinessGateEvaluator {
                     .unknown,
                     "A treatment wait is active; elapsed time is predictive because pump/circulation confirmation is not persisted.",
                     blocksSwimming: false,
+                    requiresTesting: false
+                )
+            }
+
+            if treatmentContext.hasUnknownReentryRequirement {
+                return result(
+                    .circulation,
+                    .unknown,
+                    "Circulation requirements are unknown for a pending swim-blocking treatment.",
+                    blocksSwimming: true,
                     requiresTesting: false
                 )
             }

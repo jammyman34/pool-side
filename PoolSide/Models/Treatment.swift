@@ -290,9 +290,9 @@ struct TreatmentTimingGuidance {
             if treatment.isAcidTreatment {
                 return requiresVerificationBeforeSwimming ? "Test after ~4 hrs" : "Swim after ~4 hrs"
             }
-            return "Wait ~4 hrs before adjusting again"
+            return "Retest TA after 6-8 hrs"
         case "cyanuricAcid":
-            return "CYA registers later"
+            return "Retest CYA after 24-48 hrs"
         default:
             return nil
         }
@@ -335,9 +335,9 @@ struct TreatmentTimingGuidance {
                 }
                 return "Circulate ~4 hrs before swimming."
             }
-            return "Allow ~4 hrs to circulate before making another alkalinity adjustment."
+            return "Allow 6-8 hrs to circulate before retesting alkalinity or making another alkalinity adjustment."
         case "cyanuricAcid":
-            return "Allow CYA time to register."
+            return "Allow 24-48 hrs for CYA to register before retesting."
         default:
             return nil
         }

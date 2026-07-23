@@ -1190,7 +1190,7 @@ struct ChemistryEngine {
                 targetParameter: treatment.targetParameter,
                 urgency: treatment.urgency,
                 expectedEffectParameter: treatment.expectedEffectParameter,
-                expectedDelta: productID == .saltGenerator ? 0 : ppmIncrease,
+                expectedDelta: productID == .saltGenerator || productID == .trichlorTablets ? 0 : ppmIncrease,
                 effectDelayHours: productID == .saltGenerator ? 4 : 1,
                 effectDurationHours: treatment.effectDurationHours,
                 doNotRepeatHours: productID == .saltGenerator ? 4 : chlorineDoNotRepeatHours(for: product.name),
@@ -1214,10 +1214,13 @@ struct ChemistryEngine {
             } else {
                 ounces = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForPH(
                     volumeGallons: volume,
-                    pHDecrease: max(0.2, correctionDelta)
+                    currentPH: treatment.targetParameter == "pH" ? test.pH : test.pH + correctionDelta,
+                    targetPH: treatment.targetParameter == "pH" ? test.pH - max(0.2, correctionDelta) : test.pH,
+                    totalAlkalinity: test.totalAlkalinity,
+                    cyanuricAcid: test.cyanuricAcid
                 )
             }
-            let product = pHDecreaserProduct(preference, ounces: ounces)
+            let product = pHDecreaserProduct(preference, ounces: ounces, volumeGallons: volume)
             return TreatmentTemplate(
                 chemicalName: product.name,
                 actionDescription: treatment.actionDescription,
@@ -1230,7 +1233,7 @@ struct ChemistryEngine {
                 expectedDelta: treatment.expectedDelta,
                 effectDelayHours: treatment.effectDelayHours,
                 effectDurationHours: treatment.effectDurationHours,
-                doNotRepeatHours: 12,
+                doNotRepeatHours: acidDoNotRepeatHours(for: product.id),
                 productID: product.id,
                 globalPreferenceProductID: globalPreference,
                 calculatedDoseBeforeCap: product.calculatedAmountBeforeCap,
@@ -1242,7 +1245,13 @@ struct ChemistryEngine {
             guard treatment.targetParameter == "pH" else { return nil }
             let preference = PHIncreaserPreference(rawValue: productID.rawValue) ?? .sodaAsh
             let pHDelta = max(0.2, abs(treatment.expectedDelta))
-            let ounces = ChemicalDoseCalculator.sodaAshOunces(volumeGallons: volume, pHIncrease: pHDelta)
+            let ounces = ChemicalDoseCalculator.sodaAshOunces(
+                volumeGallons: volume,
+                currentPH: test.pH,
+                targetPH: test.pH + pHDelta,
+                totalAlkalinity: test.totalAlkalinity,
+                cyanuricAcid: test.cyanuricAcid
+            )
             let product = pHIncreaserProduct(preference, ounces: ounces)
             return TreatmentTemplate(
                 chemicalName: product.name,
@@ -1279,9 +1288,9 @@ struct ChemistryEngine {
                 urgency: treatment.urgency,
                 expectedEffectParameter: treatment.expectedEffectParameter,
                 expectedDelta: treatment.expectedDelta,
-                effectDelayHours: product.id == .granularCYA ? 72 : 24,
+                effectDelayHours: product.id == .granularCYA ? TreatmentApplicationPolicy.granularCYACanonicalRetestHours : 24,
                 effectDurationHours: treatment.effectDurationHours,
-                doNotRepeatHours: product.id == .granularCYA ? 168 : 72,
+                doNotRepeatHours: product.id == .granularCYA ? TreatmentApplicationPolicy.granularCYACanonicalRetestHours : 72,
                 productID: product.id,
                 globalPreferenceProductID: globalPreference,
                 calculatedDoseBeforeCap: product.calculatedAmountBeforeCap,
@@ -1307,7 +1316,13 @@ struct ChemistryEngine {
         case "pH":
             if reading.value < 7.0 {
                 let targetPH = 7.2
-                let oz = ChemicalDoseCalculator.sodaAshOunces(volumeGallons: volume, pHIncrease: targetPH - reading.value)
+                let oz = ChemicalDoseCalculator.sodaAshOunces(
+                    volumeGallons: volume,
+                    currentPH: reading.value,
+                    targetPH: targetPH,
+                    totalAlkalinity: test.totalAlkalinity,
+                    cyanuricAcid: test.cyanuricAcid
+                )
                 let product = pHIncreaserProduct(config.pHIncreaserPreference, ounces: oz)
                 return TreatmentTemplate(
                     chemicalName: product.name,
@@ -1345,8 +1360,14 @@ struct ChemistryEngine {
                 )
             } else if shouldTreatHighPHWithAcid(reading.value, test: test, previousTest: previousTest, recentHistory: recentHistory) {
                 let targetPH = reading.value <= 7.8 ? 7.6 : 7.5
-                let oz = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForPH(volumeGallons: volume, pHDecrease: reading.value - targetPH)
-                let product = pHDecreaserProduct(config.pHDecreaserPreference, ounces: oz)
+                let oz = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForPH(
+                    volumeGallons: volume,
+                    currentPH: reading.value,
+                    targetPH: targetPH,
+                    totalAlkalinity: test.totalAlkalinity,
+                    cyanuricAcid: test.cyanuricAcid
+                )
+                let product = pHDecreaserProduct(config.pHDecreaserPreference, ounces: oz, volumeGallons: volume)
                 return TreatmentTemplate(
                     chemicalName: product.name,
                     actionDescription: pHAcidActionDescription(for: test, recentHistory: recentHistory),
@@ -1359,7 +1380,7 @@ struct ChemistryEngine {
                     expectedDelta: targetPH - reading.value,
                     effectDelayHours: 4,
                     effectDurationHours: 24,
-                    doNotRepeatHours: 12,
+                    doNotRepeatHours: acidDoNotRepeatHours(for: product.id),
                     productID: product.id,
                     globalPreferenceProductID: config.pHDecreaserPreference.productID,
                     calculatedDoseBeforeCap: product.calculatedAmountBeforeCap,
@@ -1428,7 +1449,7 @@ struct ChemistryEngine {
                     targetParameter: "freeChlorine",
                     urgency: chlorineTreatmentUrgency(for: test, target: target, recentHistory: recentHistory, config: config),
                     expectedEffectParameter: "freeChlorine",
-                    expectedDelta: target - reading.value,
+                    expectedDelta: product.id == .trichlorTablets ? 0 : target - reading.value,
                     effectDelayHours: 1,
                     effectDurationHours: 24,
                     doNotRepeatHours: chlorineDoNotRepeatHours(for: product.name),
@@ -1462,6 +1483,22 @@ struct ChemistryEngine {
                 if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
                     return possibleDilutionRetestTemplate(for: "Total Alkalinity")
                 }
+                if test.pH > 7.8 {
+                    return TreatmentTemplate(
+                        chemicalName: "Correct pH Before Raising Alkalinity",
+                        actionDescription: "pH is high, so avoid adding alkalinity increaser until the pH correction has circulated and been retested.",
+                        amount: 0,
+                        unit: "",
+                        instructions: "Complete the pH correction first. Retest pH and alkalinity before adding baking soda so the treatments do not work against each other.",
+                        targetParameter: "totalAlkalinity",
+                        urgency: .advisory,
+                        expectedEffectParameter: "totalAlkalinity",
+                        expectedDelta: 0,
+                        effectDelayHours: 0,
+                        effectDurationHours: 24,
+                        doNotRepeatHours: 12
+                    )
+                }
                 let alkalinityIncrease = 80 - reading.value
                 let lbs = ChemicalDoseCalculator.sodiumBicarbonatePounds(volumeGallons: volume, ppmIncrease: alkalinityIncrease)
                 return TreatmentTemplate(
@@ -1469,14 +1506,14 @@ struct ChemistryEngine {
                     actionDescription: "Raise low alkalinity so pH is less likely to swing",
                     amount: lbs.rounded(toPlaces: 1),
                     unit: "lbs",
-                    instructions: "Add directly to pool with pump running. For large doses, split into two additions 4-6 hours apart. Retest pH and alkalinity next day.",
+                    instructions: "Add directly to pool with pump running. Allow 6-8 hours of circulation before retesting TA or making another alkalinity adjustment.",
                     targetParameter: "totalAlkalinity",
                     urgency: reading.status.treatmentUrgency ?? .recommended,
                     expectedEffectParameter: "totalAlkalinity",
                     expectedDelta: alkalinityIncrease,
-                    effectDelayHours: 12,
+                    effectDelayHours: Int(TreatmentApplicationPolicy.bakingSodaRetestWindowHours.upperBound),
                     effectDurationHours: 48,
-                    doNotRepeatHours: 24,
+                    doNotRepeatHours: Int(TreatmentApplicationPolicy.bakingSodaRetestWindowHours.upperBound),
                     productID: config.alkalinityIncreaserPreference.productID,
                     globalPreferenceProductID: config.alkalinityIncreaserPreference.productID,
                     calculatedDoseBeforeCap: lbs.rounded(toPlaces: 1),
@@ -1485,7 +1522,7 @@ struct ChemistryEngine {
             } else if shouldTreatHighAlkalinityWithAcid(reading.value, test: test, previousTest: previousTest) {
                 let alkalinityDecrease = reading.value - 120
                 let flOz = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForAlkalinity(volumeGallons: volume, ppmDecrease: alkalinityDecrease)
-                let product = pHDecreaserProduct(config.pHDecreaserPreference, ounces: flOz)
+                let product = pHDecreaserProduct(config.pHDecreaserPreference, ounces: flOz, volumeGallons: volume)
                 return TreatmentTemplate(
                     chemicalName: product.name,
                     actionDescription: "Lower TA only because pH is high or drifting upward",
@@ -1538,14 +1575,14 @@ struct ChemistryEngine {
                     actionDescription: "Raise clearly low calcium hardness to reduce corrosion risk",
                     amount: lbs.rounded(toPlaces: 1),
                     unit: "lbs",
-                    instructions: "Pre-dissolve in water; this releases heat, so use caution. Add slowly around pool perimeter. Retest after full circulation.",
+                    instructions: "Pre-dissolve in water; this releases heat, so use caution. Add slowly around pool perimeter with the pump running. Retest calcium hardness after about 24 hours before adding more.",
                     targetParameter: "calciumHardness",
                     urgency: .optional,
                     expectedEffectParameter: "calciumHardness",
                     expectedDelta: calciumIncrease,
-                    effectDelayHours: 4,
+                    effectDelayHours: TreatmentApplicationPolicy.calciumChlorideRetestHours,
                     effectDurationHours: 72,
-                    doNotRepeatHours: 24,
+                    doNotRepeatHours: TreatmentApplicationPolicy.calciumChlorideRetestHours,
                     productID: config.calciumIncreaserPreference.productID,
                     globalPreferenceProductID: config.calciumIncreaserPreference.productID,
                     calculatedDoseBeforeCap: lbs.rounded(toPlaces: 1),
@@ -1618,9 +1655,9 @@ struct ChemistryEngine {
                     urgency: config.testMethod == .testStrips ? .advisory : .optional,
                     expectedEffectParameter: "cyanuricAcid",
                     expectedDelta: cyaIncrease,
-                    effectDelayHours: 72,
+                    effectDelayHours: product.id == .granularCYA ? TreatmentApplicationPolicy.granularCYACanonicalRetestHours : 24,
                     effectDurationHours: 168,
-                    doNotRepeatHours: product.id == .granularCYA ? 168 : 72,
+                    doNotRepeatHours: product.id == .granularCYA ? TreatmentApplicationPolicy.granularCYACanonicalRetestHours : 72,
                     productID: product.id,
                     globalPreferenceProductID: config.stabilizerPreference.productID,
                     calculatedDoseBeforeCap: product.calculatedAmountBeforeCap,
@@ -1893,6 +1930,10 @@ struct ChemistryEngine {
         chlorineRetestWaitMinutes(for: chemicalName) <= 60 ? 1 : 4
     }
 
+    private func acidDoNotRepeatHours(for productID: ChemicalProductID?) -> Int {
+        productID == .muriaticAcid31 ? TreatmentApplicationPolicy.muriaticAcid31EarliestRepeatDoseHours : 12
+    }
+
     private func chlorineRetestWaitMinutes(for chemicalName: String) -> Int {
         if chemicalName.contains("Liquid Chlorine") {
             return 60
@@ -2146,20 +2187,38 @@ struct ChemistryEngine {
         }
     }
 
-    private func pHDecreaserProduct(_ preference: PHDecreaserPreference, ounces: Double) -> ChemicalProduct {
+    private func pHDecreaserProduct(_ preference: PHDecreaserPreference, ounces: Double, volumeGallons: Double? = nil) -> ChemicalProduct {
         switch preference {
         case .muriaticAcid:
-            let cappedOunces = conservativeSingleLiquidAcidDose(fluidOunces: ounces)
-            let dose = practicalLiquidAcidDose(fluidOunces: cappedOunces)
-            let uncappedDose = practicalLiquidAcidDose(fluidOunces: ounces)
+            let application: TreatmentApplicationPolicy.DoseApplication
+            if let volumeGallons {
+                application = TreatmentApplicationPolicy.muriaticAcid31CurrentApplication(
+                    totalFluidOunces: ounces,
+                    volumeGallons: volumeGallons,
+                    displayDose: practicalLiquidAcidDose(fluidOunces:)
+                )
+            } else {
+                let cappedOunces = conservativeSingleLiquidAcidDose(fluidOunces: ounces)
+                let dose = practicalLiquidAcidDose(fluidOunces: cappedOunces)
+                let uncappedDose = practicalLiquidAcidDose(fluidOunces: ounces)
+                application = TreatmentApplicationPolicy.DoseApplication(
+                    currentAmount: dose.amount,
+                    currentUnit: dose.unit,
+                    totalCalculatedAmount: uncappedDose.amount,
+                    totalCalculatedUnit: uncappedDose.unit,
+                    remainingEstimatedAmount: 0,
+                    remainingEstimatedUnit: uncappedDose.unit,
+                    isApplicationLimited: cappedOunces < ounces
+                )
+            }
             return ChemicalProduct(
                 id: .muriaticAcid31,
-                amount: dose.amount,
-                unit: dose.unit,
-                instructions: "Add slowly to the deep end with the pump running. Never pre-mix with other chemicals. Retest pH in 4 hours before adding more.",
-                calculatedAmountBeforeCap: uncappedDose.amount,
-                calculatedUnitBeforeCap: uncappedDose.unit,
-                wasCapped: cappedOunces < ounces
+                amount: application.currentAmount,
+                unit: application.currentUnit,
+                instructions: "Add slowly to the deep end with the pump running. Never pre-mix with other chemicals. Circulate at least 1 hour. Retest pH before adding more; repeat only after a new test still calls for acid.",
+                calculatedAmountBeforeCap: application.totalCalculatedAmount,
+                calculatedUnitBeforeCap: application.totalCalculatedUnit,
+                wasCapped: application.isApplicationLimited
             )
         case .lowFumeMuriaticAcid:
             let lowFumeOunces = ounces * (31.45 / 20.0)
@@ -2223,7 +2282,7 @@ struct ChemistryEngine {
                 id: .granularCYA,
                 amount: pounds.rounded(toPlaces: 1),
                 unit: "lbs",
-                instructions: "Place stabilizer in a sock or mesh bag in front of a return jet with the pump running. Do not leave undissolved stabilizer sitting in the skimmer basket. It can take up to a week to fully register on tests."
+                instructions: "Place stabilizer in a sock or mesh bag in front of a return jet with the pump running. Do not leave undissolved stabilizer sitting in the skimmer basket. Retest CYA after 24-48 hours of circulation and avoid backwashing or cleaning the filter for several days when practical."
             )
         case .liquidConditioner:
             return ChemicalProduct(

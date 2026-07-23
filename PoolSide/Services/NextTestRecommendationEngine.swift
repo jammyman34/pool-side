@@ -76,10 +76,10 @@ struct NextTestRecommendationEngine {
         if pendingSteps.contains(where: { $0.targetParameter == "cyanuricAcid" }) {
             return make(
                 from: test.date,
-                hours: 72,
+                hours: Double(TreatmentApplicationPolicy.granularCYACanonicalRetestHours),
                 reason: "Stabilizer changes slowly and needs time to register.",
                 title: "Retest CYA",
-                body: "Retest CYA after the stabilizer has circulated and dissolved.",
+                body: "Retest CYA after 24-48 hours of circulation before adding more stabilizer.",
                 urgency: .watch,
                 source: .stabilizer
             )
@@ -168,10 +168,10 @@ struct NextTestRecommendationEngine {
         if treatment.targetParameter == "cyanuricAcid" {
             return make(
                 from: completedAt,
-                hours: 72,
+                hours: Double(TreatmentApplicationPolicy.granularCYACanonicalRetestHours),
                 reason: "Stabilizer needs time to dissolve and register.",
                 title: "Retest CYA",
-                body: "Retest CYA after 48-72 hours before adding more stabilizer.",
+                body: "Retest CYA after 24-48 hours before adding more stabilizer.",
                 urgency: .watch,
                 source: .stabilizer
             )

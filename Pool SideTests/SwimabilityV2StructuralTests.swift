@@ -160,7 +160,11 @@ final class SwimabilityV2StructuralTests: XCTestCase {
 
     func testPendingTreatmentPreventsReadyBecauseSwimBlockingClassificationIsUnknown() {
         let test = makeReadyTest()
-        test.treatments.append(makeTreatment())
+        test.treatments.append(makeTreatment(
+            chemicalName: "Unknown Immediate Product",
+            targetParameter: "unknownProduct",
+            urgency: .immediate
+        ))
 
         let assessment = assess(test: test)
 

@@ -43,6 +43,7 @@
 		9B3B1265301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1264301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift */; };
 		9B3B1267301006100016D855 /* V2TreatmentClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1266301006100016D855 /* V2TreatmentClassifier.swift */; };
 		9B3B1269301150BF0016D855 /* ChemicalDoseCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B1268301150BF0016D855 /* ChemicalDoseCalculator.swift */; };
+		9B3B126D3012BB4E0016D855 /* TreatmentApplicationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B3B126C3012BB4E0016D855 /* TreatmentApplicationPolicy.swift */; };
 		9B8AF63B2FFC2DD400CB6A85 /* PoolConditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */; };
 		9B8AF63D2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */; };
 		9B8AF63F2FFE992100CB6A85 /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */; };
@@ -101,6 +102,7 @@
 		9B3B1264301005EB0016D855 /* TreatmentAwareSwimabilityV2Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentAwareSwimabilityV2Models.swift; sourceTree = "<group>"; };
 		9B3B1266301006100016D855 /* V2TreatmentClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2TreatmentClassifier.swift; sourceTree = "<group>"; };
 		9B3B1268301150BF0016D855 /* ChemicalDoseCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChemicalDoseCalculator.swift; sourceTree = "<group>"; };
+		9B3B126C3012BB4E0016D855 /* TreatmentApplicationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentApplicationPolicy.swift; sourceTree = "<group>"; };
 		9B8AF63A2FFC2DD400CB6A85 /* PoolConditions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolConditions.swift; sourceTree = "<group>"; };
 		9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextTestRecommendationEngine.swift; sourceTree = "<group>"; };
 		9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
@@ -329,6 +331,7 @@
 				9B3B1236300CC6060016D855 /* RecommendationV2 */,
 				9B3B125B300FB2EA0016D855 /* Education */,
 				9B3B1268301150BF0016D855 /* ChemicalDoseCalculator.swift */,
+				9B3B126C3012BB4E0016D855 /* TreatmentApplicationPolicy.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -484,6 +487,7 @@
 				1E976E6D4D68EE4771BF17E2 /* AIService.swift in Sources */,
 				9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */,
 				AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */,
+				9B3B126D3012BB4E0016D855 /* TreatmentApplicationPolicy.swift in Sources */,
 				9B3B125F300FB3070016D855 /* ContextualEducationTipView.swift in Sources */,
 				46DF8F5D092C7092A89DFB48 /* ChemicalStatusCard.swift in Sources */,
 				F50043DB0B4DD2F445215FED /* ChemistryEngine.swift in Sources */,
