@@ -416,8 +416,13 @@ final class PoolViewModel {
         }
 
         let recommendation = nextTestRecommendation(for: latestTest, in: allTests)
+        guard let recommendedDate = recommendation.recommendedDate else {
+            NotificationService.shared.cancelNextPoolTestReminder()
+            return
+        }
+
         _ = await NotificationService.shared.replaceNextPoolTestReminder(
-            at: recommendation.recommendedDate,
+            at: recommendedDate,
             reason: recommendation.scheduledReason
         )
     }

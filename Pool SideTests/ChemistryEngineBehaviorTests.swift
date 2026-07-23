@@ -759,8 +759,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertEqual(cloudy.amount, 0)
         XCTAssertFalse(cloudy.chemicalName.localizedCaseInsensitiveContains("retest"))
         XCTAssertFalse(cloudy.instructions.localizedCaseInsensitiveContains("retest"))
-        XCTAssertEqual(recommendation.source, .chlorineCorrection)
-        XCTAssertEqual(recommendation.title, "Retest FC and CC")
+        XCTAssertEqual(recommendation.source, .treatmentPlan)
+        XCTAssertTrue(recommendation.isPendingTreatmentAction)
+        XCTAssertNil(recommendation.recommendedDate)
+        XCTAssertEqual(recommendation.title, "After treatment is completed")
     }
 
     func testMultipleRecoverySignalsProduceOneMergedChlorineTreatment() async throws {
@@ -867,8 +869,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             config: config
         )
 
-        XCTAssertEqual(urgentRecommendation.source, .chlorineCorrection)
-        XCTAssertLessThanOrEqual(urgentRecommendation.interval, 3_600)
+        XCTAssertEqual(urgentRecommendation.source, .treatmentPlan)
+        XCTAssertTrue(urgentRecommendation.isPendingTreatmentAction)
+        XCTAssertNil(urgentRecommendation.recommendedDate)
     }
 
     func testScoreStatusLabelDoesNotUseRecoveryForLowScoreWithoutRecoveryContext() {
@@ -976,8 +979,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             config: config
         )
 
-        XCTAssertEqual(recommendation.source, .chlorineCorrection)
-        XCTAssertLessThanOrEqual(recommendation.interval, 3_600)
+        XCTAssertEqual(recommendation.source, .treatmentPlan)
+        XCTAssertTrue(recommendation.isPendingTreatmentAction)
+        XCTAssertNil(recommendation.recommendedDate)
     }
 
     func testRecentChlorineMixingWatchlistDoesNotCreateRetestFCActionWhenNoNewTestExists() {
@@ -1069,6 +1073,187 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertFalse(treatments.contains { $0.chemicalName == "Chlorine Still Circulating" })
     }
 
+    func testPendingTreatmentRetestOwnersDoNotReceiveAbsoluteNextTestDates() {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(pH: 8.0, totalAlkalinity: 140)
+        let acid = timingTreatment(
+            name: "Muriatic Acid (31.45%)",
+            target: "pH",
+            amount: 1.5,
+            productID: .muriaticAcid31,
+            urgency: .immediate,
+            expectedDelta: -0.5,
+            effectDelayHours: 4
+        )
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [acid],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertTrue(recommendation.isPendingTreatmentAction)
+        XCTAssertNil(recommendation.recommendedDate)
+        XCTAssertEqual(recommendation.title, "After treatment is completed")
+        XCTAssertEqual(recommendation.body, "Complete or skip the recommended treatment to schedule your next test.")
+    }
+
+    func testCompletedAcidTreatmentAnchorsNextPoolTestToCompletedAt() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(pH: 8.0, totalAlkalinity: 140)
+        let completedAt = try XCTUnwrap(Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 23, hour: 10)))
+        let acid = timingTreatment(
+            name: "Muriatic Acid (31.45%)",
+            target: "pH",
+            amount: 1.5,
+            productID: .muriaticAcid31,
+            urgency: .immediate,
+            expectedDelta: -0.5,
+            effectDelayHours: 4
+        )
+        acid.isCompleted = true
+        acid.completedAt = completedAt
+
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [acid],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertFalse(recommendation.isPendingTreatmentAction)
+        XCTAssertEqual(recommendation.source, .pHCorrection)
+        XCTAssertEqual(recommendation.title, "Retest pH")
+        XCTAssertEqual(recommendation.recommendedDate, completedAt.addingTimeInterval(4 * 60 * 60))
+    }
+
+    func testPoolCareTreatmentRetestsArePendingUntilCompletionThenAnchorToCompletedAt() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(pH: 7.5, totalAlkalinity: 50, calciumHardness: 100, cyanuricAcid: 20)
+        let completedAt = try XCTUnwrap(Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 23, hour: 12)))
+        let bakingSoda = timingTreatment(
+            name: "Baking Soda (Sodium Bicarbonate)",
+            target: "totalAlkalinity",
+            amount: 13.7,
+            productID: .bakingSoda,
+            urgency: .optional,
+            expectedDelta: 30,
+            effectDelayHours: 8
+        )
+        let calcium = timingTreatment(
+            name: "Calcium Hardness Increaser (Calcium Chloride)",
+            target: "calciumHardness",
+            amount: 40.7,
+            productID: .calciumChloride,
+            urgency: .optional,
+            expectedDelta: 100,
+            effectDelayHours: TreatmentApplicationPolicy.calciumChlorideRetestHours
+        )
+        let cya = timingTreatment(
+            name: "Cyanuric Acid (Granular)",
+            target: "cyanuricAcid",
+            amount: 5.3,
+            productID: .granularCYA,
+            urgency: .optional,
+            expectedDelta: 20,
+            effectDelayHours: TreatmentApplicationPolicy.granularCYACanonicalRetestHours
+        )
+
+        let pendingRecommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [bakingSoda, calcium, cya],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+        XCTAssertTrue(pendingRecommendation.isPendingTreatmentAction)
+        XCTAssertNil(pendingRecommendation.recommendedDate)
+
+        bakingSoda.isCompleted = true
+        bakingSoda.completedAt = completedAt
+        calcium.isSkipped = true
+        cya.isSkipped = true
+
+        let completedRecommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [bakingSoda, calcium, cya],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+        XCTAssertEqual(completedRecommendation.title, "Retest TA")
+        XCTAssertEqual(completedRecommendation.recommendedDate, completedAt.addingTimeInterval(8 * 60 * 60))
+
+        bakingSoda.isSkipped = true
+        bakingSoda.isCompleted = false
+        bakingSoda.completedAt = nil
+        let skippedRecommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [bakingSoda, calcium, cya],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+        XCTAssertFalse(skippedRecommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(skippedRecommendation.recommendedDate)
+    }
+
+    func testMultipleTreatmentPlanDoesNotScheduleFinalRetestBeforePendingStepCompletion() throws {
+        let config = ChemistryTestFixtures.config(volume: 32_583)
+        let test = ChemistryTestFixtures.currentPool(pH: 8.0, totalAlkalinity: 140, cyanuricAcid: 20)
+        let completedAt = try XCTUnwrap(Calendar.current.date(from: DateComponents(year: 2026, month: 7, day: 23, hour: 9)))
+        let acid = timingTreatment(
+            name: "Muriatic Acid (31.45%)",
+            target: "pH",
+            amount: 1.5,
+            productID: .muriaticAcid31,
+            urgency: .immediate,
+            expectedDelta: -0.5,
+            effectDelayHours: 4
+        )
+        acid.isCompleted = true
+        acid.completedAt = completedAt
+        let cya = timingTreatment(
+            name: "Cyanuric Acid (Granular)",
+            target: "cyanuricAcid",
+            amount: 5.3,
+            productID: .granularCYA,
+            urgency: .optional,
+            expectedDelta: 20,
+            effectDelayHours: TreatmentApplicationPolicy.granularCYACanonicalRetestHours
+        )
+
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [acid, cya],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertTrue(recommendation.isPendingTreatmentAction)
+        XCTAssertNil(recommendation.recommendedDate)
+    }
+
+    func testRoutineNoTreatmentRecommendationStillHasAbsoluteDate() {
+        let config = ChemistryTestFixtures.config()
+        let test = ChemistryTestFixtures.currentPool(pH: 7.5, freeChlorine: 6, totalChlorine: 6.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60)
+
+        let recommendation = NextTestRecommendationEngine().recommendation(
+            for: test,
+            treatmentSteps: [],
+            watchlist: [],
+            recentHistory: [],
+            config: config
+        )
+
+        XCTAssertFalse(recommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(recommendation.recommendedDate)
+        XCTAssertEqual(recommendation.source, .stablePool)
+    }
+
     func testWatchlistPresentationText() {
         XCTAssertFalse(WatchlistPresentationText.shouldShow(count: 0))
         XCTAssertEqual(WatchlistPresentationText.summary(count: 1), "1 item to monitor")
@@ -1113,7 +1298,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         productID: ChemicalProductID,
         urgency: TreatmentUrgency = .recommended,
         minutesBeforeNext: Int = 0,
-        expectedDelta: Double = 0
+        expectedDelta: Double = 0,
+        effectDelayHours: Int = 0
     ) -> Treatment {
         Treatment(
             chemicalName: name,
@@ -1127,7 +1313,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             targetParameter: target,
             minutesBeforeNext: minutesBeforeNext,
             expectedEffectParameter: target,
-            expectedDelta: expectedDelta
+            expectedDelta: expectedDelta,
+            effectDelayHours: effectDelayHours
         )
     }
 }

@@ -18,15 +18,17 @@ struct NextTestRecommendation {
         case possibleDilution
     }
 
-    let recommendedDate: Date
+    let recommendedDate: Date?
     let interval: TimeInterval
     let reason: String
     let title: String
     let body: String
     let urgency: Urgency
     let source: Source
+    let isPendingTreatmentAction: Bool
 
     var relativeLabel: String {
+        guard let recommendedDate else { return "After treatment is completed" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return formatter.localizedString(for: recommendedDate, relativeTo: Date())
@@ -47,6 +49,26 @@ struct NextTestRecommendationEngine {
     ) -> NextTestRecommendation {
         let confidence = ChemistryEngine().recommendationConfidenceInput(for: test, recentHistory: recentHistory)
         let pendingSteps = treatmentSteps.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
+        let pendingRetestSteps = pendingSteps.filter { treatmentRetestRecommendation(for: $0, completedAt: $0.createdAt) != nil }
+
+        if !pendingRetestSteps.isEmpty {
+            return pendingTreatmentActionRecommendation()
+        }
+
+        let completedRetests = treatmentSteps
+            .filter { $0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
+            .compactMap { treatment -> NextTestRecommendation? in
+                guard let completedAt = treatment.completedAt else { return nil }
+                return treatmentRetestRecommendation(for: treatment, completedAt: completedAt)
+            }
+            .sorted {
+                guard let lhs = $0.recommendedDate, let rhs = $1.recommendedDate else { return false }
+                return lhs < rhs
+            }
+
+        if let completedRetest = completedRetests.first {
+            return completedRetest
+        }
 
         if let chlorine = pendingSteps.first(where: { $0.targetParameter == "freeChlorine" && requiresSameDayChlorineVerification($0, test: test) }) {
             let minutes = chlorineRetestMinutes(for: chlorine)
@@ -177,6 +199,30 @@ struct NextTestRecommendationEngine {
             )
         }
 
+        if treatment.targetParameter == "totalAlkalinity", !treatment.isAcidTreatment, treatment.effectDelayHours > 0 {
+            return make(
+                from: completedAt,
+                hours: Double(treatment.effectDelayHours),
+                reason: "Alkalinity treatment needs circulation before the result is meaningful.",
+                title: "Retest TA",
+                body: "Retest TA after circulation before making another alkalinity adjustment.",
+                urgency: .watch,
+                source: .treatmentPlan
+            )
+        }
+
+        if treatment.targetParameter == "calciumHardness", treatment.effectDelayHours > 0 {
+            return make(
+                from: completedAt,
+                hours: Double(treatment.effectDelayHours),
+                reason: "Calcium hardness needs time to circulate before retesting.",
+                title: "Retest CH",
+                body: "Retest calcium hardness after circulation before adding more calcium increaser.",
+                urgency: .watch,
+                source: .treatmentPlan
+            )
+        }
+
         return nil
     }
 
@@ -276,7 +322,21 @@ struct NextTestRecommendationEngine {
             title: title,
             body: body,
             urgency: urgency,
-            source: source
+            source: source,
+            isPendingTreatmentAction: false
+        )
+    }
+
+    private func pendingTreatmentActionRecommendation() -> NextTestRecommendation {
+        NextTestRecommendation(
+            recommendedDate: nil,
+            interval: 0,
+            reason: "Complete or skip the recommended treatment to schedule your next test.",
+            title: "After treatment is completed",
+            body: "Complete or skip the recommended treatment to schedule your next test.",
+            urgency: .watch,
+            source: .treatmentPlan,
+            isPendingTreatmentAction: true
         )
     }
 }

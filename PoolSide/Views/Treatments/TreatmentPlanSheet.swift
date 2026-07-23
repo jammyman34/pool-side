@@ -884,16 +884,23 @@ struct TreatmentPlanSheet: View {
     }
 
     private var nextPoolTestRelativeText: String {
-        if Calendar.current.isDateInTomorrow(nextTestRecommendation.recommendedDate) {
-            return "Tomorrow around \(Self.timeFormatter.string(from: nextTestRecommendation.recommendedDate))"
+        guard let recommendedDate = nextTestRecommendation.recommendedDate else {
+            return "After treatment is completed"
         }
-        if Calendar.current.isDateInToday(nextTestRecommendation.recommendedDate) {
-            return "Today around \(Self.timeFormatter.string(from: nextTestRecommendation.recommendedDate))"
+
+        if Calendar.current.isDateInTomorrow(recommendedDate) {
+            return "Tomorrow around \(Self.timeFormatter.string(from: recommendedDate))"
         }
-        return Self.reminderDateFormatter.string(from: nextTestRecommendation.recommendedDate)
+        if Calendar.current.isDateInToday(recommendedDate) {
+            return "Today around \(Self.timeFormatter.string(from: recommendedDate))"
+        }
+        return Self.reminderDateFormatter.string(from: recommendedDate)
     }
 
     private var nextPoolTestReminderStatus: String {
+        if nextTestRecommendation.isPendingTreatmentAction {
+            return "Reminder waits for treatment completion"
+        }
         if !viewModel.poolConfig.enableNextPoolTestReminders {
             return "Next pool test reminders are off"
         }

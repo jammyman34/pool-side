@@ -705,7 +705,9 @@ struct DashboardView: View {
         return f.string(from: date)
     }
 
-    private func nextTestPillText(for date: Date, now: Date = Date()) -> String {
+    private func nextTestPillText(for date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "Next test after treatment" }
+
         if date <= now {
             return "Test pool water today"
         }
