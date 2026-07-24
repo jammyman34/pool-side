@@ -25,6 +25,7 @@ struct V2TreatmentClassification: Codable, Equatable, Sendable {
     let blocksCurrentSwimability: Bool
     let startsWaitOnCompletion: Bool
     let verificationRequiredBeforeSwimming: Bool
+    let pendingVerificationGateIdentifiers: Set<SwimReadinessGateIdentifier>
     let waitMinutes: Int?
     let completedAt: Date?
     let readyAt: Date?
@@ -56,14 +57,9 @@ struct V2TreatmentAwareContext: Codable, Equatable, Sendable {
     }
 
     var pendingVerificationGateIdentifiers: Set<SwimReadinessGateIdentifier> {
-        Set(classifications.compactMap { classification in
-            guard classification.completionState == .completedVerificationRequired else { return nil }
-            switch classification.targetParameter {
-            case "freeChlorine": return .sanitizerAdequacy
-            case "pH": return .pH
-            default: return nil
-            }
-        })
+        Set(classifications
+            .filter { $0.completionState == .completedVerificationRequired }
+            .flatMap(\.pendingVerificationGateIdentifiers))
     }
 
     var hasUnresolvedRecoveryAction: Bool {

@@ -44,38 +44,156 @@ final class PoolConfigurationMigrationTests: XCTestCase {
     }
 
     func testPartialConfigUpdatePreservesCoverAndRoboticCleanerSettings() {
-        let originalData = UserDefaults.standard.data(forKey: PoolConfiguration.defaultsKey)
-        defer {
-            if let originalData {
-                UserDefaults.standard.set(originalData, forKey: PoolConfiguration.defaultsKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: PoolConfiguration.defaultsKey)
+        preservePoolConfigurationDefaults {
+            PoolConfiguration.current = PoolConfiguration(
+                volumeGallons: 32_583,
+                surfaceType: .plaster,
+                testMethod: .liquidDropKit,
+                isSaltwater: false,
+                hasCover: true,
+                petsRegularlySwim: true,
+                usesRoboticCleaner: true,
+                chlorinePreference: .liquidChlorine12_5
+            )
+            let viewModel = PoolViewModel()
+
+            viewModel.updateConfig { config in
+                config.chlorinePreference = .liquidChlorine10
             }
+
+            let updated = PoolConfiguration.current
+            XCTAssertTrue(updated.hasCover)
+            XCTAssertTrue(updated.petsRegularlySwim)
+            XCTAssertTrue(updated.usesRoboticCleaner)
+            XCTAssertEqual(updated.chlorinePreference, .liquidChlorine10)
+            XCTAssertEqual(updated.volumeGallons, 32_583)
+            XCTAssertEqual(updated.testMethod, .liquidDropKit)
         }
+    }
 
-        PoolConfiguration.current = PoolConfiguration(
-            volumeGallons: 32_583,
-            surfaceType: .plaster,
-            testMethod: .liquidDropKit,
-            isSaltwater: false,
-            hasCover: true,
-            petsRegularlySwim: true,
-            usesRoboticCleaner: true,
-            chlorinePreference: .liquidChlorine12_5
-        )
-        let viewModel = PoolViewModel()
+    func testRecoveredEquipmentBackupsSurviveDefaultConfigurationOverwrite() {
+        preservePoolConfigurationDefaults {
+            let viewModel = PoolViewModel()
+            viewModel.saveConfig(
+                PoolConfiguration(
+                    volumeGallons: 32_583,
+                    hasCover: true,
+                    usesRoboticCleaner: true
+                ),
+                marksEquipmentChoicesExplicit: true
+            )
 
-        viewModel.updateConfig { config in
-            config.chlorinePreference = .liquidChlorine10
+            PoolConfiguration.current = PoolConfiguration(volumeGallons: 32_583)
+
+            let recovered = PoolConfiguration.current
+            XCTAssertTrue(recovered.hasCover)
+            XCTAssertTrue(recovered.usesRoboticCleaner)
         }
+    }
 
-        let updated = PoolConfiguration.current
-        XCTAssertTrue(updated.hasCover)
-        XCTAssertTrue(updated.petsRegularlySwim)
-        XCTAssertTrue(updated.usesRoboticCleaner)
-        XCTAssertEqual(updated.chlorinePreference, .liquidChlorine10)
-        XCTAssertEqual(updated.volumeGallons, 32_583)
-        XCTAssertEqual(updated.testMethod, .liquidDropKit)
+    func testSavedTestHistoryCanRecoverMissingEquipmentSettings() {
+        preservePoolConfigurationDefaults {
+            PoolConfiguration.current = PoolConfiguration(volumeGallons: 32_583)
+            let historicalTest = PoolTest(
+                pH: 7.5,
+                freeChlorine: 5,
+                totalChlorine: 5,
+                totalAlkalinity: 100,
+                calciumHardness: 330,
+                cyanuricAcid: 60,
+                poolConditions: PoolConditions(
+                    coverOpenTime: .twoToSixHours,
+                    cleaningActivity: .oneCycle
+                )
+            )
+            let viewModel = PoolViewModel()
+
+            viewModel.refreshConfigFromStorage(reconcilingWith: [historicalTest])
+
+            XCTAssertTrue(viewModel.poolConfig.hasCover)
+            XCTAssertTrue(viewModel.poolConfig.usesRoboticCleaner)
+            XCTAssertTrue(PoolConfiguration.current.hasCover)
+            XCTAssertTrue(PoolConfiguration.current.usesRoboticCleaner)
+        }
+    }
+
+    func testExplicitEquipmentOffChoiceIsNotReenabledByHistory() {
+        preservePoolConfigurationDefaults {
+            let viewModel = PoolViewModel()
+            viewModel.saveConfig(
+                PoolConfiguration(
+                    volumeGallons: 32_583,
+                    hasCover: false,
+                    usesRoboticCleaner: false
+                ),
+                marksEquipmentChoicesExplicit: true
+            )
+            let historicalTest = PoolTest(
+                pH: 7.5,
+                freeChlorine: 5,
+                totalChlorine: 5,
+                totalAlkalinity: 100,
+                calciumHardness: 330,
+                cyanuricAcid: 60,
+                poolConditions: PoolConditions(
+                    coverOpenTime: .twoToSixHours,
+                    cleaningActivity: .oneCycle
+                )
+            )
+
+            viewModel.refreshConfigFromStorage(reconcilingWith: [historicalTest])
+
+            XCTAssertFalse(viewModel.poolConfig.hasCover)
+            XCTAssertFalse(viewModel.poolConfig.usesRoboticCleaner)
+        }
+    }
+
+    func testManualVacuumHistoryDoesNotRecoverRoboticCleanerSetting() {
+        preservePoolConfigurationDefaults {
+            PoolConfiguration.current = PoolConfiguration(volumeGallons: 32_583)
+            let historicalTest = PoolTest(
+                pH: 7.5,
+                freeChlorine: 5,
+                totalChlorine: 5,
+                totalAlkalinity: 100,
+                calciumHardness: 330,
+                cyanuricAcid: 60,
+                poolConditions: PoolConditions(cleaningActivity: .entirePool)
+            )
+            let viewModel = PoolViewModel()
+
+            viewModel.refreshConfigFromStorage(reconcilingWith: [historicalTest])
+
+            XCTAssertFalse(viewModel.poolConfig.usesRoboticCleaner)
+        }
+    }
+
+    func testInvalidSavedFieldDoesNotResetCoverOrRoboticCleanerSettings() throws {
+        let json = """
+        {
+            "name": "Dogfood Pool",
+            "volumeGallons": 32583,
+            "surfaceType": "plaster",
+            "testMethod": "liquid_drop_kit",
+            "liquidDropKitBrand": "Unsupported Future Kit",
+            "isSaltwater": false,
+            "hasCover": true,
+            "petsRegularlySwim": false,
+            "usesRoboticCleaner": true,
+            "chlorinePreference": "liquid_chlorine_12_5"
+        }
+        """
+        let data = try XCTUnwrap(json.data(using: .utf8))
+
+        let config = try JSONDecoder().decode(PoolConfiguration.self, from: data)
+
+        XCTAssertEqual(config.name, "Dogfood Pool")
+        XCTAssertEqual(config.volumeGallons, 32_583)
+        XCTAssertEqual(config.testMethod, .liquidDropKit)
+        XCTAssertEqual(config.liquidDropKitBrand, .taylorK2006FASDPD)
+        XCTAssertTrue(config.hasCover)
+        XCTAssertTrue(config.usesRoboticCleaner)
+        XCTAssertEqual(config.chlorinePreference, .liquidChlorine12_5)
     }
 
     func testTreatmentProductDefaultUpdatePreservesUnrelatedPoolConfiguration() {
@@ -104,5 +222,31 @@ final class PoolConfigurationMigrationTests: XCTestCase {
     private func decode<T: Decodable>(_ type: T.Type, from string: String) throws -> T {
         let data = try JSONEncoder().encode(string)
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func preservePoolConfigurationDefaults(_ body: () -> Void) {
+        let keys = [
+            PoolConfiguration.defaultsKey,
+            PoolConfiguration.hasCoverBackupKey,
+            PoolConfiguration.usesRoboticCleanerBackupKey,
+            PoolConfiguration.hasCoverExplicitChoiceKey,
+            PoolConfiguration.usesRoboticCleanerExplicitChoiceKey
+        ]
+        let originalValues = keys.reduce(into: [String: Any]()) { result, key in
+            if let value = UserDefaults.standard.object(forKey: key) {
+                result[key] = value
+            }
+        }
+
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        body()
+
+        keys.forEach { key in
+            if let value = originalValues[key] {
+                UserDefaults.standard.set(value, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
     }
 }

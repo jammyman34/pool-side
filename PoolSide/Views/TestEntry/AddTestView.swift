@@ -2577,6 +2577,8 @@ private var heroBanner: some View {
     // MARK: - Actions
 
     private func prefill() {
+        viewModel.refreshConfigFromStorage(reconcilingWith: tests)
+
         if let test = editingTest {
             date = test.date
             pH = test.pH

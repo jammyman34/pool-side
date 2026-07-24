@@ -266,6 +266,29 @@ struct TreatmentTimingGuidance {
         )
     }
 
+    static func requiresVerificationBeforeSwimming(for treatment: Treatment) -> Bool {
+        if treatment.targetParameter == "pH" {
+            guard let test = treatment.poolTest else { return treatment.urgency == .immediate }
+            return !(7.2...7.8).contains(test.pH)
+        }
+
+        guard treatment.targetParameter == "freeChlorine" else { return false }
+        if treatment.urgency == .immediate { return true }
+        guard let test = treatment.poolTest else { return false }
+
+        let indicators = Set(test.visualIndicators)
+        let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)
+            || indicators.contains(VisualIndicator.greenWater.rawValue)
+            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
+            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
+            || test.waterClarityAssessment == .cloudy
+            || test.visibleAlgaeAssessment == .present
+
+        return hasProblemWater
+            || test.combinedChlorine > 0.5
+            || test.freeChlorine < ChemistryEngine().freeChlorineSwimReadinessMinimum(cyanuricAcid: test.cyanuricAcid)
+    }
+
     static func compactCardTip(
         for treatment: Treatment,
         nextActionableTreatment: Treatment? = nil,

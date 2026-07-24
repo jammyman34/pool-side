@@ -44,6 +44,12 @@ struct ContentView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }
+        .onAppear {
+            viewModel.refreshConfigFromStorage(reconcilingWith: tests)
+        }
+        .onChange(of: tests.count) { _, _ in
+            viewModel.refreshConfigFromStorage(reconcilingWith: tests)
+        }
         .task {
             try? await Task.sleep(for: .milliseconds(1000))
             withAnimation(.easeOut(duration: 0.2)) {

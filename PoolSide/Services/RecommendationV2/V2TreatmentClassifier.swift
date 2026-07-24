@@ -28,7 +28,8 @@ struct V2TreatmentClassifier {
     private func classify(treatment: Treatment, evaluationDate: Date) -> V2TreatmentClassification {
         let category = category(for: treatment)
         let waitMinutes = waitMinutes(for: treatment, category: category)
-        let verificationRequired = verificationRequired(for: treatment, category: category)
+        let pendingVerificationGateIdentifiers = pendingVerificationGateIdentifiers(for: treatment)
+        let verificationRequired = verificationRequired(for: treatment, category: category, pendingVerificationGateIdentifiers: pendingVerificationGateIdentifiers)
         let completionState = completionState(
             for: treatment,
             category: category,
@@ -53,6 +54,7 @@ struct V2TreatmentClassifier {
             blocksCurrentSwimability: blocks,
             startsWaitOnCompletion: waitMinutes != nil,
             verificationRequiredBeforeSwimming: verificationRequired,
+            pendingVerificationGateIdentifiers: pendingVerificationGateIdentifiers,
             waitMinutes: waitMinutes,
             completedAt: treatment.completedAt,
             readyAt: completionState == .completedWaiting ? readyAt : nil,
@@ -67,7 +69,10 @@ struct V2TreatmentClassifier {
 
         switch treatment.targetParameter {
         case "freeChlorine":
-            return isRecoveryChlorine(treatment) ? .swimBlocking : .both
+            if isRecoveryChlorine(treatment) || !pendingVerificationGateIdentifiers(for: treatment).isEmpty {
+                return .swimBlocking
+            }
+            return treatment.urgency == .optional ? .poolCare : .both
         case "pH":
             return .swimBlocking
         case "totalAlkalinity":
@@ -148,30 +153,44 @@ struct V2TreatmentClassifier {
         }
     }
 
-    private func verificationRequired(for treatment: Treatment, category: V2TreatmentClassificationCategory) -> Bool {
+    private func verificationRequired(
+        for treatment: Treatment,
+        category: V2TreatmentClassificationCategory,
+        pendingVerificationGateIdentifiers: Set<SwimReadinessGateIdentifier>
+    ) -> Bool {
         guard category != .nonChemicalAction else { return false }
         if isRecoveryChlorine(treatment) {
             return true
         }
-        if correctsFailedSwimReadinessChemistryGate(treatment) {
+        if !pendingVerificationGateIdentifiers.isEmpty {
             return true
         }
         return treatment.urgency == .immediate
             && (treatment.targetParameter == "freeChlorine" || treatment.targetParameter == "pH")
     }
 
-    private func correctsFailedSwimReadinessChemistryGate(_ treatment: Treatment) -> Bool {
-        guard let test = treatment.poolTest else { return false }
+    private func pendingVerificationGateIdentifiers(for treatment: Treatment) -> Set<SwimReadinessGateIdentifier> {
+        guard let test = treatment.poolTest else { return [] }
         let chemistryEngine = ChemistryEngine()
+        var identifiers = Set<SwimReadinessGateIdentifier>()
 
         switch treatment.targetParameter {
         case "freeChlorine":
-            return test.freeChlorine < chemistryEngine.freeChlorineSwimReadinessMinimum(cyanuricAcid: test.cyanuricAcid)
+            if test.freeChlorine < chemistryEngine.freeChlorineSwimReadinessMinimum(cyanuricAcid: test.cyanuricAcid) {
+                identifiers.insert(.sanitizerAdequacy)
+            }
+            if test.combinedChlorine > 0.5 {
+                identifiers.insert(.combinedChlorine)
+            }
         case "pH":
-            return !(7.2...7.8).contains(test.pH)
+            if !(7.2...7.8).contains(test.pH) {
+                identifiers.insert(.pH)
+            }
         default:
-            return false
+            break
         }
+
+        return identifiers
     }
 
     private func readyAt(for treatment: Treatment, waitMinutes: Int?) -> Date? {

@@ -35,11 +35,24 @@ final class PoolViewModel {
         poolConfig = PoolConfiguration.current
     }
 
-    func saveConfig(_ config: PoolConfiguration) {
+    func refreshConfigFromStorage(reconcilingWith tests: [PoolTest]) {
+        var latest = PoolConfiguration.current
+        let recovered = PoolConfiguration.recoveredFromTestHistory(latest, tests: tests)
+        if recovered != latest {
+            PoolConfiguration.current = recovered
+            latest = recovered
+        }
+        poolConfig = latest
+    }
+
+    func saveConfig(_ config: PoolConfiguration, marksEquipmentChoicesExplicit: Bool = false) {
         var normalized = config
         normalized.normalizeChemicalPreferences()
         poolConfig = normalized
         PoolConfiguration.current = normalized
+        if marksEquipmentChoicesExplicit {
+            PoolConfiguration.markEquipmentChoicesExplicit(normalized)
+        }
     }
 
     func updateConfig(_ update: (inout PoolConfiguration) -> Void) {

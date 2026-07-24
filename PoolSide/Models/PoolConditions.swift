@@ -262,6 +262,15 @@ enum CleaningActivity: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
+    var isRoboticCleanerEvidence: Bool {
+        switch self {
+        case .oneCycle, .multipleCycles, .brushedAndMultipleCycles:
+            return true
+        case .unknown, .no, .spotVacuumed, .entirePool, .brushedAndEntirePool:
+            return false
+        }
+    }
+
     var organicLoadReductionScore: Int {
         switch self {
         case .unknown, .no: return 0

@@ -656,7 +656,7 @@ struct SettingsView: View {
         normalizeBrandForCurrentMethod()
         var updatedConfig = currentConfig
         updatedConfig.normalizeChemicalPreferences()
-        viewModel.saveConfig(updatedConfig)
+        viewModel.saveConfig(updatedConfig, marksEquipmentChoicesExplicit: true)
         if !updatedConfig.enableNextPoolTestReminders {
             NotificationService.shared.cancelNextPoolTestReminder()
         }

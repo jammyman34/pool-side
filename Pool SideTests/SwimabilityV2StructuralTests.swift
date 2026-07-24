@@ -218,7 +218,7 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(gateState(.pH, in: assessment), .pass)
     }
 
-    func testRoutineChlorineNotCompletedPredictsReadyAfterTreatment() {
+    func testOptionalMaintenanceChlorineNotCompletedDoesNotBlockReadyPool() {
         let test = makeReadyTest()
         test.treatments.append(makeTreatment(
             chemicalName: "Liquid Chlorine 12.5%",
@@ -227,9 +227,13 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         ))
 
         let assessment = assess(test: test)
+        let classification = assessment.treatmentAwareContext?.classifications.first
 
-        XCTAssertEqual(assessment.state, .expectedReadyAfterTreatment)
-        XCTAssertEqual(assessment.evidenceType, .predicted)
+        XCTAssertEqual(classification?.category, .poolCare)
+        XCTAssertEqual(classification?.completionState, .plannedTreatment)
+        XCTAssertFalse(classification?.blocksCurrentSwimability ?? true)
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertEqual(assessment.evidenceType, .observed)
         XCTAssertEqual(assessment.predictionConfidence, .medium)
     }
 
@@ -514,6 +518,180 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(gateState(.pH, in: assessment), .fail)
     }
 
+    func testElevatedCombinedChlorineChlorineCompletedInsideWaitRemainsDoNotSwim() throws {
+        let test = makeReadyTest(freeChlorine: 6.0, totalChlorine: 7.0)
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Treat elevated combined chlorine.",
+            targetParameter: "freeChlorine",
+            urgency: .recommended,
+            isCompleted: true,
+            completedAt: evaluationDate.addingTimeInterval(-30 * 60),
+            minutesBeforeNext: 60,
+            expectedDelta: -1.0
+        )
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+
+        let assessment = assess(test: test)
+        let classification = try XCTUnwrap(assessment.treatmentAwareContext?.classifications.first)
+
+        XCTAssertEqual(assessment.state, .doNotSwim)
+        XCTAssertEqual(gateState(.combinedChlorine, in: assessment), .fail)
+        XCTAssertEqual(classification.completionState, .completedWaiting)
+        XCTAssertTrue(classification.verificationRequiredBeforeSwimming)
+    }
+
+    func testElevatedCombinedChlorineChlorineWaitExpiredRequiresPostTreatmentVerification() throws {
+        let test = makeReadyTest(freeChlorine: 6.0, totalChlorine: 7.0)
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Treat elevated combined chlorine.",
+            targetParameter: "freeChlorine",
+            urgency: .recommended,
+            isCompleted: true,
+            completedAt: evaluationDate.addingTimeInterval(-70 * 60),
+            minutesBeforeNext: 60,
+            expectedDelta: -1.0
+        )
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+
+        let assessment = assess(test: test)
+        let classification = try XCTUnwrap(assessment.treatmentAwareContext?.classifications.first)
+        let treatmentContext = try XCTUnwrap(assessment.treatmentAwareContext)
+
+        XCTAssertEqual(assessment.state, .testBeforeSwimming)
+        XCTAssertTrue(assessment.testingRequired)
+        XCTAssertEqual(gateState(.combinedChlorine, in: assessment), .fail)
+        XCTAssertEqual(classification.completionState, .completedVerificationRequired)
+        XCTAssertTrue(classification.verificationRequiredBeforeSwimming)
+        XCTAssertTrue(treatmentContext.pendingVerificationGateIdentifiers.contains(.combinedChlorine))
+        XCTAssertNil(assessment.earliestPredictedReadyTime)
+    }
+
+    @MainActor
+    func testJumpAheadBeyondElevatedCombinedChlorineWaitRequiresPostTreatmentVerification() throws {
+        let actualDate = evaluationDate
+        let test = makeReadyTest(date: actualDate.addingTimeInterval(-60 * 60), freeChlorine: 6.0, totalChlorine: 7.0)
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Treat elevated combined chlorine.",
+            targetParameter: "freeChlorine",
+            urgency: .recommended,
+            isCompleted: true,
+            completedAt: actualDate.addingTimeInterval(-10 * 60),
+            minutesBeforeNext: 60,
+            expectedDelta: -1.0
+        )
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+
+        let comparison = try XCTUnwrap(PoolViewModel().runSwimabilityV2JumpAheadComparison(
+            for: test,
+            recentTests: [],
+            offset: .oneHour,
+            actualDate: actualDate
+        ))
+
+        XCTAssertEqual(comparison.v2Assessment.state, .testBeforeSwimming)
+        XCTAssertTrue(comparison.v2Assessment.testingRequired)
+        XCTAssertEqual(comparison.v2Assessment.treatmentAwareContext?.classifications.first?.completionState, .completedVerificationRequired)
+        XCTAssertNotEqual(comparison.v2Assessment.state, .readyToSwim)
+    }
+
+    func testNewPostTreatmentTestWithSafeCombinedChlorineCanBeReadyToSwim() {
+        let assessment = assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.5))
+
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertEqual(gateState(.combinedChlorine, in: assessment), .pass)
+    }
+
+    func testNewPostTreatmentTestWithUnsafeCombinedChlorineIsDoNotSwim() {
+        let assessment = assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 7.0))
+
+        XCTAssertEqual(assessment.state, .doNotSwim)
+        XCTAssertEqual(gateState(.combinedChlorine, in: assessment), .fail)
+    }
+
+    func testLowFCAndElevatedCombinedChlorineWaitExpiredRequireTestingForBothGates() throws {
+        let test = makeReadyTest(freeChlorine: 1.0, totalChlorine: 2.0)
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Treat low sanitizer and elevated combined chlorine.",
+            targetParameter: "freeChlorine",
+            urgency: .recommended,
+            isCompleted: true,
+            completedAt: evaluationDate.addingTimeInterval(-70 * 60),
+            minutesBeforeNext: 60,
+            expectedDelta: 4.0
+        )
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+
+        let assessment = assess(test: test)
+        let treatmentContext = try XCTUnwrap(assessment.treatmentAwareContext)
+
+        XCTAssertEqual(assessment.state, .testBeforeSwimming)
+        XCTAssertTrue(treatmentContext.pendingVerificationGateIdentifiers.contains(.sanitizerAdequacy))
+        XCTAssertTrue(treatmentContext.pendingVerificationGateIdentifiers.contains(.combinedChlorine))
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .fail)
+        XCTAssertEqual(gateState(.combinedChlorine, in: assessment), .fail)
+    }
+
+    func testRecoveryVisualBlockersRemainDoNotSwimAfterChlorineWaitExpired() throws {
+        let test = makeReadyTest(
+            freeChlorine: 1.0,
+            totalChlorine: 2.0,
+            waterClarityAssessment: .cloudy,
+            visibleAlgaeAssessment: .present
+        )
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Recovery chlorine for algae, cloudy water, and combined chlorine.",
+            targetParameter: "freeChlorine",
+            urgency: .immediate,
+            isCompleted: true,
+            completedAt: evaluationDate.addingTimeInterval(-70 * 60),
+            minutesBeforeNext: 60,
+            expectedDelta: 4.0
+        )
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+
+        let assessment = assess(test: test)
+        let treatmentContext = try XCTUnwrap(assessment.treatmentAwareContext)
+
+        XCTAssertEqual(assessment.state, .doNotSwim)
+        XCTAssertTrue(treatmentContext.pendingVerificationGateIdentifiers.contains(.sanitizerAdequacy))
+        XCTAssertTrue(treatmentContext.pendingVerificationGateIdentifiers.contains(.combinedChlorine))
+        XCTAssertEqual(gateState(.waterClarity, in: assessment), .fail)
+        XCTAssertEqual(gateState(.visibleAlgae, in: assessment), .fail)
+    }
+
+    func testSkippedElevatedCombinedChlorineTreatmentDoesNotClearCCBlocker() throws {
+        let test = makeReadyTest(freeChlorine: 6.0, totalChlorine: 7.0)
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Treat elevated combined chlorine.",
+            targetParameter: "freeChlorine",
+            urgency: .recommended,
+            isSkipped: true,
+            minutesBeforeNext: 60,
+            expectedDelta: -1.0
+        )
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+
+        let assessment = assess(test: test)
+        let treatmentContext = try XCTUnwrap(assessment.treatmentAwareContext)
+
+        XCTAssertEqual(assessment.state, .doNotSwim)
+        XCTAssertEqual(gateState(.combinedChlorine, in: assessment), .fail)
+        XCTAssertTrue(treatmentContext.pendingVerificationGateIdentifiers.isEmpty)
+        XCTAssertEqual(treatmentContext.classifications.first?.completionState, .skippedTreatment)
+    }
+
     func testPoolCareOnlyPendingTreatmentDoesNotAutomaticallyBlockSwimming() {
         let test = makeReadyTest()
         test.treatments.append(makeTreatment(
@@ -605,12 +783,13 @@ final class SwimabilityV2StructuralTests: XCTestCase {
     func testCompletedTreatmentMissingTimestampDoesNotProducePreciseReadyTime() {
         let test = makeReadyTest()
         test.treatments.append(makeTreatment(
-            chemicalName: "Liquid Chlorine 12.5%",
-            targetParameter: "freeChlorine",
-            urgency: .optional,
+            chemicalName: "Muriatic Acid (31.45%)",
+            targetParameter: "pH",
+            urgency: .recommended,
             isCompleted: true,
             completedAt: nil,
-            minutesBeforeNext: 60
+            minutesBeforeNext: 240,
+            expectedDelta: -0.3
         ))
 
         let assessment = assess(test: test)
@@ -659,13 +838,111 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(chlorine.minutesBeforeNext, 60)
         XCTAssertEqual(TreatmentTimingGuidance.cardTip(for: chlorine), "Swim after ~1 hr")
         XCTAssertEqual(treatmentContext.activeTreatmentCount, 1)
-        XCTAssertEqual(classification.category, .both)
+        XCTAssertEqual(classification.category, .poolCare)
         XCTAssertEqual(classification.completionState, .plannedTreatment)
+        XCTAssertFalse(classification.blocksCurrentSwimability)
         XCTAssertFalse(classification.verificationRequiredBeforeSwimming)
-        XCTAssertEqual(assessment.state, .expectedReadyAfterTreatment)
-        XCTAssertEqual(assessment.evidenceType, .predicted)
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertEqual(assessment.evidenceType, .observed)
         XCTAssertNil(assessment.earliestPredictedReadyTime)
         XCTAssertFalse(assessment.testingRequired)
+        XCTAssertFalse(assessment.swimmingBlocked)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .pass)
+        XCTAssertEqual(gateState(.treatmentCompletion, in: assessment), .pass)
+    }
+
+    func testCleanTC1SkippedOptionalMaintenanceChlorineRemainsReadyToSwim() async throws {
+        let test = makeCleanTC1Test()
+        let config = makeTC1Config()
+        let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        let response = try await RuleBasedService().generateRecommendations(for: request)
+        let generatedTreatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
+        generatedTreatments.forEach { test.treatments.append($0) }
+        let chlorine = try XCTUnwrap(generatedTreatments.first { $0.targetParameter == "freeChlorine" && !$0.isWatchlistItem })
+
+        chlorine.isSkipped = true
+        chlorine.skippedAt = evaluationDate
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+        let classification = try XCTUnwrap(assessment.treatmentAwareContext?.classifications.first { $0.treatmentID == chlorine.id })
+
+        XCTAssertEqual(classification.category, .poolCare)
+        XCTAssertEqual(classification.completionState, .skippedTreatment)
+        XCTAssertFalse(classification.blocksCurrentSwimability)
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertFalse(assessment.swimmingBlocked)
+        XCTAssertFalse(assessment.testingRequired)
+    }
+
+    func testBelowReadinessMinimumChlorineTreatmentRemainsSwimBlocking() async throws {
+        let test = makeCleanTC1Test()
+        test.freeChlorine = 4.0
+        test.totalChlorine = 4.0
+        let config = makeTC1Config()
+        let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        let response = try await RuleBasedService().generateRecommendations(for: request)
+        let generatedTreatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
+        generatedTreatments.forEach { test.treatments.append($0) }
+        let chlorine = try XCTUnwrap(generatedTreatments.first { $0.targetParameter == "freeChlorine" && !$0.isWatchlistItem })
+
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+        let classification = try XCTUnwrap(assessment.treatmentAwareContext?.classifications.first { $0.treatmentID == chlorine.id })
+
+        XCTAssertEqual(chlorine.urgency, .recommended)
+        XCTAssertEqual(TreatmentTimingGuidance.cardTip(
+            for: chlorine,
+            requiresVerificationBeforeSwimming: TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine)
+        ), "Test before swimming")
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .fail)
+        XCTAssertEqual(classification.category, .swimBlocking)
+        XCTAssertEqual(classification.completionState, .plannedTreatment)
+        XCTAssertTrue(classification.blocksCurrentSwimability)
+        XCTAssertEqual(gateState(.treatmentCompletion, in: assessment), .fail)
+        XCTAssertEqual(assessment.state, .doNotSwim)
+        XCTAssertTrue(assessment.swimmingBlocked)
+    }
+
+    func testRecoveryChlorineClassificationRemainsSwimBlocking() throws {
+        let test = makeReadyTest(
+            freeChlorine: 1.0,
+            totalChlorine: 2.0,
+            waterClarityAssessment: .cloudy,
+            visibleAlgaeAssessment: .present
+        )
+        let treatment = makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            instructions: "Recovery chlorine for algae and cloudy water.",
+            targetParameter: "freeChlorine",
+            urgency: .immediate,
+            minutesBeforeNext: 60
+        )
+        test.treatments.append(treatment)
+
+        let assessment = assess(test: test)
+        let classification = try XCTUnwrap(assessment.treatmentAwareContext?.classifications.first { $0.treatmentID == treatment.id })
+
+        XCTAssertEqual(classification.category, .swimBlocking)
+        XCTAssertTrue(classification.blocksCurrentSwimability)
+        XCTAssertTrue(classification.verificationRequiredBeforeSwimming)
+        XCTAssertEqual(assessment.state, .doNotSwim)
+        XCTAssertTrue(assessment.swimmingBlocked)
+    }
+
+    func testPreferredTargetChlorineDoesNotGenerateMaintenanceTopOff() async throws {
+        let test = makeCleanTC1Test()
+        test.freeChlorine = 6.5
+        test.totalChlorine = 6.5
+        let config = makeTC1Config()
+        let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        let response = try await RuleBasedService().generateRecommendations(for: request)
+        let generatedTreatments = response.treatments.map { $0.toTreatment(linkedTo: test) }
+        generatedTreatments.forEach { test.treatments.append($0) }
+
+        XCTAssertFalse(generatedTreatments.contains { $0.targetParameter == "freeChlorine" && !$0.isWatchlistItem })
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .pass)
+        XCTAssertEqual(gateState(.treatmentCompletion, in: assessment), .pass)
+        XCTAssertEqual(assessment.state, .readyToSwim)
+        XCTAssertFalse(assessment.swimmingBlocked)
     }
 
     func testCleanTC1FinalComparisonReflectsGeneratedTreatmentsOnce() async throws {
@@ -690,14 +967,14 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(output.components(separatedBy: "===== POOL SIDE V2 SWIMABILITY =====").count - 1, 1)
         XCTAssertEqual(output.components(separatedBy: "===== END POOL SIDE V2 SWIMABILITY =====").count - 1, 1)
         XCTAssertTrue(output.contains("Active Treatments: 1"))
-        XCTAssertTrue(output.contains("Treatment-Aware Swimability: Expected Ready After Treatment"))
+        XCTAssertTrue(output.contains("Treatment-Aware Swimability: Ready to Swim"))
         XCTAssertTrue(output.contains("Prediction Confidence: Medium"))
         XCTAssertTrue(output.contains("Active Treatment Count: 1"))
-        XCTAssertTrue(output.contains("Liquid Chlorine 12.5%=both"))
+        XCTAssertTrue(output.contains("Liquid Chlorine 12.5%=poolCare"))
         XCTAssertTrue(output.contains("Liquid Chlorine 12.5%=plannedTreatment"))
         XCTAssertTrue(output.contains("Verification Required: No"))
         XCTAssertTrue(output.contains("Earliest Predicted Ready Time: None"))
-        XCTAssertFalse(output.contains("Treatment-Aware Swimability: Ready to Swim"))
+        XCTAssertFalse(output.contains("Treatment-Aware Swimability: Expected Ready After Treatment"))
         XCTAssertFalse(output.contains("V2 Swimability: Test Before Swimming"))
         XCTAssertEqual(generatedTreatments.filter { !$0.isWatchlistItem }.count, 1)
     }
@@ -785,9 +1062,12 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         let restoredClassification = try XCTUnwrap(restoredComparison.v2Assessment.treatmentAwareContext?.classifications.first)
 
         XCTAssertEqual(restoredClassification.completionState, .plannedTreatment)
+        XCTAssertEqual(restoredClassification.category, .poolCare)
+        XCTAssertFalse(restoredClassification.blocksCurrentSwimability)
         XCTAssertFalse(treatment.isSkipped)
         XCTAssertTrue(restoredComparison.developerDescription.contains("Evaluation Context: Treatment Restored"))
-        XCTAssertEqual(restoredComparison.v2Assessment.state, .expectedReadyAfterTreatment)
+        XCTAssertEqual(restoredComparison.v2Assessment.state, .readyToSwim)
+        XCTAssertFalse(restoredComparison.v2Assessment.swimmingBlocked)
         XCTAssertEqual(test.treatments.filter { !$0.isWatchlistItem }.count, 1)
     }
 
@@ -1014,7 +1294,7 @@ final class SwimabilityV2StructuralTests: XCTestCase {
             date: evaluationDate.addingTimeInterval(-60 * 60),
             pH: 7.5,
             freeChlorine: 4.5,
-            totalChlorine: 5.0,
+            totalChlorine: 4.5,
             totalAlkalinity: 100,
             calciumHardness: 330,
             cyanuricAcid: 60,

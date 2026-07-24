@@ -486,7 +486,7 @@ struct FirstUsePoolSetupView: View {
     }
 
     private func saveAndContinue() {
-        viewModel.saveConfig(currentConfig)
+        viewModel.saveConfig(currentConfig, marksEquipmentChoicesExplicit: true)
         onComplete()
     }
 }

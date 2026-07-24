@@ -901,7 +901,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.6,
             freeChlorine: 4.5,
-            totalChlorine: 5.0,
+            totalChlorine: 4.5,
             totalAlkalinity: 170,
             calciumHardness: 330,
             cyanuricAcid: 60
@@ -932,6 +932,60 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertEqual(recommendation.title, "Next pool test")
         XCTAssertEqual(recommendation.interval, 86_400)
         XCTAssertFalse(recommendation.reason.contains("same-day verification"))
+    }
+
+    func testBelowSwimReadinessMinimumChlorineIsRequiredAndRequiresVerificationCopy() throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 4.0,
+            totalChlorine: 4.0,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        test.waterClarityAssessment = .clear
+        test.visibleAlgaeAssessment = .absent
+
+        let templates = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        let chlorineTemplate = try XCTUnwrap(templates.first { $0.targetParameter == "freeChlorine" && $0.amount > 0 })
+        let chlorine = chlorineTemplate.toTreatment(linkedTo: test)
+
+        XCTAssertEqual(chlorineTemplate.urgency, .recommended)
+        XCTAssertFalse(chlorineTemplate.actionDescription.contains("Maintenance top-off"))
+        XCTAssertTrue(chlorineTemplate.instructions.contains("Retest FC and CC in 60 minutes."))
+        XCTAssertTrue(TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine))
+        XCTAssertEqual(TreatmentTimingGuidance.cardTip(
+            for: chlorine,
+            requiresVerificationBeforeSwimming: TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine)
+        ), "Test before swimming")
+    }
+
+    func testAtSwimReadinessMinimumChlorineTopOffStaysOptionalAndRoutineCopy() throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 4.5,
+            totalChlorine: 4.5,
+            totalAlkalinity: 100,
+            calciumHardness: 330,
+            cyanuricAcid: 60
+        )
+        test.waterClarityAssessment = .clear
+        test.visibleAlgaeAssessment = .absent
+
+        let templates = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        let chlorineTemplate = try XCTUnwrap(templates.first { $0.targetParameter == "freeChlorine" && $0.amount > 0 })
+        let chlorine = chlorineTemplate.toTreatment(linkedTo: test)
+
+        XCTAssertEqual(chlorineTemplate.urgency, .optional)
+        XCTAssertTrue(chlorineTemplate.actionDescription.contains("Maintenance top-off"))
+        XCTAssertTrue(chlorineTemplate.instructions.contains("Circulate for 60 minutes before swimming."))
+        XCTAssertFalse(TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine))
+        XCTAssertEqual(TreatmentTimingGuidance.cardTip(
+            for: chlorine,
+            requiresVerificationBeforeSwimming: TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine)
+        ), "Swim after ~1 hr")
     }
 
     func testDogfoodWatchlistCopyStaysNonurgentAndProportional() {

@@ -1865,7 +1865,6 @@ struct ChemistryEngine {
 
     private func chlorineTreatmentUrgency(for test: PoolTest, target: Double, recentHistory: [PoolTest], config: PoolConfiguration) -> TreatmentUrgency {
         let minimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
-        let maintenanceFloor = max(0, minimum - 0.5)
         let targetLower = freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
         if hasVisibleAlgae(test) || hasCloudyWater(test) || target >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
             return .immediate
@@ -1876,7 +1875,7 @@ struct ChemistryEngine {
         if test.freeChlorine < minimum * 0.5 {
             return .immediate
         }
-        if test.freeChlorine < maintenanceFloor {
+        if test.freeChlorine < minimum {
             return .recommended
         }
         if test.freeChlorine < targetLower && chlorineDemandScore(for: test) >= 3 {
@@ -1916,7 +1915,7 @@ struct ChemistryEngine {
             || hasCloudyWater(test)
             || hasStrongChlorineSmell(test)
             || test.combinedChlorine > 0.5
-            || test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid) * 0.5
+            || test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
         if needsVerification {
             parts.append("Retest FC and CC in \(waitMinutes) minutes.")
         } else {
