@@ -109,6 +109,9 @@ struct ContentView: View {
     private var firstTestDashboard: some View {
         FirstTestEmptyDashboardView(
             onAddFirstTest: openAddTest,
+            onOpenSettings: {
+                showingSettings = true
+            },
             isTransitioning: false,
             plusNamespace: nil
         )

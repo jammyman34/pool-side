@@ -493,6 +493,7 @@ struct FirstUsePoolSetupView: View {
 
 struct FirstTestEmptyDashboardView: View {
     let onAddFirstTest: () -> Void
+    var onOpenSettings: (() -> Void)? = nil
     var isTransitioning: Bool = false
     var plusNamespace: Namespace.ID?
 
@@ -502,8 +503,25 @@ struct FirstTestEmptyDashboardView: View {
         ZStack {
             PoolColor.appBackground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 28)
+            VStack(spacing: 12) {
+                if let onOpenSettings {
+                    HStack {
+                        Spacer()
+                        Button(action: onOpenSettings) {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(PoolColor.deepWater)
+                                .frame(width: 44, height: 44)
+                                .background(Color.white, in: Circle())
+                                .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                } else {
+                    Spacer(minLength: 28)
+                }
 
                 VStack(spacing: 22) {
                     Image("Test Data Hero")
