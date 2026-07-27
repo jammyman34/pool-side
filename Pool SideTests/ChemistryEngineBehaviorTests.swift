@@ -760,9 +760,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertFalse(cloudy.chemicalName.localizedCaseInsensitiveContains("retest"))
         XCTAssertFalse(cloudy.instructions.localizedCaseInsensitiveContains("retest"))
         XCTAssertEqual(recommendation.source, .treatmentPlan)
-        XCTAssertTrue(recommendation.isPendingTreatmentAction)
-        XCTAssertNil(recommendation.recommendedDate)
-        XCTAssertEqual(recommendation.title, "After treatment is completed")
+        XCTAssertFalse(recommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(recommendation.recommendedDate)
+        XCTAssertEqual(recommendation.title, "Next full pool test")
     }
 
     func testMultipleRecoverySignalsProduceOneMergedChlorineTreatment() async throws {
@@ -848,9 +848,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(routineRecommendation.source, .treatmentPlan)
-        XCTAssertEqual(routineRecommendation.title, "Next pool test")
+        XCTAssertEqual(routineRecommendation.title, "Next full pool test")
         XCTAssertEqual(routineRecommendation.interval, 86_400)
-        XCTAssertTrue(routineRecommendation.body.contains("Same-day checks are optional"))
+        XCTAssertTrue(routineRecommendation.body.contains("normal full pool test"))
 
         let urgentTest = ChemistryTestFixtures.currentPool(
             pH: 7.6,
@@ -870,8 +870,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(urgentRecommendation.source, .treatmentPlan)
-        XCTAssertTrue(urgentRecommendation.isPendingTreatmentAction)
-        XCTAssertNil(urgentRecommendation.recommendedDate)
+        XCTAssertFalse(urgentRecommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(urgentRecommendation.recommendedDate)
+        XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: urgentTreatments.first { $0.targetParameter == "freeChlorine" }!))
     }
 
     func testScoreStatusLabelDoesNotUseRecoveryForLowScoreWithoutRecoveryContext() {
@@ -929,7 +930,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(recommendation.source, .treatmentPlan)
-        XCTAssertEqual(recommendation.title, "Next pool test")
+        XCTAssertEqual(recommendation.title, "Next full pool test")
         XCTAssertEqual(recommendation.interval, 86_400)
         XCTAssertFalse(recommendation.reason.contains("same-day verification"))
     }
@@ -1034,8 +1035,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(recommendation.source, .treatmentPlan)
-        XCTAssertTrue(recommendation.isPendingTreatmentAction)
-        XCTAssertNil(recommendation.recommendedDate)
+        XCTAssertFalse(recommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(recommendation.recommendedDate)
+        XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: treatments.first { $0.targetParameter == "freeChlorine" }!))
     }
 
     func testRecentChlorineMixingWatchlistDoesNotCreateRetestFCActionWhenNoNewTestExists() {
@@ -1147,10 +1149,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             config: config
         )
 
-        XCTAssertTrue(recommendation.isPendingTreatmentAction)
-        XCTAssertNil(recommendation.recommendedDate)
-        XCTAssertEqual(recommendation.title, "After treatment is completed")
-        XCTAssertEqual(recommendation.body, "Complete or skip the recommended treatment to schedule your next test.")
+        XCTAssertFalse(recommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(recommendation.recommendedDate)
+        XCTAssertEqual(recommendation.title, "Next full pool test")
+        XCTAssertEqual(recommendation.body, "Run your normal full pool test to check overall water balance.")
     }
 
     func testCompletedAcidTreatmentAnchorsNextPoolTestToCompletedAt() throws {
@@ -1178,9 +1180,12 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
 
         XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertEqual(recommendation.source, .pHCorrection)
-        XCTAssertEqual(recommendation.title, "Retest pH")
-        XCTAssertEqual(recommendation.recommendedDate, completedAt.addingTimeInterval(4 * 60 * 60))
+        XCTAssertEqual(recommendation.source, .stablePool)
+        XCTAssertEqual(recommendation.title, "Next full pool test")
+        let retest = try XCTUnwrap(NextTestRecommendationEngine().treatmentRetestRecommendation(for: acid, completedAt: completedAt))
+        XCTAssertEqual(retest.source, .pHCorrection)
+        XCTAssertEqual(retest.title, "Retest pH")
+        XCTAssertEqual(retest.recommendedDate, completedAt.addingTimeInterval(4 * 60 * 60))
     }
 
     func testPoolCareTreatmentRetestsArePendingUntilCompletionThenAnchorToCompletedAt() throws {
@@ -1222,8 +1227,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             recentHistory: [],
             config: config
         )
-        XCTAssertTrue(pendingRecommendation.isPendingTreatmentAction)
-        XCTAssertNil(pendingRecommendation.recommendedDate)
+        XCTAssertFalse(pendingRecommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(pendingRecommendation.recommendedDate)
 
         bakingSoda.isCompleted = true
         bakingSoda.completedAt = completedAt
@@ -1237,8 +1242,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             recentHistory: [],
             config: config
         )
-        XCTAssertEqual(completedRecommendation.title, "Retest TA")
-        XCTAssertEqual(completedRecommendation.recommendedDate, completedAt.addingTimeInterval(8 * 60 * 60))
+        XCTAssertEqual(completedRecommendation.title, "Next full pool test")
+        let taRetest = try XCTUnwrap(NextTestRecommendationEngine().treatmentRetestRecommendation(for: bakingSoda, completedAt: completedAt))
+        XCTAssertEqual(taRetest.title, "Retest TA")
+        XCTAssertEqual(taRetest.recommendedDate, completedAt.addingTimeInterval(8 * 60 * 60))
 
         bakingSoda.isSkipped = true
         bakingSoda.isCompleted = false
@@ -1287,8 +1294,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             config: config
         )
 
-        XCTAssertTrue(recommendation.isPendingTreatmentAction)
-        XCTAssertNil(recommendation.recommendedDate)
+        XCTAssertFalse(recommendation.isPendingTreatmentAction)
+        XCTAssertNotNil(recommendation.recommendedDate)
+        XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: acid, completedAt: completedAt))
     }
 
     func testRoutineNoTreatmentRecommendationStillHasAbsoluteDate() {

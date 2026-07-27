@@ -143,6 +143,19 @@ final class PoolTest {
     /// Salt level in ppm — relevant for salt-chlorine systems (ideal: 2700 – 3400 ppm)
     var saltLevel: Double?
 
+    // MARK: - Per-Parameter Evidence
+    var freeChlorineMeasuredAt: Date?
+    var totalChlorineMeasuredAt: Date?
+    var pHMeasuredAt: Date?
+    var totalAlkalinityMeasuredAt: Date?
+    var calciumHardnessMeasuredAt: Date?
+    var cyanuricAcidMeasuredAt: Date?
+    var saltLevelMeasuredAt: Date?
+    var isFocusedCheck: Bool = false
+    var focusedCheckParametersRaw: String = ""
+    var sourcePoolTestIDRaw: String?
+    var sourceWorkflowStepIDRaw: String?
+
     // MARK: - Meta
     var testMethodRaw: String = TestMethod.testStrips.rawValue
     var liquidDropKitBrandRaw: String?
@@ -200,6 +213,13 @@ final class PoolTest {
         self.cyanuricAcid = cyanuricAcid
         self.temperatureFahrenheit = temperatureFahrenheit
         self.saltLevel = saltLevel
+        self.freeChlorineMeasuredAt = date
+        self.totalChlorineMeasuredAt = date
+        self.pHMeasuredAt = date
+        self.totalAlkalinityMeasuredAt = date
+        self.calciumHardnessMeasuredAt = date
+        self.cyanuricAcidMeasuredAt = date
+        self.saltLevelMeasuredAt = saltLevel == nil ? nil : date
         self.testMethodRaw = testMethod.rawValue
         self.liquidDropKitBrandRaw = liquidDropKitBrand?.rawValue
         self.poolConditionsData = try? poolConditions.map { try JSONEncoder().encode($0) }
@@ -218,6 +238,41 @@ final class PoolTest {
     /// Combined chlorine (chloramines) = total – free. Should be < 0.5 ppm.
     var combinedChlorine: Double {
         max(0, totalChlorine - freeChlorine)
+    }
+
+    var focusedCheckParameters: [String] {
+        get {
+            focusedCheckParametersRaw
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        set {
+            focusedCheckParametersRaw = newValue.joined(separator: ",")
+        }
+    }
+
+    var sourcePoolTestID: UUID? {
+        get { sourcePoolTestIDRaw.flatMap(UUID.init(uuidString:)) }
+        set { sourcePoolTestIDRaw = newValue?.uuidString }
+    }
+
+    var sourceWorkflowStepID: UUID? {
+        get { sourceWorkflowStepIDRaw.flatMap(UUID.init(uuidString:)) }
+        set { sourceWorkflowStepIDRaw = newValue?.uuidString }
+    }
+
+    func evidenceDate(for parameter: String) -> Date {
+        switch parameter {
+        case "freeChlorine": return freeChlorineMeasuredAt ?? date
+        case "combinedChlorine", "totalChlorine": return totalChlorineMeasuredAt ?? date
+        case "pH": return pHMeasuredAt ?? date
+        case "totalAlkalinity": return totalAlkalinityMeasuredAt ?? date
+        case "calciumHardness": return calciumHardnessMeasuredAt ?? date
+        case "cyanuricAcid": return cyanuricAcidMeasuredAt ?? date
+        case "saltLevel": return saltLevelMeasuredAt ?? date
+        default: return date
+        }
     }
 
     var testMethod: TestMethod {

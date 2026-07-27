@@ -48,63 +48,10 @@ struct NextTestRecommendationEngine {
         config: PoolConfiguration
     ) -> NextTestRecommendation {
         let confidence = ChemistryEngine().recommendationConfidenceInput(for: test, recentHistory: recentHistory)
-        let pendingSteps = treatmentSteps.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
-        let pendingRetestSteps = pendingSteps.filter { treatmentRetestRecommendation(for: $0, completedAt: $0.createdAt) != nil }
+        let pendingSteps = treatmentSteps.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem && !$0.isFocusedCheckStep }
 
-        if !pendingRetestSteps.isEmpty {
-            return pendingTreatmentActionRecommendation()
-        }
-
-        let completedRetests = treatmentSteps
-            .filter { $0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
-            .compactMap { treatment -> NextTestRecommendation? in
-                guard let completedAt = treatment.completedAt else { return nil }
-                return treatmentRetestRecommendation(for: treatment, completedAt: completedAt)
-            }
-            .sorted {
-                guard let lhs = $0.recommendedDate, let rhs = $1.recommendedDate else { return false }
-                return lhs < rhs
-            }
-
-        if let completedRetest = completedRetests.first {
-            return completedRetest
-        }
-
-        if let chlorine = pendingSteps.first(where: { $0.targetParameter == "freeChlorine" && requiresSameDayChlorineVerification($0, test: test) }) {
-            let minutes = chlorineRetestMinutes(for: chlorine)
-            return make(
-                from: test.date,
-                minutes: minutes,
-                reason: "FC needs same-day verification after circulation.",
-                title: "Retest FC and CC",
-                body: "Retest FC and CC after adding chlorine because conditions make the correction time-sensitive.",
-                urgency: chlorine.urgency == .immediate ? .urgent : .retest,
-                source: .chlorineCorrection
-            )
-        }
-
-        if pendingSteps.contains(where: { $0.targetParameter == "pH" && $0.effectDelayHours >= 4 && $0.urgency == .immediate }) {
-            return make(
-                from: test.date,
-                minutes: 240,
-                reason: "pH is unsafe and needs a same-day confirmation.",
-                title: "Retest pH",
-                body: "Retest pH after circulation before adding more pH product.",
-                urgency: .urgent,
-                source: .pHCorrection
-            )
-        }
-
-        if pendingSteps.contains(where: { $0.targetParameter == "cyanuricAcid" }) {
-            return make(
-                from: test.date,
-                hours: Double(TreatmentApplicationPolicy.granularCYACanonicalRetestHours),
-                reason: "Stabilizer changes slowly and needs time to register.",
-                title: "Retest CYA",
-                body: "Retest CYA after 24-48 hours of circulation before adding more stabilizer.",
-                urgency: .watch,
-                source: .stabilizer
-            )
+        if hasCompletedOptionalChlorineTopOff(treatmentSteps) {
+            return treatmentPlanRoutineFollowUp(from: test.date)
         }
 
         if confidence.waterChangeScore >= 3 {
@@ -116,7 +63,7 @@ struct NextTestRecommendationEngine {
                 from: test.date,
                 hours: 24,
                 reason: reason,
-                title: "Next pool test",
+                title: "Next full pool test",
                 body: "Retest after circulation or tomorrow to confirm dilution effects before making large corrections.",
                 urgency: .watch,
                 source: .possibleDilution
@@ -128,7 +75,7 @@ struct NextTestRecommendationEngine {
                 from: test.date,
                 hours: 24,
                 reason: "Recent pool conditions may increase chlorine demand.",
-                title: "Next pool test",
+                title: "Next full pool test",
                 body: "Test again tomorrow to confirm FC is holding after the recent demand.",
                 urgency: .watch,
                 source: .highDemand
@@ -141,26 +88,18 @@ struct NextTestRecommendationEngine {
                 from: test.date,
                 hours: Double(days * 24),
                 reason: "Pool is stable and does not need immediate treatment.",
-                title: "Next pool test",
-                body: "Pool Side recommends your next routine test based on current stability and recent demand.",
+                title: "Next full pool test",
+                body: "Run your normal full pool test to check overall water balance.",
                 urgency: .routine,
                 source: .stablePool
             )
         }
 
-        return make(
-            from: test.date,
-            hours: 24,
-            reason: "A treatment plan is active; routine testing should confirm the overall response tomorrow.",
-            title: "Next pool test",
-            body: "Test again in about 24 hours to confirm the treatment plan worked. Same-day checks are optional unless a treatment specifically calls for verification.",
-            urgency: .watch,
-            source: .treatmentPlan
-        )
+        return treatmentPlanRoutineFollowUp(from: test.date)
     }
 
     func treatmentRetestRecommendation(for treatment: Treatment, completedAt: Date = Date()) -> NextTestRecommendation? {
-        guard !treatment.isWatchlistItem else { return nil }
+        guard !treatment.isWatchlistItem, !treatment.isFocusedCheckStep else { return nil }
 
         if treatment.targetParameter == "freeChlorine", shouldRetestAfterChlorine(treatment) {
             let minutes = chlorineRetestMinutes(for: treatment)
@@ -224,6 +163,30 @@ struct NextTestRecommendationEngine {
         }
 
         return nil
+    }
+
+    private func treatmentPlanRoutineFollowUp(from testDate: Date) -> NextTestRecommendation {
+        make(
+            from: testDate,
+            hours: 24,
+            reason: "A treatment plan is active; routine testing should confirm the overall response tomorrow.",
+            title: "Next full pool test",
+            body: "Run your normal full pool test to check overall water balance.",
+            urgency: .watch,
+            source: .treatmentPlan
+        )
+    }
+
+    private func hasCompletedOptionalChlorineTopOff(_ treatmentSteps: [Treatment]) -> Bool {
+        treatmentSteps.contains { treatment in
+            treatment.isCompleted
+                && !treatment.isSkipped
+                && !treatment.isWatchlistItem
+                && !treatment.isFocusedCheckStep
+                && treatment.targetParameter == "freeChlorine"
+                && treatment.urgency == .optional
+                && treatmentRetestRecommendation(for: treatment, completedAt: treatment.completedAt ?? treatment.createdAt) == nil
+        }
     }
 
     private func stableCadenceDays(

@@ -151,6 +151,7 @@ final class PoolViewModel {
                 let treatment = template.toTreatment(linkedTo: test)
                 insertAndLinkTreatment(treatment, to: test, modelContext: modelContext)
             }
+            appendWorkflowCheckSteps(to: test, modelContext: modelContext)
 
             // Store the assessment text
             test.aiAssessment = response.assessmentText
@@ -204,6 +205,7 @@ final class PoolViewModel {
                 }
                 insertAndLinkTreatment(treatment, to: test, modelContext: modelContext)
             }
+            appendWorkflowCheckSteps(to: test, modelContext: modelContext)
 
             test.aiAssessment = response.assessmentText
             try modelContext.save()
@@ -229,6 +231,36 @@ final class PoolViewModel {
         modelContext.insert(treatment)
         if !test.treatments.contains(where: { $0.id == treatment.id }) {
             test.treatments.append(treatment)
+        }
+    }
+
+    @MainActor
+    private func appendWorkflowCheckSteps(to test: PoolTest, modelContext: ModelContext) {
+        let workflowEngine = TreatmentWorkflowEngine()
+        let treatmentSteps = test.treatments
+            .filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let existingParentIDs = Set(
+            test.treatments
+                .filter(\.isFocusedCheckStep)
+                .compactMap(\.parentTreatmentID)
+        )
+        var nextSortOrder = (test.treatments.map(\.sortOrder).max() ?? 0) + 1
+
+        for treatment in treatmentSteps where !existingParentIDs.contains(treatment.id) {
+            guard let check = workflowEngine.makeCheckStep(after: treatment, sortOrder: treatment.sortOrder + 1) else { continue }
+            shiftSortOrders(in: test, startingAt: check.sortOrder)
+            if test.treatments.contains(where: { $0.sortOrder == check.sortOrder }) {
+                check.sortOrder = nextSortOrder
+                nextSortOrder += 1
+            }
+            insertAndLinkTreatment(check, to: test, modelContext: modelContext)
+        }
+    }
+
+    private func shiftSortOrders(in test: PoolTest, startingAt sortOrder: Int) {
+        for treatment in test.treatments where treatment.sortOrder >= sortOrder {
+            treatment.sortOrder += 1
         }
     }
 
@@ -403,7 +435,7 @@ final class PoolViewModel {
         let allTreatments = test.treatments
             .filter { !($0.isSkipped && $0.isWatchlistItem) }
             .sorted { $0.sortOrder < $1.sortOrder }
-        let treatmentSteps = allTreatments.filter { !$0.isWatchlistItem }
+        let treatmentSteps = allTreatments.filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep }
         let watchlist = allTreatments.filter { $0.isWatchlistItem }
 
         return nextTestRecommendationEngine.recommendation(
@@ -413,6 +445,91 @@ final class PoolViewModel {
             recentHistory: recentHistory(before: test, in: tests, limit: 10),
             config: poolConfig
         )
+    }
+
+    @MainActor
+    func saveFocusedCheck(
+        _ checkStep: Treatment,
+        values: [String: Double],
+        for test: PoolTest,
+        allTests: [PoolTest],
+        modelContext: ModelContext,
+        measuredAt: Date = Date()
+    ) async throws {
+        applyFocusedCheckValues(values, to: test, measuredAt: measuredAt)
+        test.isFocusedCheck = test.isFocusedCheck || !values.isEmpty
+        test.focusedCheckParameters = Array(Set(test.focusedCheckParameters + values.keys)).sorted()
+        checkStep.isCompleted = true
+        checkStep.completedAt = measuredAt
+        checkStep.isSkipped = false
+        checkStep.skippedAt = nil
+        checkStep.focusedCheckSummary = focusedCheckSummary(values)
+        checkStep.checkResultTestID = test.id
+
+        let history = recentHistory(before: test, in: allTests, limit: 10)
+        await generateRecommendations(
+            for: test,
+            recentTests: history,
+            modelContext: modelContext,
+            replacingCompletedPlan: false
+        )
+        try modelContext.save()
+    }
+
+    private func applyFocusedCheckValues(_ values: [String: Double], to test: PoolTest, measuredAt: Date) {
+        if let fc = values["freeChlorine"] {
+            let currentCC = values["combinedChlorine"] ?? test.combinedChlorine
+            test.freeChlorine = fc
+            test.totalChlorine = fc + currentCC
+            test.freeChlorineMeasuredAt = measuredAt
+            test.totalChlorineMeasuredAt = measuredAt
+        }
+        if let cc = values["combinedChlorine"] {
+            test.totalChlorine = test.freeChlorine + cc
+            test.totalChlorineMeasuredAt = measuredAt
+        }
+        if let pH = values["pH"] {
+            test.pH = pH
+            test.pHMeasuredAt = measuredAt
+        }
+        if let totalAlkalinity = values["totalAlkalinity"] {
+            test.totalAlkalinity = totalAlkalinity
+            test.totalAlkalinityMeasuredAt = measuredAt
+        }
+        if let calciumHardness = values["calciumHardness"] {
+            test.calciumHardness = calciumHardness
+            test.calciumHardnessMeasuredAt = measuredAt
+        }
+        if let cyanuricAcid = values["cyanuricAcid"] {
+            test.cyanuricAcid = cyanuricAcid
+            test.cyanuricAcidMeasuredAt = measuredAt
+        }
+        if let saltLevel = values["saltLevel"] {
+            test.saltLevel = saltLevel
+            test.saltLevelMeasuredAt = measuredAt
+        }
+    }
+
+    private func focusedCheckSummary(_ values: [String: Double]) -> String {
+        values
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                "\(displayName(forFocusedCheckParameter: key)) \(value.formattedTreatmentAmount)"
+            }
+            .joined(separator: ", ")
+    }
+
+    private func displayName(forFocusedCheckParameter parameter: String) -> String {
+        switch parameter {
+        case "freeChlorine": return "FC"
+        case "combinedChlorine": return "CC"
+        case "pH": return "pH"
+        case "totalAlkalinity": return "TA"
+        case "calciumHardness": return "CH"
+        case "cyanuricAcid": return "CYA"
+        case "saltLevel": return "Salt"
+        default: return parameter
+        }
     }
 
     @MainActor

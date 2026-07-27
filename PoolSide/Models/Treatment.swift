@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class Treatment {
+final class Treatment: Identifiable {
 
     // MARK: - Identity
     var id: UUID
@@ -60,6 +60,14 @@ final class Treatment {
     var effectDelayHours: Int = 0
     var effectDurationHours: Int = 0
     var doNotRepeatBefore: Date?
+
+    // MARK: - Adaptive Workflow
+    var workflowStepKindRaw: String = TreatmentWorkflowStepKind.treatment.rawValue
+    var checkParametersRaw: String = ""
+    var parentTreatmentIDRaw: String?
+    var checkResultTestIDRaw: String?
+    var focusedCheckSummary: String?
+    var workflowGeneration: Int = 0
 
     // MARK: - Relationship
     var poolTest: PoolTest?
@@ -135,6 +143,11 @@ final class Treatment {
     }
 }
 
+enum TreatmentWorkflowStepKind: String, Codable {
+    case treatment
+    case focusedCheck
+}
+
 // MARK: - Product Swap
 
 /// Categories of swappable chemical products tied to a Treatment.
@@ -203,6 +216,37 @@ enum ChemicalProductCategory: String, CaseIterable, Identifiable {
 }
 
 extension Treatment {
+    var workflowStepKind: TreatmentWorkflowStepKind {
+        get { TreatmentWorkflowStepKind(rawValue: workflowStepKindRaw) ?? .treatment }
+        set { workflowStepKindRaw = newValue.rawValue }
+    }
+
+    var isFocusedCheckStep: Bool {
+        workflowStepKind == .focusedCheck
+    }
+
+    var checkParameters: [String] {
+        get {
+            checkParametersRaw
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        set {
+            checkParametersRaw = newValue.joined(separator: ",")
+        }
+    }
+
+    var parentTreatmentID: UUID? {
+        get { parentTreatmentIDRaw.flatMap(UUID.init(uuidString:)) }
+        set { parentTreatmentIDRaw = newValue?.uuidString }
+    }
+
+    var checkResultTestID: UUID? {
+        get { checkResultTestIDRaw.flatMap(UUID.init(uuidString:)) }
+        set { checkResultTestIDRaw = newValue?.uuidString }
+    }
+
     var isWatchlistItem: Bool {
         urgency == .advisory
     }

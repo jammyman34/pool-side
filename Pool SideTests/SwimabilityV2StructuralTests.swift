@@ -237,7 +237,7 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(assessment.predictionConfidence, .medium)
     }
 
-    func testRoutineChlorineCompletedWithActiveWaitPredictsReadyAroundTime() {
+    func testOptionalMaintenanceChlorineCompletedInsideWaitDoesNotBlockReadyPool() {
         let test = makeReadyTest()
         let treatment = makeTreatment(
             chemicalName: "Liquid Chlorine 12.5%",
@@ -250,10 +250,15 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         test.treatments.append(treatment)
 
         let assessment = assess(test: test)
+        let classification = assessment.treatmentAwareContext?.classifications.first
 
-        XCTAssertEqual(assessment.state, .expectedReadyAroundTime)
+        XCTAssertEqual(classification?.category, .poolCare)
+        XCTAssertEqual(classification?.completionState, .noActiveTreatment)
+        XCTAssertFalse(classification?.blocksCurrentSwimability ?? true)
+        XCTAssertEqual(assessment.state, .readyToSwim)
         XCTAssertEqual(assessment.evidenceType, .predicted)
-        XCTAssertEqual(assessment.earliestPredictedReadyTime, evaluationDate.addingTimeInterval(30 * 60))
+        XCTAssertNil(assessment.earliestPredictedReadyTime)
+        XCTAssertFalse(assessment.swimmingBlocked)
     }
 
     func testRoutineChlorineCompletedWithElapsedWaitCanReturnPredictedReady() {
@@ -1005,22 +1010,22 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         let output = comparison.developerDescription
 
         XCTAssertTrue(chlorine.isCompleted)
-        XCTAssertEqual(classification.completionState, .completedWaiting)
-        XCTAssertEqual(classification.readyAt, completedAt.addingTimeInterval(60 * 60))
-        XCTAssertEqual(assessment.state, .expectedReadyAroundTime)
+        XCTAssertEqual(classification.completionState, .noActiveTreatment)
+        XCTAssertNil(classification.readyAt)
+        XCTAssertEqual(assessment.state, .readyToSwim)
         XCTAssertEqual(assessment.evidenceType, .predicted)
         XCTAssertEqual(assessment.predictionConfidence, .medium)
-        XCTAssertEqual(assessment.earliestPredictedReadyTime, completedAt.addingTimeInterval(60 * 60))
+        XCTAssertNil(assessment.earliestPredictedReadyTime)
         XCTAssertFalse(classification.verificationRequiredBeforeSwimming)
         XCTAssertFalse(assessment.testingRequired)
-        XCTAssertTrue(assessment.swimmingBlocked)
-        XCTAssertEqual(gateState(.circulation, in: assessment), .unknown)
+        XCTAssertFalse(assessment.swimmingBlocked)
+        XCTAssertEqual(gateState(.circulation, in: assessment), .notApplicable)
         XCTAssertTrue(output.contains("Evaluation Context: Treatment Completed"))
         XCTAssertTrue(output.contains("Completed Treatments: 1"))
-        XCTAssertTrue(output.contains("Treatment-Aware Swimability: Expected Ready Around Time"))
-        XCTAssertTrue(output.contains("Liquid Chlorine 12.5%=completedWaiting"))
+        XCTAssertTrue(output.contains("Treatment-Aware Swimability: Ready to Swim"))
+        XCTAssertTrue(output.contains("Liquid Chlorine 12.5%=noActiveTreatment"))
         XCTAssertTrue(output.contains("Verification Required: No"))
-        XCTAssertFalse(output.contains("Treatment-Aware Swimability: Ready to Swim"))
+        XCTAssertFalse(output.contains("Treatment-Aware Swimability: Expected Ready Around Time"))
         XCTAssertFalse(output.contains("V2 Swimability: Test Before Swimming"))
         XCTAssertEqual(test.treatments.filter { !$0.isWatchlistItem }.count, 1)
     }

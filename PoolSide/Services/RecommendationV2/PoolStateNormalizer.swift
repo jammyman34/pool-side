@@ -7,19 +7,25 @@ struct PoolStateNormalizer {
     func normalize(request: AIRecommendationRequest, evaluationDate: Date = Date()) -> NormalizedPoolState {
         let test = request.currentTest
         let readings = normalizedReadings(for: test)
+        let readinessEvidenceDate = [
+            test.evidenceDate(for: "freeChlorine"),
+            test.evidenceDate(for: "combinedChlorine"),
+            test.evidenceDate(for: "pH"),
+            test.evidenceDate(for: "cyanuricAcid")
+        ].min() ?? test.date
         let visualIndicators = Set(test.visualIndicators)
         let conditions = test.poolConditions
         let previousTests = request.recentHistory
             .filter { $0.id != test.id && $0.date < test.date }
             .sorted { $0.date > $1.date }
         let treatments = test.treatments
-        let actionableTreatments = treatments.filter { !$0.isWatchlistItem }
+        let actionableTreatments = treatments.filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep }
         let completedTreatments = actionableTreatments.filter(\.isCompleted)
 
         return NormalizedPoolState(
             currentTestID: test.id,
             testDate: test.date,
-            ageInMinutes: max(0, Int(evaluationDate.timeIntervalSince(test.date) / 60)),
+            ageInMinutes: max(0, Int(evaluationDate.timeIntervalSince(readinessEvidenceDate) / 60)),
             evaluationDate: evaluationDate,
             poolVolumeGallons: request.poolConfig.volumeGallons,
             surfaceType: request.poolConfig.surfaceType,

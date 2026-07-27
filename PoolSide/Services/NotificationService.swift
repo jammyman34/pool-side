@@ -201,6 +201,8 @@ final class NotificationService: ObservableObject {
         case "freeChlorine": return "FC/CC"
         case "combinedChlorine": return "CC"
         case "pH": return "pH"
+        case "totalAlkalinity": return "TA"
+        case "calciumHardness": return "CH"
         case "cyanuricAcid": return "CYA"
         default: return "pool water"
         }

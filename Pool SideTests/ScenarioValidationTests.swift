@@ -102,7 +102,7 @@ private enum ScenarioCatalog {
                         testingRequired: true,
                         verificationRequired: true,
                         failedGates: [.sanitizerAdequacy, .treatmentCompletion],
-                        nextTestPending: true
+                        nextTestPending: false
                     )),
                     .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 30, expect: .init(v2State: .doNotSwim, swimmingBlocked: true, verificationRequired: true, treatmentStates: ["Liquid Chlorine": .completedWaiting])),
                     .advance(minutes: 70, expect: .init(v2State: .testBeforeSwimming, swimmingBlocked: true, testingRequired: true, verificationRequired: true, treatmentStates: ["Liquid Chlorine": .completedVerificationRequired], pendingVerificationGates: [.sanitizerAdequacy])),
@@ -124,7 +124,7 @@ private enum ScenarioCatalog {
                         testingRequired: true,
                         verificationRequired: true,
                         failedGates: [.combinedChlorine, .treatmentCompletion],
-                        nextTestPending: true
+                        nextTestPending: false
                     )),
                     .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 30, expect: .init(v2State: .doNotSwim, swimmingBlocked: true, verificationRequired: true, treatmentStates: ["Liquid Chlorine": .completedWaiting])),
                     .advance(minutes: 70, expect: .init(v2State: .testBeforeSwimming, swimmingBlocked: true, testingRequired: true, verificationRequired: true, treatmentStates: ["Liquid Chlorine": .completedVerificationRequired], pendingVerificationGates: [.combinedChlorine], activeWaitsEmpty: true)),
@@ -152,7 +152,7 @@ private enum ScenarioCatalog {
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60),
                 history: pHDriftHistory,
                 steps: [
-                    .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", urgency: .recommended, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 4.0, calculatedUnit: "qt")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: true)),
+                    .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", urgency: .recommended, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 4.0, calculatedUnit: "qt")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
                     .completeTreatment(nameContains: "Muriatic Acid", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, testingRequired: true, verificationRequired: true, treatmentStates: ["Muriatic Acid": .completedVerificationRequired], pendingVerificationGates: [.pH])),
                     .addVerificationTest(chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 120, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .readyToSwim, swimmingBlocked: false))
                 ]
@@ -162,21 +162,21 @@ private enum ScenarioCatalog {
                 name: "Low TA TC6",
                 area: "CORE",
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60),
-                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Baking Soda", amount: 13.7, unit: "lbs", urgency: .recommended, badge: "Retest TA after 6-8 hrs", category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: true))]
+                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Baking Soda", amount: 13.7, unit: "lbs", urgency: .recommended, badge: "Retest TA after 6-8 hrs", category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
             ),
             ScenarioDefinition(
                 id: "H",
                 name: "Low CYA TC7",
                 area: "CORE",
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20),
-                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Cyanuric Acid", amount: 5.3, unit: "lbs", urgency: .optional, badge: "Retest CYA after 24-48 hrs", category: .poolCare, completionState: .plannedTreatment)], absentTreatment: "Remove Chlorine Source", v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: true))]
+                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Cyanuric Acid", amount: 5.3, unit: "lbs", urgency: .optional, badge: "Retest CYA after 24-48 hrs", category: .poolCare, completionState: .plannedTreatment)], absentTreatment: "Remove Chlorine Source", v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
             ),
             ScenarioDefinition(
                 id: "I",
                 name: "Low Calcium TC8",
                 area: "CORE",
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60),
-                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Calcium Hardness", amount: 40.7, unit: "lbs", urgency: .optional, category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: true))]
+                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Calcium Hardness", amount: 40.7, unit: "lbs", urgency: .optional, category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
             ),
             ScenarioDefinition(
                 id: "J",
@@ -228,8 +228,8 @@ private enum ScenarioCatalog {
             chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60),
             history: pHDriftHistory,
             steps: [
-                .generate(expect: .init(treatmentCount: 1, treatments: [expectation], v2State: .doNotSwim, swimmingBlocked: true, verificationRequired: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: true)),
-                .completeTreatment(nameContains: expectation.nameContains, minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, testingRequired: true, verificationRequired: true, pendingVerificationGates: [.pH], nextTestPending: false, nextTestSource: .pHCorrection, nextTestMinutesFromCompletedAt: 240))
+                .generate(expect: .init(treatmentCount: 1, treatments: [expectation], v2State: .doNotSwim, swimmingBlocked: true, verificationRequired: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
+                .completeTreatment(nameContains: expectation.nameContains, minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, testingRequired: true, verificationRequired: true, pendingVerificationGates: [.pH], nextTestPending: false))
             ]
         )
     }
@@ -237,7 +237,7 @@ private enum ScenarioCatalog {
     private static var pHIncreaseScenarios: [ScenarioDefinition] {
         [
             ScenarioDefinition(id: "PI-soda-ash", name: "Soda Ash Low pH", area: "PH INCREASE", config: .init(pHIncreaser: .sodaAsh), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [
-                .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Soda Ash", amount: 1.6, unit: "lbs", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, expectedDeltaMinimum: 0.29)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: true)),
+                .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Soda Ash", amount: 1.6, unit: "lbs", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, expectedDeltaMinimum: 0.29)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
                 .completeTreatment(nameContains: "Soda Ash", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, testingRequired: true, verificationRequired: true, pendingVerificationGates: [.pH])),
                 .addVerificationTest(chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.2, totalAlkalinity: 105, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .readyToSwim, swimmingBlocked: false)),
                 .addVerificationTest(chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.1, totalAlkalinity: 105, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH]))
@@ -288,18 +288,18 @@ private enum ScenarioCatalog {
             ScenarioDefinition(id: "CON-high-ph-low-ta", name: "High pH Low TA Defers Baking Soda", area: "CONFLICTS", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 8.1, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid")], absentTreatment: "Baking Soda", v2State: .doNotSwim, swimmingBlocked: true))]),
             ScenarioDefinition(id: "CON-low-ph-low-ta", name: "Low pH Low TA Allows Compatible Raises", area: "CONFLICTS", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Soda Ash"), .init(nameContains: "Baking Soda")], absentTreatment: "Muriatic Acid", v2State: .doNotSwim, swimmingBlocked: true))]),
             ScenarioDefinition(id: "CON-low-ph-high-ta", name: "Low pH High TA No Acid Fight", area: "CONFLICTS", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 160, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Soda Ash")], absentTreatment: "Muriatic Acid", v2State: .doNotSwim, swimmingBlocked: true))]),
-            ScenarioDefinition(id: "CON-low-fc-high-ph", name: "Low FC High pH Sequenced Treatments", area: "CONFLICTS", chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 8.1, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Muriatic Acid", urgency: .immediate), .init(nameContains: "Liquid Chlorine", urgency: .recommended, badge: "Test before swimming")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy, .pH, .treatmentCompletion], nextTestPending: true))])
+            ScenarioDefinition(id: "CON-low-fc-high-ph", name: "Low FC High pH Sequenced Treatments", area: "CONFLICTS", chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 8.1, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Muriatic Acid", urgency: .immediate), .init(nameContains: "Liquid Chlorine", urgency: .recommended, badge: "Test before swimming")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy, .pH, .treatmentCompletion], nextTestPending: false))])
         ]
     }
 
     private static var multipleTreatmentScenarios: [ScenarioDefinition] {
         [
             ScenarioDefinition(id: "MT-poolcare-plus-blocking", name: "PoolCare Plus SwimBlocking", area: "MULTIPLE TREATMENTS", chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [
-                .generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Liquid Chlorine", category: .swimBlocking), .init(nameContains: "Baking Soda", category: .poolCare)], v2State: .doNotSwim, swimmingBlocked: true, nextTestPending: true)),
-                .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 70, expect: .init(v2State: .testBeforeSwimming, pendingVerificationGates: [.sanitizerAdequacy], nextTestPending: true)),
+                .generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Liquid Chlorine", category: .swimBlocking), .init(nameContains: "Baking Soda", category: .poolCare)], v2State: .doNotSwim, swimmingBlocked: true, nextTestPending: false)),
+                .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 70, expect: .init(v2State: .testBeforeSwimming, pendingVerificationGates: [.sanitizerAdequacy], nextTestPending: false)),
                 .skipTreatment(nameContains: "Baking Soda", expect: .init(v2State: .testBeforeSwimming, nextTestPending: false))
             ]),
-            ScenarioDefinition(id: "MT-two-poolcare", name: "Two PoolCare Treatments", area: "MULTIPLE TREATMENTS", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 50, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Baking Soda", category: .poolCare), .init(nameContains: "Calcium Hardness", category: .poolCare)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: true))])
+            ScenarioDefinition(id: "MT-two-poolcare", name: "Two PoolCare Treatments", area: "MULTIPLE TREATMENTS", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 50, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Baking Soda", category: .poolCare), .init(nameContains: "Calcium Hardness", category: .poolCare)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))])
         ]
     }
 
@@ -356,9 +356,9 @@ private enum ScenarioCatalog {
 
     private static var applicationPolicyScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "APP-acid-demand-vs-current", name: "Acid Total Demand Versus Current Application", area: "APPLICATION POLICY", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", calculatedDose: 4.0, calculatedUnit: "qt", wasDoseCapped: true)], nextTestPending: true)), .completeTreatment(nameContains: "Muriatic Acid", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, pendingVerificationGates: [.pH]))]),
-            ScenarioDefinition(id: "APP-cya-retest-policy", name: "CYA Retest Policy", area: "APPLICATION POLICY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Cyanuric Acid", badge: "Retest CYA after 24-48 hrs", category: .poolCare)], nextTestPending: true))]),
-            ScenarioDefinition(id: "APP-calcium-retest-policy", name: "Calcium Retest Policy", area: "APPLICATION POLICY", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", category: .poolCare)], nextTestPending: true)), .completeTreatment(nameContains: "Calcium Hardness", minutesAgo: 10, expect: .init(nextTestPending: false, nextTestSource: .treatmentPlan, nextTestMinutesFromCompletedAt: 24 * 60))])
+            ScenarioDefinition(id: "APP-acid-demand-vs-current", name: "Acid Total Demand Versus Current Application", area: "APPLICATION POLICY", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", calculatedDose: 4.0, calculatedUnit: "qt", wasDoseCapped: true)], nextTestPending: false)), .completeTreatment(nameContains: "Muriatic Acid", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, pendingVerificationGates: [.pH]))]),
+            ScenarioDefinition(id: "APP-cya-retest-policy", name: "CYA Retest Policy", area: "APPLICATION POLICY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Cyanuric Acid", badge: "Retest CYA after 24-48 hrs", category: .poolCare)], nextTestPending: false))]),
+            ScenarioDefinition(id: "APP-calcium-retest-policy", name: "Calcium Retest Policy", area: "APPLICATION POLICY", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", category: .poolCare)], nextTestPending: false)), .completeTreatment(nameContains: "Calcium Hardness", minutesAgo: 10, expect: .init(nextTestPending: false))])
         ]
     }
 
@@ -405,17 +405,77 @@ private enum ScenarioCatalog {
 
     private static var nextTestScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "NT-routine", name: "Routine Next Test", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 0, nextTestPending: false, nextTestSource: .stablePool))]),
-            ScenarioDefinition(id: "NT-completion-anchor", name: "Completed Treatment Anchors Next Test", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [
-                .generate(expect: .init(nextTestPending: true)),
-                .completeTreatment(nameContains: "Acid", minutesAgo: 10, expect: .init(nextTestPending: false, nextTestSource: .pHCorrection, nextTestMinutesFromCompletedAt: 240))
+            ScenarioDefinition(id: "NT-routine", name: "Routine Next Test", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 0, nextTestPending: false, nextTestSource: .stablePool, nextTestMinutesFromCurrentTest: 3 * 24 * 60))]),
+            ScenarioDefinition(id: "NT-completion-anchor", name: "Completed Treatment Keeps Routine Next Full Test", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [
+                .generate(expect: .init(nextTestPending: false)),
+                .completeTreatment(nameContains: "Acid", minutesAgo: 10, expect: .init(nextTestPending: false))
             ]),
             ScenarioDefinition(id: "NT-skip", name: "Skipped Treatment Does Not Fake Retest", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [
-                .generate(expect: .init(nextTestPending: true)),
+                .generate(expect: .init(nextTestPending: false)),
                 .skipTreatment(nameContains: "Baking Soda", expect: .init(nextTestPending: false))
+            ]),
+            ScenarioDefinition(id: "NT-optional-chlorine-pending", name: "Optional Maintenance Chlorine Keeps Tomorrow While Pending", area: "NEXT POOL TEST", chemistry: optionalMaintenanceChlorineChemistry, state: optionalMaintenanceChlorineState, steps: [
+                .generate(expect: .init(
+                    treatmentCount: 1,
+                    treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .optional, badge: "Swim after ~1 hr", category: .poolCare, completionState: .plannedTreatment)],
+                    v2State: .readyToSwim,
+                    swimmingBlocked: false,
+                    testingRequired: false,
+                    verificationRequired: false,
+                    nextTestPending: false,
+                    nextTestMinutesFromCurrentTest: 24 * 60
+                ))
+            ]),
+            ScenarioDefinition(id: "NT-optional-chlorine-completed", name: "Optional Maintenance Chlorine Keeps Tomorrow After Completion", area: "NEXT POOL TEST", chemistry: optionalMaintenanceChlorineChemistry, state: optionalMaintenanceChlorineState, steps: [
+                .generate(expect: .init(treatmentCount: 1, nextTestPending: false, nextTestMinutesFromCurrentTest: 24 * 60)),
+                .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 10, expect: .init(
+                    v2State: .readyToSwim,
+                    swimmingBlocked: false,
+                    testingRequired: false,
+                    verificationRequired: false,
+                    nextTestPending: false,
+                    nextTestMinutesFromCurrentTest: 24 * 60
+                ))
+            ]),
+            ScenarioDefinition(id: "NT-optional-chlorine-skipped", name: "Optional Maintenance Chlorine Skip Does Not Create Verification", area: "NEXT POOL TEST", chemistry: optionalMaintenanceChlorineChemistry, state: optionalMaintenanceChlorineState, steps: [
+                .generate(expect: .init(treatmentCount: 1, nextTestPending: false, nextTestMinutesFromCurrentTest: 24 * 60)),
+                .skipTreatment(nameContains: "Liquid Chlorine", expect: .init(
+                    v2State: .readyToSwim,
+                    swimmingBlocked: false,
+                    testingRequired: false,
+                    verificationRequired: false,
+                    treatmentStates: ["Liquid Chlorine": .skippedTreatment],
+                    nextTestPending: false
+                ))
+            ]),
+            ScenarioDefinition(id: "NT-low-fc-completed-verification", name: "Below Minimum Chlorine Completion Keeps Verification In Workflow", area: "NEXT POOL TEST", chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [
+                .generate(expect: .init(nextTestPending: false)),
+                .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 10, expect: .init(verificationRequired: true, nextTestPending: false))
+            ]),
+            ScenarioDefinition(id: "NT-elevated-cc-completed-verification", name: "Elevated CC Completion Keeps Verification In Workflow", area: "NEXT POOL TEST", chemistry: .init(freeChlorine: 6, combinedChlorine: 1, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [
+                .generate(expect: .init(nextTestPending: false)),
+                .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 10, expect: .init(verificationRequired: true, nextTestPending: false))
             ])
         ]
     }
+
+    private static let optionalMaintenanceChlorineChemistry = ScenarioChemistry(
+        freeChlorine: 4.5,
+        combinedChlorine: 0,
+        pH: 7.6,
+        totalAlkalinity: 160,
+        calciumHardness: 350,
+        cyanuricAcid: 60
+    )
+
+    private static let optionalMaintenanceChlorineState = ScenarioPoolState(
+        coverOpenTime: .twoToSixHours,
+        organicDebrisLoad: .low,
+        skimmedDebris: .yes,
+        cleaningActivity: .multipleCycles,
+        clarity: .clear,
+        algae: .absent
+    )
 }
 
 private struct ScenarioDefinition {
@@ -556,6 +616,7 @@ private struct ScenarioExpectation {
     var nextTestPending: Bool?
     var nextTestSource: NextTestRecommendation.Source?
     var nextTestMinutesFromCompletedAt: Int?
+    var nextTestMinutesFromCurrentTest: Int?
 }
 
 private struct ScenarioStepResult {
@@ -725,6 +786,14 @@ private final class ScenarioRunner {
                 assert(abs(actualMinutes - minutes) <= 1, "next test expected completedAt + \(minutes)m, actual +\(actualMinutes)m")
             } else {
                 assert(false, "next test completion anchor missing completedAt or recommendedDate")
+            }
+        }
+        if let minutes = expectation.nextTestMinutesFromCurrentTest {
+            if let recommendedDate = next.recommendedDate {
+                let actualMinutes = Int(round(recommendedDate.timeIntervalSince(context.currentTest.date) / 60))
+                assert(abs(actualMinutes - minutes) <= 1, "next test expected current test + \(minutes)m, actual +\(actualMinutes)m")
+            } else {
+                assert(false, "next test current-test anchor missing recommendedDate")
             }
         }
 

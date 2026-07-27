@@ -3,7 +3,7 @@ import Foundation
 struct V2TreatmentClassifier {
     func classify(treatments: [Treatment], evaluationDate: Date) -> V2TreatmentAwareContext {
         let classifications = treatments
-            .filter { !$0.isWatchlistItem }
+            .filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep }
             .sorted { $0.sortOrder == $1.sortOrder ? $0.createdAt < $1.createdAt : $0.sortOrder < $1.sortOrder }
             .map { classify(treatment: $0, evaluationDate: evaluationDate) }
 
@@ -101,6 +101,10 @@ struct V2TreatmentClassifier {
 
         guard treatment.isCompleted else {
             return .plannedTreatment
+        }
+
+        if category == .poolCare && !verificationRequired {
+            return .noActiveTreatment
         }
 
         guard let waitMinutes, let completedAt = treatment.completedAt else {
