@@ -150,7 +150,7 @@ final class SwimabilityV2StructuralTests: XCTestCase {
     }
 
     func testStaleTestDoesNotProduceReadyToSwim() {
-        let staleDate = evaluationDate.addingTimeInterval(-9 * 60 * 60)
+        let staleDate = evaluationDate.addingTimeInterval(-25 * 60 * 60)
         let assessment = assess(test: makeReadyTest(date: staleDate))
 
         XCTAssertEqual(assessment.state, .doNotSwim)
@@ -839,7 +839,9 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(chlorineTreatments.count, 1)
         XCTAssertEqual(chlorine.chemicalName, "Liquid Chlorine 12.5%")
         XCTAssertEqual(chlorine.amount, 0.75, accuracy: 0.001)
-        XCTAssertEqual(chlorine.urgency, .optional)
+        // Superseded by approved policy §3/§4: a maintenance top-off toward the operating target is now
+        // Recommended (not Optional); it remains non-swim-blocking with a swim-after-circulation badge.
+        XCTAssertEqual(chlorine.urgency, .recommended)
         XCTAssertEqual(chlorine.minutesBeforeNext, 60)
         XCTAssertEqual(TreatmentTimingGuidance.cardTip(for: chlorine), "Swim after ~1 hr")
         XCTAssertEqual(treatmentContext.activeTreatmentCount, 1)
@@ -1154,7 +1156,7 @@ final class SwimabilityV2StructuralTests: XCTestCase {
     @MainActor
     func testJumpAheadStillRespectsTestFreshnessPolicy() throws {
         let actualDate = evaluationDate
-        let test = makeReadyTest(date: actualDate.addingTimeInterval(-7.5 * 60 * 60))
+        let test = makeReadyTest(date: actualDate.addingTimeInterval(-24 * 60 * 60))
 
         let comparison = try XCTUnwrap(PoolViewModel().runSwimabilityV2JumpAheadComparison(
             for: test,
@@ -1246,6 +1248,78 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         #else
         XCTAssertFalse(RecommendationV2FeatureFlags.swimabilityV2ComparisonEnabled)
         #endif
+    }
+
+    // MARK: - Production adoption: ChemistryPolicy-driven swim gates
+
+    func testPHSwimRangeUsesApprovedSevenPointZeroToSevenPointEight() {
+        // Swim range 7.0–7.8 inclusive (wider than the 7.2–7.6 operating range).
+        for pH in [7.0, 7.1, 7.2, 7.6, 7.7, 7.8] {
+            let assessment = assess(test: makeReadyTest(pH: pH))
+            XCTAssertEqual(assessment.state, .readyToSwim, "pH \(pH) should be swimmable")
+            XCTAssertEqual(gateState(.pH, in: assessment), .pass, "pH \(pH)")
+        }
+        for pH in [6.9, 7.9] {
+            let assessment = assess(test: makeReadyTest(pH: pH))
+            XCTAssertEqual(assessment.state, .doNotSwim, "pH \(pH) should block")
+            XCTAssertEqual(gateState(.pH, in: assessment), .fail, "pH \(pH)")
+        }
+    }
+
+    func testFCReadinessMinimumGatesSwimmingNotOperatingTarget() {
+        // CYA 60 → readinessMin 4.5, operating-target lower bound 6.0. The swim gate uses the minimum.
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 4.4, totalChlorine: 4.4, cyanuricAcid: 60)).state, .doNotSwim)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 4.5, totalChlorine: 4.5, cyanuricAcid: 60)).state, .readyToSwim)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 5.0, totalChlorine: 5.0, cyanuricAcid: 60)).state, .readyToSwim)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.0, cyanuricAcid: 60)).state, .readyToSwim)
+    }
+
+    func testHighFCUsesCanonicalReentryCeilingResolverNotAHardcodedMax() {
+        // CYA 60 → reentryCeiling = max(10, operatingUpper 8.0) = 10 (from ChemistryPolicy, not a Dashboard literal).
+        XCTAssertEqual(FreeChlorinePolicy.reentryCeiling(cyanuricAcid: 60), 10, accuracy: 0.001)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 9.0, totalChlorine: 9.0, cyanuricAcid: 60)).state, .readyToSwim)
+        let high = assess(test: makeReadyTest(freeChlorine: 11.0, totalChlorine: 11.0, cyanuricAcid: 60))
+        XCTAssertEqual(high.state, .doNotSwim)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: high), .fail)
+    }
+
+    func testCombinedChlorineGateHonorsApprovedThresholdAndMeasurementResolution() {
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.0, cyanuricAcid: 60)).state, .readyToSwim)   // CC 0
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.5, cyanuricAcid: 60)).state, .readyToSwim)   // CC 0.5 swimmable
+        let over = assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.6, cyanuricAcid: 60))                            // CC 0.6 blocks
+        XCTAssertEqual(over.state, .doNotSwim)
+        XCTAssertEqual(gateState(.combinedChlorine, in: over), .fail)
+    }
+
+    func testExtremePoolCareParametersDoNotDirectlyBlockSwimming() {
+        // Extreme TA and CH with acceptable FC/CC/pH/visuals remain swimmable (pool-care, not swim gates).
+        let taCH = makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.0, totalAlkalinity: 260, calciumHardness: 950, cyanuricAcid: 60)
+        XCTAssertEqual(assess(test: taCH).state, .readyToSwim)
+        // CYA does not directly gate: at CYA 120 the FC minimum rises (~9), so with adequate FC 10 the pool is ready.
+        let highCYA = makeReadyTest(freeChlorine: 10.0, totalChlorine: 10.0, cyanuricAcid: 120)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assess(test: highCYA)), .pass)
+        XCTAssertEqual(assess(test: highCYA).state, .readyToSwim)
+    }
+
+    func testPlannedPHCorrectionAtSevenPointSevenDoesNotBlockSwimming() {
+        // A Recommended pH correction for a still-swimmable pH must not make the pool unready.
+        let test = makeReadyTest(pH: 7.7)
+        let treatment = makeTreatment(chemicalName: "Muriatic Acid 31%", amount: 1, unit: "qt", targetParameter: "pH", urgency: .recommended, expectedDelta: -0.3)
+        treatment.poolTest = test
+        test.treatments.append(treatment)
+        let assessment = assess(test: test)
+        XCTAssertEqual(gateState(.pH, in: assessment), .pass)
+        XCTAssertEqual(assessment.state, .readyToSwim)
+    }
+
+    func testDashboardReadinessStatusIsPurePresentationMappingOfV2State() {
+        // The Dashboard presents V2 state; it does not calculate readiness. Every V2 state maps intentionally.
+        XCTAssertEqual(DashboardSwimReadinessStatus(swimabilityState: .readyToSwim), .readyNow)
+        XCTAssertEqual(DashboardSwimReadinessStatus(swimabilityState: .expectedReadyAfterTreatment), .readyAfterWait)
+        XCTAssertEqual(DashboardSwimReadinessStatus(swimabilityState: .expectedReadyAroundTime), .readyAfterWait)
+        XCTAssertEqual(DashboardSwimReadinessStatus(swimabilityState: .doNotSwim), .notRecommended)
+        XCTAssertEqual(DashboardSwimReadinessStatus(swimabilityState: .testBeforeSwimming), .notRecommended)
+        XCTAssertEqual(DashboardSwimReadinessStatus(swimabilityState: .moreInformationNeeded), .unknown)
     }
 
     private func assess(test: PoolTest) -> SwimabilityV2Assessment {

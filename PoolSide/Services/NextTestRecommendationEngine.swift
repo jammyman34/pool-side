@@ -184,9 +184,23 @@ struct NextTestRecommendationEngine {
                 && !treatment.isWatchlistItem
                 && !treatment.isFocusedCheckStep
                 && treatment.targetParameter == "freeChlorine"
-                && treatment.urgency == .optional
-                && treatmentRetestRecommendation(for: treatment, completedAt: treatment.completedAt ?? treatment.createdAt) == nil
+                && isMaintenanceChlorineTopOff(treatment)
         }
+    }
+
+    /// A maintenance chlorine top-off is a completed FC treatment whose source test FC was at/above the
+    /// CYA-adjusted readiness minimum (ChemistryPolicy recommendedLow, non-swim-blocking). Detected via
+    /// ChemistryPolicy rather than the urgency label, since maintenance top-offs are now Recommended
+    /// (not Optional) yet must still keep the treatment-plan routine cadence rather than falling to the
+    /// stable-pool cadence.
+    private func isMaintenanceChlorineTopOff(_ treatment: Treatment) -> Bool {
+        guard let test = treatment.poolTest else { return false }
+        let classification = ChemistryPolicy.classify(
+            .freeChlorine,
+            value: test.freeChlorine,
+            context: ChemistryPolicyContext(cyanuricAcid: test.cyanuricAcid)
+        )
+        return classification.actionState == .recommendedLow && !classification.blocksSwimming
     }
 
     private func stableCadenceDays(

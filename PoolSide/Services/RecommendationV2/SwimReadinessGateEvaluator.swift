@@ -1,18 +1,16 @@
 import Foundation
 
 struct SwimReadinessGateEvaluator {
-    private let chemistryEngine = ChemistryEngine()
+    /// Chemistry swim gates consume ChemistryPolicy so there is one authority for chemistry thresholds:
+    /// - pH swim range: ChemistryPolicy.PHPolicy (7.0–7.8 inclusive; operating range 7.2–7.6 is separate).
+    /// - FC low: ChemistryPolicy.FreeChlorinePolicy.readinessMinimum(CYA); FC high: reentryCeiling(CYA).
+    /// - CC: ChemistryPolicy.CombinedChlorinePolicy.readinessThreshold.
+    private let combinedChlorineReadinessMaximum = CombinedChlorinePolicy.readinessThreshold
 
-    /// Pool Side observed-readiness pH range. Public-health references commonly allow pH up to 7.8;
-    /// Pool Side keeps 7.2 as the lower readiness bound to preserve sanitizer effectiveness and swimmer comfort.
-    private let pHReadinessRange = 7.2...7.8
-
-    /// Reuses the existing app behavior that treats CC above 0.5 ppm as concerning.
-    private let acceptableCombinedChlorineMaximum = 0.5
-
-    /// Provisional observed-readiness freshness policy. This requires qualified standards/product review
-    /// before v2 readiness is exposed as production user-facing guidance.
-    private let readinessFreshnessThresholdMinutes = 8 * 60
+    /// Approved user-facing swim-readiness freshness window: readiness stays valid for 24 hours since the
+    /// most recent supporting evidence, then re-testing is required. This is a product decision (not a
+    /// chemistry fact); it balances daily re-testing against not expiring a same-day test by evening.
+    private let readinessFreshnessThresholdMinutes = 24 * 60
 
     func evaluate(state: NormalizedPoolState, treatmentContext: V2TreatmentAwareContext? = nil) -> [SwimReadinessGateResult] {
         [
@@ -49,7 +47,7 @@ struct SwimReadinessGateEvaluator {
             )
         }
 
-        let minimum = chemistryEngine.freeChlorineSwimReadinessMinimum(cyanuricAcid: cyanuricAcid)
+        let minimum = FreeChlorinePolicy.readinessMinimum(cyanuricAcid: cyanuricAcid)
         if freeChlorine < minimum {
             return result(
                 .sanitizerAdequacy,
@@ -57,6 +55,19 @@ struct SwimReadinessGateEvaluator {
                 "FC \(format(freeChlorine)) ppm is below the CYA-adjusted observed-readiness minimum of \(format(minimum)) ppm.",
                 blocksSwimming: true,
                 requiresTesting: true
+            )
+        }
+
+        // High-FC re-entry: above the CYA-resolved re-entry ceiling, hold swimming until FC decays.
+        // Uses the ChemistryPolicy resolver rather than a hard-coded number.
+        let ceiling = FreeChlorinePolicy.reentryCeiling(cyanuricAcid: cyanuricAcid)
+        if freeChlorine > ceiling {
+            return result(
+                .sanitizerAdequacy,
+                .fail,
+                "FC \(format(freeChlorine)) ppm is above the CYA-adjusted re-entry ceiling of \(format(ceiling)) ppm; let it decay before swimming.",
+                blocksSwimming: true,
+                requiresTesting: false
             )
         }
 
@@ -74,11 +85,13 @@ struct SwimReadinessGateEvaluator {
             return result(.pH, .unknown, "pH was not recorded.", blocksSwimming: true, requiresTesting: true)
         }
 
-        if pHReadinessRange.contains(pH) {
-            return result(.pH, .pass, "pH \(format(pH)) is within the Pool Side observed-readiness range.", blocksSwimming: false, requiresTesting: false)
+        // ChemistryPolicy owns the pH SWIM range (7.0–7.8 inclusive), which is wider than the 7.2–7.6
+        // operating range. A pH in the swim range does not block even when it is a Recommended correction.
+        if ChemistryPolicy.classify(.pH, value: pH, context: ChemistryPolicyContext()).blocksSwimming {
+            return result(.pH, .fail, "pH \(format(pH)) is outside the Pool Side swim-readiness range (7.0–7.8).", blocksSwimming: true, requiresTesting: true)
         }
 
-        return result(.pH, .fail, "pH \(format(pH)) is outside the Pool Side observed-readiness range.", blocksSwimming: true, requiresTesting: true)
+        return result(.pH, .pass, "pH \(format(pH)) is within the Pool Side swim-readiness range (7.0–7.8).", blocksSwimming: false, requiresTesting: false)
     }
 
     private func combinedChlorineGate(for state: NormalizedPoolState) -> SwimReadinessGateResult {
@@ -90,8 +103,8 @@ struct SwimReadinessGateEvaluator {
             return result(.combinedChlorine, .fail, "Strong chlorine odor was reported, so the chloramine/problem-water context requires verification.", blocksSwimming: true, requiresTesting: true)
         }
 
-        if combinedChlorine > acceptableCombinedChlorineMaximum {
-            return result(.combinedChlorine, .fail, "CC \(format(combinedChlorine)) ppm is above the current observed-readiness threshold of \(format(acceptableCombinedChlorineMaximum)) ppm.", blocksSwimming: true, requiresTesting: true)
+        if combinedChlorine > combinedChlorineReadinessMaximum {
+            return result(.combinedChlorine, .fail, "CC \(format(combinedChlorine)) ppm is above the current observed-readiness threshold of \(format(combinedChlorineReadinessMaximum)) ppm.", blocksSwimming: true, requiresTesting: true)
         }
 
         return result(.combinedChlorine, .pass, "CC \(format(combinedChlorine)) ppm is within the current observed-readiness threshold.", blocksSwimming: false, requiresTesting: false)

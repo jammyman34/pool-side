@@ -49,6 +49,7 @@
 		9B8AF63D2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8AF63C2FFD548E00CB6A85 /* NextTestRecommendationEngine.swift */; };
 		9B8AF63F2FFE992100CB6A85 /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */; };
 		9BACD3B02FE2EF4600C47EBC /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */; };
+		9BC853603017E82A0095E100 /* ChemistryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC8535F3017E82A0095E100 /* ChemistryPolicy.swift */; };
 		AD79914134E1BF950F8E55E0 /* AddTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DF5015684F5FE62BCF2E0C /* AddTestView.swift */; };
 		B1370947F2519328B3B422A4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FE594E4E96479DCDBA4D6DBF /* Assets.xcassets */; };
 		BD045FD26E8F2E7894105DE9 /* ToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413760B903EFB0B7EE3867F8 /* ToastView.swift */; };
@@ -110,6 +111,7 @@
 		9B8AF63E2FFE992100CB6A85 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
 		9BABD64D300AB25E007DAEBB /* Pool SideTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Pool SideTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BACD3AF2FE2EF4600C47EBC /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
+		9BC8535F3017E82A0095E100 /* ChemistryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChemistryPolicy.swift; sourceTree = "<group>"; };
 		9BF358082FE2F10C00853A99 /* PoolSide.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PoolSide.entitlements; sourceTree = "<group>"; };
 		A2B1172BBFB76FCBAB212A92 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A7C65FE5D657EB1E72327194 /* TreatmentCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreatmentCardView.swift; sourceTree = "<group>"; };
@@ -323,6 +325,7 @@
 		A664D93FFE0BFE1680980E89 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				9BC8535F3017E82A0095E100 /* ChemistryPolicy.swift */,
 				FC26E6406C535DD54CC22654 /* AIService.swift */,
 				FD1D60BAEFC35408A9A85109 /* ChemistryEngine.swift */,
 				BCD17832DAFDD11342727FA2 /* FoundationModelsService.swift */,
@@ -518,6 +521,7 @@
 				9B3B12B8301505E70016D855 /* TreatmentWorkflowEngine.swift in Sources */,
 				2E3A41EFA7183A9AED322134 /* PoolTest.swift in Sources */,
 				9B3B125D300FB2EA0016D855 /* ContextualEducationStore.swift in Sources */,
+				9BC853603017E82A0095E100 /* ChemistryPolicy.swift in Sources */,
 				1F297DA8D2C19DA99D2635CD /* PoolViewModel.swift in Sources */,
 				9B3B1249300E7D780016D855 /* FirstUseState.swift in Sources */,
 				9B3B1269301150BF0016D855 /* ChemicalDoseCalculator.swift in Sources */,

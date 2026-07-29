@@ -957,7 +957,7 @@ struct ChemistryEngine {
         var templates: [TreatmentTemplate] = []
         let previousTest = recentHistory.first
 
-        for reading in readings where reading.status != .ideal && reading.status != .testing {
+        for reading in readings where shouldGenerateTreatment(for: reading, test: test, config: config) {
             if let template = treatmentTemplate(
                 for: reading,
                 test: test,
@@ -1303,6 +1303,36 @@ struct ChemistryEngine {
         }
     }
 
+    /// Resolves the authoritative ChemistryPolicy classification for a parameter/value under the
+    /// current pool context. ChemistryEngine consumes this for action-state, urgency, correction
+    /// target, and disposition rather than recreating bands and urgency independently.
+    private func policyClassification(_ parameter: ChemistryParameter, value: Double, test: PoolTest, config: PoolConfiguration) -> ParameterClassification {
+        ChemistryPolicy.classify(parameter, value: value, context: ChemistryPolicyContext.make(
+            config: config,
+            cyanuricAcid: test.cyanuricAcid,
+            pH: test.pH,
+            totalAlkalinity: test.totalAlkalinity,
+            hasScalingEvidence: hasScaling(test),
+            chlorineSampleSize: test.taylorSampleSize
+        ))
+    }
+
+    /// Decides whether a reading should be considered for treatment generation.
+    ///
+    /// For most parameters this uses the display `ChemicalStatus`. Total alkalinity is the exception:
+    /// its treatment-generation gate is ChemistryPolicy (sanitizer-aware operating range), decoupled
+    /// from the legacy `totalAlkalinityStatus` (ideal 80–120) that still drives Pool Score. This keeps
+    /// a single authoritative treatment classifier for TA — e.g. a hypochlorite pool at TA 101–120 is
+    /// a policy `recommendedHigh` condition and must not be suppressed by the legacy status — without
+    /// altering the score model.
+    private func shouldGenerateTreatment(for reading: ChemicalReading, test: PoolTest, config: PoolConfiguration) -> Bool {
+        guard reading.status != .testing else { return false }
+        if reading.key == "totalAlkalinity" {
+            return policyClassification(.totalAlkalinity, value: test.totalAlkalinity, test: test, config: config).actionState != .ideal
+        }
+        return reading.status != .ideal
+    }
+
     private func treatmentTemplate(
         for reading: ChemicalReading,
         test: PoolTest,
@@ -1314,8 +1344,14 @@ struct ChemistryEngine {
 
         switch reading.key {
         case "pH":
-            if reading.value < 7.0 {
-                let targetPH = 7.2
+            // ChemistryPolicy is authoritative: operating range 7.2–7.6, correction target ~7.4 in both
+            // directions, and every out-of-operating-range reading is corrected (no monitor-only for
+            // 7.0–7.2 or 7.6–7.8). History influences dose conservatism/explanation, not whether we treat.
+            let classification = policyClassification(.pH, value: reading.value, test: test, config: config)
+            guard classification.disposition != .noAction, let targetPH = classification.correctionTarget else { return nil }
+            let derivedUrgency = classification.derivedUrgency ?? .recommended
+
+            if classification.actionState.isLow {
                 let oz = ChemicalDoseCalculator.sodaAshOunces(
                     volumeGallons: volume,
                     currentPH: reading.value,
@@ -1326,12 +1362,14 @@ struct ChemistryEngine {
                 let product = pHIncreaserProduct(config.pHIncreaserPreference, ounces: oz)
                 return TreatmentTemplate(
                     chemicalName: product.name,
-                    actionDescription: "Raise unsafe low pH into the safe range",
+                    actionDescription: classification.actionState == .actNowLow
+                        ? "Raise unsafe low pH toward the ideal operating range (~7.4)"
+                        : "Raise pH toward the ideal operating range (~7.4)",
                     amount: product.amount,
                     unit: product.unit,
                     instructions: "\(product.instructions) Retest before making any sanitizer or alkalinity adjustments.",
                     targetParameter: "pH",
-                    urgency: .immediate,
+                    urgency: derivedUrgency,
                     expectedEffectParameter: "pH",
                     expectedDelta: targetPH - reading.value,
                     effectDelayHours: 4,
@@ -1343,23 +1381,11 @@ struct ChemistryEngine {
                     calculatedDoseBeforeCapUnit: product.calculatedUnitBeforeCap,
                     wasDoseCapped: product.wasCapped
                 )
-            } else if reading.value < 7.2 {
-                return TreatmentTemplate(
-                    chemicalName: "Monitor pH",
-                    actionDescription: "pH is low-normal; avoid adding acid and retest before adjusting.",
-                    amount: 0,
-                    unit: "",
-                    instructions: "Do not lower pH. Keep circulation running and retest pH with a reliable kit before adding pH increaser unless it drops below 7.0.",
-                    targetParameter: "pH",
-                    urgency: .advisory,
-                    expectedEffectParameter: "pH",
-                    expectedDelta: 0,
-                    effectDelayHours: 0,
-                    effectDurationHours: 12,
-                    doNotRepeatHours: 12
-                )
-            } else if shouldTreatHighPHWithAcid(reading.value, test: test, previousTest: previousTest, recentHistory: recentHistory) {
-                let targetPH = reading.value <= 7.8 ? 7.6 : 7.5
+            } else {
+                // Verify-before-repeat: while a recent acid dose is still inside its wait/retest window,
+                // withhold a duplicate acid dose (the wait advisory is appended downstream). This defers a
+                // duplicate, it does not let history decide whether out-of-range pH is treated at all.
+                if hasActiveRecentAcidTreatment(recentHistory: recentHistory) { return nil }
                 let oz = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForPH(
                     volumeGallons: volume,
                     currentPH: reading.value,
@@ -1375,7 +1401,7 @@ struct ChemistryEngine {
                     unit: product.unit,
                     instructions: "\(product.instructions) Add this conservative dose, circulate, then retest pH before adding more. Avoid chasing alkalinity at the same time.",
                     targetParameter: "pH",
-                    urgency: pHDecreaserUrgency(for: reading.value, test: test, previousTest: previousTest, recentHistory: recentHistory),
+                    urgency: derivedUrgency,
                     expectedEffectParameter: "pH",
                     expectedDelta: targetPH - reading.value,
                     effectDelayHours: 4,
@@ -1386,21 +1412,6 @@ struct ChemistryEngine {
                     calculatedDoseBeforeCap: product.calculatedAmountBeforeCap,
                     calculatedDoseBeforeCapUnit: product.calculatedUnitBeforeCap,
                     wasDoseCapped: product.wasCapped
-                )
-            } else {
-                return TreatmentTemplate(
-                    chemicalName: "Monitor pH Trend",
-                    actionDescription: "pH is currently acceptable, but elevated alkalinity may cause it to rise.",
-                    amount: 0,
-                    unit: "",
-                    instructions: "Keep circulation running and watch the next pH result. Do not add acid unless pH reaches 7.8 or higher, pH keeps rising, or scaling appears.",
-                    targetParameter: "pH",
-                    urgency: .advisory,
-                    expectedEffectParameter: "pH",
-                    expectedDelta: 0,
-                    effectDelayHours: 0,
-                    effectDurationHours: 12,
-                    doNotRepeatHours: 12
                 )
             }
 
@@ -1424,7 +1435,9 @@ struct ChemistryEngine {
                         unit: product.unit,
                         instructions: product.instructions,
                         targetParameter: "freeChlorine",
-                        urgency: .optional,
+                        // ChemistryPolicy: FC below the operating target is a Recommended correction (toward
+                        // target), delivered via the generator rather than a manual chemical dose.
+                        urgency: policyClassification(.freeChlorine, value: reading.value, test: test, config: config).derivedUrgency ?? .recommended,
                         expectedEffectParameter: "freeChlorine",
                         expectedDelta: 0,
                         effectDelayHours: 4,
@@ -1479,7 +1492,8 @@ struct ChemistryEngine {
             }
 
         case "totalAlkalinity":
-            if reading.value < 70 {
+            let taClassification = policyClassification(.totalAlkalinity, value: reading.value, test: test, config: config)
+            if taClassification.actionState.isLow {
                 if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
                     return possibleDilutionRetestTemplate(for: "Total Alkalinity")
                 }
@@ -1499,16 +1513,17 @@ struct ChemistryEngine {
                         doNotRepeatHours: 12
                     )
                 }
-                let alkalinityIncrease = 80 - reading.value
+                // Sanitizer-aware target (~90 hypochlorite/SWG, ~110 acidic-stabilized) per ChemistryPolicy.
+                let alkalinityIncrease = (taClassification.correctionTarget ?? 90) - reading.value
                 let lbs = ChemicalDoseCalculator.sodiumBicarbonatePounds(volumeGallons: volume, ppmIncrease: alkalinityIncrease)
                 return TreatmentTemplate(
                     chemicalName: config.alkalinityIncreaserPreference.displayName,
-                    actionDescription: "Raise low alkalinity so pH is less likely to swing",
+                    actionDescription: "Raise low alkalinity toward the sanitizer-appropriate operating range so pH is less likely to swing",
                     amount: lbs.rounded(toPlaces: 1),
                     unit: "lbs",
                     instructions: "Add directly to pool with pump running. Allow 6-8 hours of circulation before retesting TA or making another alkalinity adjustment.",
                     targetParameter: "totalAlkalinity",
-                    urgency: reading.status.treatmentUrgency ?? .recommended,
+                    urgency: taClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "totalAlkalinity",
                     expectedDelta: alkalinityIncrease,
                     effectDelayHours: Int(TreatmentApplicationPolicy.bakingSodaRetestWindowHours.upperBound),
@@ -1520,7 +1535,8 @@ struct ChemistryEngine {
                     calculatedDoseBeforeCapUnit: "lbs"
                 )
             } else if shouldTreatHighAlkalinityWithAcid(reading.value, test: test, previousTest: previousTest) {
-                let alkalinityDecrease = reading.value - 120
+                // Lower toward the sanitizer-aware operating target only when pH makes acid appropriate.
+                let alkalinityDecrease = reading.value - (taClassification.correctionTarget ?? 90)
                 let flOz = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForAlkalinity(volumeGallons: volume, ppmDecrease: alkalinityDecrease)
                 let product = pHDecreaserProduct(config.pHDecreaserPreference, ounces: flOz, volumeGallons: volume)
                 return TreatmentTemplate(
@@ -1564,20 +1580,23 @@ struct ChemistryEngine {
 
         case "calciumHardness":
             let acceptable = calciumAcceptableRange(surface: config.surfaceType)
-            if reading.value < acceptable.lowerBound {
+            let chClassification = policyClassification(.calciumHardness, value: reading.value, test: test, config: config)
+            if chClassification.actionState.isLow {
                 if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
                     return possibleDilutionRetestTemplate(for: "Calcium Hardness")
                 }
-                let calciumIncrease = acceptable.lowerBound - reading.value
+                // ChemistryPolicy aims into the surface-appropriate operating range (~250–300 plaster),
+                // not merely the minimum boundary.
+                let calciumIncrease = (chClassification.correctionTarget ?? acceptable.lowerBound) - reading.value
                 let lbs = ChemicalDoseCalculator.calciumChloridePounds(volumeGallons: volume, ppmIncrease: calciumIncrease)
                 return TreatmentTemplate(
                     chemicalName: "Calcium Hardness Increaser (\(config.calciumIncreaserPreference.displayName))",
-                    actionDescription: "Raise clearly low calcium hardness to reduce corrosion risk",
+                    actionDescription: "Raise low calcium hardness into the operating range to reduce corrosion risk",
                     amount: lbs.rounded(toPlaces: 1),
                     unit: "lbs",
-                    instructions: "Pre-dissolve in water; this releases heat, so use caution. Add slowly around pool perimeter with the pump running. Retest calcium hardness after about 24 hours before adding more.",
+                    instructions: "With the circulation system running, add the measured calcium hardness increaser according to the product label. Distribute it as the manufacturer directs, and brush any undissolved product only if the label instructs you to — dissolving calcium chloride is strongly exothermic, and many labels specifically say not to pre-mix it. Retest calcium hardness after about 24 hours before adding more.",
                     targetParameter: "calciumHardness",
-                    urgency: .optional,
+                    urgency: chClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "calciumHardness",
                     expectedDelta: calciumIncrease,
                     effectDelayHours: TreatmentApplicationPolicy.calciumChlorideRetestHours,
@@ -1621,6 +1640,7 @@ struct ChemistryEngine {
             }
 
         case "cyanuricAcid":
+            let cyaClassification = policyClassification(.cyanuricAcid, value: reading.value, test: test, config: config)
             if reading.value < 30 {
                 if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
                     return possibleDilutionRetestTemplate(for: "CYA")
@@ -1652,7 +1672,9 @@ struct ChemistryEngine {
                     unit: product.unit,
                     instructions: "\(product.instructions) Confirm low CYA with the most reliable test available before repeating; stabilizer is slow to leave the pool.",
                     targetParameter: "cyanuricAcid",
-                    urgency: config.testMethod == .testStrips ? .advisory : .optional,
+                    // Strip readings stay advisory (confirm first); reliable readings correct toward ideal.
+                    // Optional is not used for a genuine below-range correction (ChemistryPolicy §3/§9).
+                    urgency: config.testMethod == .testStrips ? .advisory : (cyaClassification.derivedUrgency ?? .recommended),
                     expectedEffectParameter: "cyanuricAcid",
                     expectedDelta: cyaIncrease,
                     effectDelayHours: product.id == .granularCYA ? TreatmentApplicationPolicy.granularCYACanonicalRetestHours : 24,
@@ -1683,6 +1705,7 @@ struct ChemistryEngine {
             return nil
 
         case "saltLevel":
+            let saltClassification = policyClassification(.saltLevel, value: reading.value, test: test, config: config)
             if reading.value < 2700 {
                 if shouldConfirmPossibleDilutionBeforeCorrection(reading: reading, test: test, config: config) {
                     return possibleDilutionRetestTemplate(for: "Salt")
@@ -1696,7 +1719,7 @@ struct ChemistryEngine {
                     unit: "lbs",
                     instructions: "Broadcast salt across the shallow end with the pump running and brush until dissolved. Do not add through the skimmer. Retest after 24 hours of circulation.",
                     targetParameter: "saltLevel",
-                    urgency: reading.status.treatmentUrgency ?? .recommended,
+                    urgency: saltClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "saltLevel",
                     expectedDelta: saltIncrease,
                     effectDelayHours: 24,
@@ -1713,7 +1736,7 @@ struct ChemistryEngine {
                     unit: "gallons to drain/refill",
                     instructions: "Replace about 10% of the water, circulate, and retest salt before repeating. Check the salt cell manual for its exact high-salt limit.",
                     targetParameter: "saltLevel",
-                    urgency: .optional,
+                    urgency: saltClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "saltLevel",
                     expectedDelta: 0,
                     effectDelayHours: 24,
@@ -1850,8 +1873,11 @@ struct ChemistryEngine {
         recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> String {
-        let urgency = chlorineTreatmentUrgency(for: test, target: target, recentHistory: recentHistory, config: config)
-        if urgency == .optional {
+        // Maintenance top-off is identified by ChemistryPolicy (FC at/above the CYA-adjusted readiness
+        // minimum but below the operating target), not by urgency — maintenance top-offs are now
+        // Recommended rather than Optional.
+        let classification = policyClassification(.freeChlorine, value: test.freeChlorine, test: test, config: config)
+        if classification.actionState == .recommendedLow, target < freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
             return "Maintenance top-off toward \(formatRangeBound(target)) ppm"
         }
         if target >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
@@ -1881,10 +1907,10 @@ struct ChemistryEngine {
         if test.freeChlorine < targetLower && chlorineDemandScore(for: test) >= 3 {
             return .recommended
         }
-        if isStablePoolContext(test, previousTest: recentHistory.first, recentHistory: recentHistory, config: config) {
-            return .optional
-        }
-        return .optional
+        // ChemistryPolicy: FC at/above the CYA-adjusted readiness minimum but below the operating target
+        // is a Recommended maintenance top-off toward the operating target — no longer Optional merely
+        // because swimming remains allowed. (Swim-blocking is decided separately by ChemistryPolicy gates.)
+        return .recommended
     }
 
     private func chlorineDemandScore(for test: PoolTest) -> Int {
@@ -2010,7 +2036,9 @@ struct ChemistryEngine {
                 unit: product.unit,
                 instructions: "\(product.instructions) Open the cover if present, circulate well, and retest FC and CC. CC at or below 0.5 is acceptable; above 1.0 needs stronger attention.",
                 targetParameter: "freeChlorine",
-                urgency: test.combinedChlorine >= 1.0 ? .recommended : .optional,
+                // CC above the readiness threshold is a corrective oxidation (ChemistryPolicy), not Optional:
+                // Recommended for the 0.5–1.0 band, Act Now above 1.0.
+                urgency: policyClassification(.combinedChlorine, value: test.combinedChlorine, test: test, config: config).derivedUrgency ?? .recommended,
                 expectedEffectParameter: "combinedChlorine",
                 expectedDelta: -test.combinedChlorine,
                 effectDelayHours: 2,
@@ -2220,30 +2248,53 @@ struct ChemistryEngine {
                 wasCapped: application.isApplicationLimited
             )
         case .lowFumeMuriaticAcid:
-            let lowFumeOunces = ounces * (31.45 / 20.0)
-            let cappedOunces = conservativeSingleLiquidAcidDose(fluidOunces: lowFumeOunces)
-            let dose = practicalLiquidAcidDose(fluidOunces: cappedOunces)
-            let uncappedDose = practicalLiquidAcidDose(fluidOunces: lowFumeOunces)
+            // Stage on the 31.45%-equivalent corrective load, then translate into 20% liquid volume,
+            // so the safe current application matches the equivalent 31.45% application (fixes the
+            // prior asymmetry where low-fume acid bypassed the volume-scaled single-application limit).
+            let conversion = 31.45 / 20.0
+            let currentEquivalent31: Double
+            let isLimited: Bool
+            if let volumeGallons {
+                let staged = TreatmentApplicationPolicy.stagedAcidLoad(equivalent31FluidOunces: ounces, volumeGallons: volumeGallons)
+                currentEquivalent31 = staged.currentEquivalent31FluidOunces
+                isLimited = staged.isApplicationLimited
+            } else {
+                currentEquivalent31 = conservativeSingleLiquidAcidDose(fluidOunces: ounces)
+                isLimited = currentEquivalent31 < ounces
+            }
+            let currentDose = practicalLiquidAcidDose(fluidOunces: currentEquivalent31 * conversion)
+            let totalDose = practicalLiquidAcidDose(fluidOunces: ounces * conversion)
             return ChemicalProduct(
                 id: .muriaticAcid20,
-                amount: dose.amount,
-                unit: dose.unit,
+                amount: currentDose.amount,
+                unit: currentDose.unit,
                 instructions: "Add slowly to the deep end with the pump running. Low-fume acid is weaker than 31.45% muriatic acid, so it requires more liquid volume for the same pH change. Retest pH in 4 hours before adding more.",
-                calculatedAmountBeforeCap: uncappedDose.amount,
-                calculatedUnitBeforeCap: uncappedDose.unit,
-                wasCapped: cappedOunces < lowFumeOunces
+                calculatedAmountBeforeCap: totalDose.amount,
+                calculatedUnitBeforeCap: totalDose.unit,
+                wasCapped: isLimited
             )
         case .dryAcid:
-            let dryAcidOunces = dryAcidOuncesEquivalent(toMuriaticAcid31FluidOunces: ounces)
-            let cappedOunces = conservativeSingleDryAcidDose(ounces: dryAcidOunces)
+            // Stage on the 31.45%-equivalent corrective load, then translate into dry-acid weight.
+            let currentEquivalent31: Double
+            let isLimited: Bool
+            if let volumeGallons {
+                let staged = TreatmentApplicationPolicy.stagedAcidLoad(equivalent31FluidOunces: ounces, volumeGallons: volumeGallons)
+                currentEquivalent31 = staged.currentEquivalent31FluidOunces
+                isLimited = staged.isApplicationLimited
+            } else {
+                currentEquivalent31 = min(max(0, ounces), 256)
+                isLimited = currentEquivalent31 < ounces
+            }
+            let currentDryOunces = dryAcidOuncesEquivalent(toMuriaticAcid31FluidOunces: currentEquivalent31)
+            let totalDryOunces = dryAcidOuncesEquivalent(toMuriaticAcid31FluidOunces: ounces)
             return ChemicalProduct(
                 id: .dryAcid,
-                amount: (cappedOunces / 16).rounded(toPlaces: 1),
+                amount: (currentDryOunces / 16).rounded(toPlaces: 1),
                 unit: "lbs",
                 instructions: "Pre-dissolve in a bucket of pool water and add slowly with the pump running. Dry acid adds sulfate over time, so avoid using it as a frequent large-dose product unless it is the product you intentionally maintain. Retest pH in 4 hours before adding more.",
-                calculatedAmountBeforeCap: (dryAcidOunces / 16).rounded(toPlaces: 1),
+                calculatedAmountBeforeCap: (totalDryOunces / 16).rounded(toPlaces: 1),
                 calculatedUnitBeforeCap: "lbs",
-                wasCapped: cappedOunces < dryAcidOunces
+                wasCapped: isLimited
             )
         }
     }
@@ -2254,10 +2305,6 @@ struct ChemistryEngine {
 
     private func conservativeSingleLiquidAcidDose(fluidOunces: Double) -> Double {
         min(max(0, fluidOunces), 256)
-    }
-
-    private func conservativeSingleDryAcidDose(ounces: Double) -> Double {
-        min(max(0, ounces), 256)
     }
 
     private func practicalLiquidAcidDose(fluidOunces: Double) -> (amount: Double, unit: String) {

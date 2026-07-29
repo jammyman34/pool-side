@@ -72,7 +72,7 @@ private enum ScenarioCatalog {
                 steps: [
                     .generate(expect: .init(
                         treatmentCount: 1,
-                        treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .optional, badge: "Swim after ~1 hr", category: .poolCare, completionState: .plannedTreatment)],
+                        treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .recommended, badge: "Swim after ~1 hr", category: .poolCare, completionState: .plannedTreatment)],
                         v2State: .readyToSwim,
                         swimmingBlocked: false,
                         testingRequired: false,
@@ -152,7 +152,7 @@ private enum ScenarioCatalog {
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60),
                 history: pHDriftHistory,
                 steps: [
-                    .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", urgency: .recommended, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 4.0, calculatedUnit: "qt")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
+                    .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 1.2, calculatedUnit: "gal")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
                     .completeTreatment(nameContains: "Muriatic Acid", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, testingRequired: true, verificationRequired: true, treatmentStates: ["Muriatic Acid": .completedVerificationRequired], pendingVerificationGates: [.pH])),
                     .addVerificationTest(chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 120, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .readyToSwim, swimmingBlocked: false))
                 ]
@@ -162,21 +162,21 @@ private enum ScenarioCatalog {
                 name: "Low TA TC6",
                 area: "CORE",
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60),
-                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Baking Soda", amount: 13.7, unit: "lbs", urgency: .recommended, badge: "Retest TA after 6-8 hrs", category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
+                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Baking Soda", amount: 18.2, unit: "lbs", urgency: .immediate, badge: "Retest TA after 6-8 hrs", category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
             ),
             ScenarioDefinition(
                 id: "H",
                 name: "Low CYA TC7",
                 area: "CORE",
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20),
-                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Cyanuric Acid", amount: 5.3, unit: "lbs", urgency: .optional, badge: "Retest CYA after 24-48 hrs", category: .poolCare, completionState: .plannedTreatment)], absentTreatment: "Remove Chlorine Source", v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
+                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Cyanuric Acid", amount: 5.3, unit: "lbs", urgency: .recommended, badge: "Retest CYA after 24-48 hrs", category: .poolCare, completionState: .plannedTreatment)], absentTreatment: "Remove Chlorine Source", v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
             ),
             ScenarioDefinition(
                 id: "I",
                 name: "Low Calcium TC8",
                 area: "CORE",
                 chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60),
-                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Calcium Hardness", amount: 40.7, unit: "lbs", urgency: .optional, category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
+                steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Calcium Hardness", amount: 71.3, unit: "lbs", urgency: .immediate, category: .poolCare, completionState: .plannedTreatment)], v2State: .readyToSwim, swimmingBlocked: false, nextTestPending: false))]
             ),
             ScenarioDefinition(
                 id: "J",
@@ -198,23 +198,30 @@ private enum ScenarioCatalog {
 
     private static var acidProductScenarios: [ScenarioDefinition] {
         [
+            // pH 8.0 is Act Now High and corrects toward ~7.4 (approved policy §6), so urgency is immediate
+            // and the total demand for the 0.6 pH drop now displays in gallons (1.2 gal); staged current 1.5 qt.
             highPHScenario(
                 id: "AP-acid31",
                 name: "Muriatic Acid 31.45%",
                 pHDecreaser: .muriaticAcid,
-                expectation: .init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", urgency: .recommended, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 4.0, calculatedUnit: "qt", wasDoseCapped: true)
+                expectation: .init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 1.2, calculatedUnit: "gal", wasDoseCapped: true)
             ),
+            // Staged current application now matches the equivalent 31.45% single application:
+            // 52.13 fl-oz-equivalent-31 × (31.45/20) ≈ 82 fl oz → 2.5 qt current; total ≈ 194 fl oz → 1.5 gal.
+            // Superseded by approved policy §12 (acid application-policy symmetry): low-fume acid is now
+            // staged rather than dumped in one 1.5 gal application, so wasDoseCapped is true.
             highPHScenario(
                 id: "AP-acid20",
                 name: "Low-Fume Muriatic Acid 20%",
                 pHDecreaser: .lowFumeMuriaticAcid,
-                expectation: .init(nameContains: "Low-Fume Muriatic Acid", amountMinimum: 1.4, unit: "gal", urgency: .recommended, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedMinimum: 1.4, calculatedUnit: "gal", wasDoseCapped: false)
+                expectation: .init(nameContains: "Low-Fume Muriatic Acid", amount: 2.5, unit: "qt", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedMinimum: 1.4, calculatedUnit: "gal", wasDoseCapped: true)
             ),
+            // Staged current 1.2 lbs; total now ~3.5 lbs for the 0.6 pH drop toward ~7.4 (policy §6 + §12).
             highPHScenario(
                 id: "AP-dry-acid",
                 name: "Dry Acid Sodium Bisulfate",
                 pHDecreaser: .dryAcid,
-                expectation: .init(nameContains: "Dry Acid", amount: 2.9, unit: "lbs", urgency: .recommended, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 2.9, calculatedUnit: "lbs", wasDoseCapped: false)
+                expectation: .init(nameContains: "Dry Acid", amount: 1.2, unit: "lbs", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, calculatedDose: 3.5, calculatedUnit: "lbs", wasDoseCapped: true)
             )
         ]
     }
@@ -237,13 +244,15 @@ private enum ScenarioCatalog {
     private static var pHIncreaseScenarios: [ScenarioDefinition] {
         [
             ScenarioDefinition(id: "PI-soda-ash", name: "Soda Ash Low pH", area: "PH INCREASE", config: .init(pHIncreaser: .sodaAsh), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [
-                .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Soda Ash", amount: 1.6, unit: "lbs", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, expectedDeltaMinimum: 0.29)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
+                .generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Soda Ash", amount: 2.6, unit: "lbs", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment, expectedDeltaMinimum: 0.49)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion], nextTestPending: false)),
                 .completeTreatment(nameContains: "Soda Ash", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, testingRequired: true, verificationRequired: true, pendingVerificationGates: [.pH])),
                 .addVerificationTest(chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.2, totalAlkalinity: 105, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .readyToSwim, swimmingBlocked: false)),
-                .addVerificationTest(chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.1, totalAlkalinity: 105, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH]))
+                // pH 7.1 is within the approved 7.0–7.8 swim range: swimmable (a Recommended raise toward
+                // ~7.4 may still exist, but it no longer blocks). Previously 7.1 failed the old 7.2 gate.
+                .addVerificationTest(chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.1, totalAlkalinity: 105, calciumHardness: 330, cyanuricAcid: 60), expect: .init(v2State: .readyToSwim, swimmingBlocked: false))
             ]),
             ScenarioDefinition(id: "PI-borax", name: "Borax Low pH", area: "PH INCREASE", config: .init(pHIncreaser: .borax), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Borax", amountMinimum: 2.5, unit: "lbs", urgency: .immediate, badge: "Test pH after ~4 hrs", category: .swimBlocking, completionState: .plannedTreatment)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH, .treatmentCompletion]))]),
-            ScenarioDefinition(id: "PI-ta-sensitive-low", name: "Soda Ash Low Buffer", area: "PH INCREASE", config: .init(pHIncreaser: .sodaAsh), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Soda Ash", amountMaximum: 1.2, unit: "lbs"), .init(nameContains: "Baking Soda", unit: "lbs")], v2State: .doNotSwim, swimmingBlocked: true))])
+            ScenarioDefinition(id: "PI-ta-sensitive-low", name: "Soda Ash Low Buffer", area: "PH INCREASE", config: .init(pHIncreaser: .sodaAsh), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Soda Ash", amountMaximum: 1.8, unit: "lbs"), .init(nameContains: "Baking Soda", unit: "lbs")], v2State: .doNotSwim, swimmingBlocked: true))])
         ]
     }
 
@@ -258,7 +267,7 @@ private enum ScenarioCatalog {
     private static var trichlorScenarios: [ScenarioDefinition] {
         [
             ScenarioDefinition(id: "TR-acute-low-fc", name: "Trichlor Preference Acute FC Uses Immediate Chlorine", area: "TRICHLOR", config: .init(chlorine: .tablets), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", amount: 1.0, unit: "gal", expectedDeltaMinimum: 2.9)], absentTreatment: "Trichlor", v2State: .doNotSwim, swimmingBlocked: true))]),
-            ScenarioDefinition(id: "TR-maintenance", name: "Trichlor Maintenance Preference Avoids Precise Tablet Dose", area: "TRICHLOR", config: .init(chlorine: .tablets), chemistry: .init(freeChlorine: 4.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .optional)], absentTreatment: "Chlorine Tablets", v2State: .readyToSwim, swimmingBlocked: false))])
+            ScenarioDefinition(id: "TR-maintenance", name: "Trichlor Maintenance Preference Avoids Precise Tablet Dose", area: "TRICHLOR", config: .init(chlorine: .tablets), chemistry: .init(freeChlorine: 4.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .recommended)], absentTreatment: "Chlorine Tablets", v2State: .readyToSwim, swimmingBlocked: false))])
         ]
     }
 
@@ -275,9 +284,9 @@ private enum ScenarioCatalog {
 
     private static var saltScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "SALT-generator-modest", name: "Salt Generator Modest FC Deficit", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 5.8, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 3200), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Salt Chlorine Generator", amount: 0, urgency: .optional, category: .nonChemicalAction)], v2State: .readyToSwim, swimmingBlocked: false))]),
-            ScenarioDefinition(id: "SALT-urgent-deficit", name: "Salt Urgent Deficit Remains Blocked", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 3200), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Salt Chlorine Generator", urgency: .optional, category: .nonChemicalAction)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy]))]),
-            ScenarioDefinition(id: "SALT-low", name: "Low Salt Addition", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 2500), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Pool Salt", amount: 190.1, unit: "lbs", urgency: .optional, category: .poolCare, expectedDelta: 700)], v2State: .readyToSwim, swimmingBlocked: false))]),
+            ScenarioDefinition(id: "SALT-generator-modest", name: "Salt Generator Modest FC Deficit", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 5.8, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 3200), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Salt Chlorine Generator", amount: 0, urgency: .recommended, category: .nonChemicalAction)], v2State: .readyToSwim, swimmingBlocked: false))]),
+            ScenarioDefinition(id: "SALT-urgent-deficit", name: "Salt Urgent Deficit Remains Blocked", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 3200), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Salt Chlorine Generator", urgency: .immediate, category: .nonChemicalAction)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy]))]),
+            ScenarioDefinition(id: "SALT-low", name: "Low Salt Addition", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 2500), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Pool Salt", amount: 190.1, unit: "lbs", urgency: .recommended, category: .poolCare, expectedDelta: 700)], v2State: .readyToSwim, swimmingBlocked: false))]),
             ScenarioDefinition(id: "SALT-adequate", name: "Adequate Salt No Salt Treatment", area: "SALT", config: .init(isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 3200), steps: [.generate(expect: .init(absentTreatment: "Pool Salt", v2State: .readyToSwim, swimmingBlocked: false))])
         ]
     }
@@ -305,11 +314,12 @@ private enum ScenarioCatalog {
 
     private static var freshnessScenarios: [ScenarioDefinition] {
         [
+            // Approved 24-hour (1440-minute) readiness-freshness window.
             freshnessScenario(id: "FRESH-now", name: "Fresh Test", minutesOld: 60, expected: .readyToSwim),
-            freshnessScenario(id: "FRESH-inside", name: "Inside Freshness Boundary", minutesOld: 479, expected: .readyToSwim),
-            freshnessScenario(id: "FRESH-boundary", name: "Exact Freshness Boundary", minutesOld: 480, expected: .readyToSwim),
-            freshnessScenario(id: "FRESH-outside", name: "Outside Freshness Boundary", minutesOld: 481, expected: .doNotSwim),
-            freshnessScenario(id: "FRESH-stale", name: "Materially Stale", minutesOld: 720, expected: .doNotSwim)
+            freshnessScenario(id: "FRESH-inside", name: "Inside Freshness Boundary", minutesOld: 1439, expected: .readyToSwim),
+            freshnessScenario(id: "FRESH-boundary", name: "Exact Freshness Boundary", minutesOld: 1440, expected: .readyToSwim),
+            freshnessScenario(id: "FRESH-outside", name: "Outside Freshness Boundary", minutesOld: 1441, expected: .doNotSwim),
+            freshnessScenario(id: "FRESH-stale", name: "Materially Stale", minutesOld: 2880, expected: .doNotSwim)
         ]
     }
 
@@ -328,9 +338,13 @@ private enum ScenarioCatalog {
 
     private static var historyDrivenPHScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "HIST-ph-isolated", name: "Isolated pH 8 Monitor", area: "HISTORY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 0, v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH]))]),
+            // Approved policy §6: history no longer suppresses correction of out-of-operating-range pH.
+            // pH 8.0 is Act Now High and is corrected toward ~7.4 regardless of whether it is isolated.
+            ScenarioDefinition(id: "HIST-ph-isolated", name: "Isolated pH 8 Still Corrected", area: "HISTORY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Muriatic Acid", urgency: .immediate)], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.pH]))]),
             ScenarioDefinition(id: "HIST-ph-rising", name: "Rising pH History Treats", area: "HISTORY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [.generate(expect: .init(treatmentCount: 1, treatments: [.init(nameContains: "Muriatic Acid")], v2State: .doNotSwim, swimmingBlocked: true))]),
-            ScenarioDefinition(id: "HIST-ph-stable-highish", name: "Stable High-ish pH History", area: "HISTORY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60), history: [.init(daysBefore: 7, chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60)), .init(daysBefore: 14, chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60)), .init(daysBefore: 21, chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60))], steps: [.generate(expect: .init(absentTreatment: "Muriatic Acid", v2State: .readyToSwim, swimmingBlocked: false))])
+            // pH 7.8 is Recommended High: corrected toward ~7.4 but still swimmable (7.8 inclusive), so the
+            // Muriatic Acid treatment is now generated yet the pool remains Ready to Swim (pool-care classification).
+            ScenarioDefinition(id: "HIST-ph-stable-highish", name: "Stable High-ish pH Corrected But Swimmable", area: "HISTORY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60), history: [.init(daysBefore: 7, chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60)), .init(daysBefore: 14, chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60)), .init(daysBefore: 21, chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.8, totalAlkalinity: 130, calciumHardness: 330, cyanuricAcid: 60))], steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid", urgency: .recommended, category: .poolCare)], v2State: .readyToSwim, swimmingBlocked: false))])
         ]
     }
 
@@ -338,8 +352,8 @@ private enum ScenarioCatalog {
         [
             ScenarioDefinition(id: "VOL-chlorine-10k", name: "12.5 Chlorine 10k Scaling", area: "VOLUME SCALING", config: .init(volume: 10_000), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", amount: 0.25, unit: "gal")]))]),
             ScenarioDefinition(id: "VOL-chlorine-40k", name: "12.5 Chlorine 40k Scaling", area: "VOLUME SCALING", config: .init(volume: 40_000), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", amount: 1.0, unit: "gal")]))]),
-            ScenarioDefinition(id: "VOL-baking-10k", name: "Baking Soda 10k Scaling", area: "VOLUME SCALING", config: .init(volume: 10_000), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Baking Soda", amount: 4.2, unit: "lbs")]))]),
-            ScenarioDefinition(id: "VOL-calcium-20k", name: "Calcium 20k Scaling", area: "VOLUME SCALING", config: .init(volume: 20_000), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", amount: 25.0, unit: "lbs")]))]),
+            ScenarioDefinition(id: "VOL-baking-10k", name: "Baking Soda 10k Scaling", area: "VOLUME SCALING", config: .init(volume: 10_000), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Baking Soda", amount: 5.6, unit: "lbs")]))]),
+            ScenarioDefinition(id: "VOL-calcium-20k", name: "Calcium 20k Scaling", area: "VOLUME SCALING", config: .init(volume: 20_000), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", amount: 43.8, unit: "lbs")]))]),
             ScenarioDefinition(id: "VOL-cya-40k", name: "CYA 40k Scaling", area: "VOLUME SCALING", config: .init(volume: 40_000), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Cyanuric Acid", amount: 6.7, unit: "lbs")]))]),
             ScenarioDefinition(id: "VOL-salt-20k", name: "Salt 20k Scaling", area: "VOLUME SCALING", config: .init(volume: 20_000, isSaltwater: true, chlorine: .saltGenerator), chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60, salt: 2500), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Pool Salt", amount: 116.6, unit: "lbs")]))])
         ]
@@ -349,14 +363,16 @@ private enum ScenarioCatalog {
         [
             ScenarioDefinition(id: "MAG-baking-not-hundreds", name: "Baking Soda Magnitude Guard", area: "MAGNITUDE", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Baking Soda", amountMaximum: 20, unit: "lbs")]))]),
             ScenarioDefinition(id: "MAG-cya-not-tens", name: "CYA Magnitude Guard", area: "MAGNITUDE", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Cyanuric Acid", amountMaximum: 8, unit: "lbs")]))]),
-            ScenarioDefinition(id: "MAG-calcium-tens", name: "Calcium Magnitude Guard", area: "MAGNITUDE", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", amountMinimum: 30, amountMaximum: 60, unit: "lbs")]))]),
+            // Low-CH now targets the operating range (~275, policy §8) rather than the 200 minimum, so +175 ppm
+// in 32,583 gal is ~71 lbs (correct linear scaling; guard still catches order-of-magnitude errors).
+ScenarioDefinition(id: "MAG-calcium-tens", name: "Calcium Magnitude Guard", area: "MAGNITUDE", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", amountMinimum: 30, amountMaximum: 80, unit: "lbs")]))]),
             ScenarioDefinition(id: "MAG-dry-acid-weight", name: "Dry Acid Uses Weight", area: "MAGNITUDE", config: .init(pHDecreaser: .dryAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [.generate(expect: .init(treatments: [.init(nameContains: "Dry Acid", unit: "lbs")], absentTreatment: "fl oz"))])
         ]
     }
 
     private static var applicationPolicyScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "APP-acid-demand-vs-current", name: "Acid Total Demand Versus Current Application", area: "APPLICATION POLICY", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", calculatedDose: 4.0, calculatedUnit: "qt", wasDoseCapped: true)], nextTestPending: false)), .completeTreatment(nameContains: "Muriatic Acid", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, pendingVerificationGates: [.pH]))]),
+            ScenarioDefinition(id: "APP-acid-demand-vs-current", name: "Acid Total Demand Versus Current Application", area: "APPLICATION POLICY", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid", amount: 1.5, unit: "qt", calculatedDose: 1.2, calculatedUnit: "gal", wasDoseCapped: true)], nextTestPending: false)), .completeTreatment(nameContains: "Muriatic Acid", minutesAgo: 250, expect: .init(v2State: .testBeforeSwimming, pendingVerificationGates: [.pH]))]),
             ScenarioDefinition(id: "APP-cya-retest-policy", name: "CYA Retest Policy", area: "APPLICATION POLICY", chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 20), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Cyanuric Acid", badge: "Retest CYA after 24-48 hrs", category: .poolCare)], nextTestPending: false))]),
             ScenarioDefinition(id: "APP-calcium-retest-policy", name: "Calcium Retest Policy", area: "APPLICATION POLICY", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 100, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Calcium Hardness", category: .poolCare)], nextTestPending: false)), .completeTreatment(nameContains: "Calcium Hardness", minutesAgo: 10, expect: .init(nextTestPending: false))])
         ]
@@ -371,9 +387,11 @@ private enum ScenarioCatalog {
         let ccScenarios = ccValues.map { cc in
             ScenarioDefinition(id: "CC-\(cc)", name: "CC Boundary \(cc)", chemistry: .init(freeChlorine: 6, combinedChlorine: cc, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(v2State: cc > 0.5 ? .doNotSwim : .readyToSwim, swimmingBlocked: cc > 0.5, failedGates: cc > 0.5 ? [.combinedChlorine] : []))])
         }
-        let pHValues = [7.1, 7.2, 7.5, 7.8, 7.9, 8.0]
+        // Approved swim range is 7.0–7.8 inclusive (wider than the 7.2–7.6 operating range): 7.1 swims.
+        let pHValues = [6.9, 7.0, 7.1, 7.2, 7.5, 7.7, 7.8, 7.9, 8.0]
         let pHScenarios = pHValues.map { pH in
-            ScenarioDefinition(id: "PH-\(pH)", name: "pH Boundary \(pH)", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: pH, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(v2State: (7.2...7.8).contains(pH) ? .readyToSwim : .doNotSwim, swimmingBlocked: !(7.2...7.8).contains(pH), failedGates: !(7.2...7.8).contains(pH) ? [.pH] : []))])
+            let swimmable = (7.0...7.8).contains(pH)
+            return ScenarioDefinition(id: "PH-\(pH)", name: "pH Boundary \(pH)", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: pH, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(v2State: swimmable ? .readyToSwim : .doNotSwim, swimmingBlocked: !swimmable, failedGates: swimmable ? [] : [.pH]))])
         }
         let visualCases: [(String, WaterClarityAssessment, VisibleAlgaeAssessment, SwimabilityState, [SwimReadinessGateIdentifier])] = [
             ("clear-no-algae", .clear, .absent, .readyToSwim, []),
@@ -417,7 +435,7 @@ private enum ScenarioCatalog {
             ScenarioDefinition(id: "NT-optional-chlorine-pending", name: "Optional Maintenance Chlorine Keeps Tomorrow While Pending", area: "NEXT POOL TEST", chemistry: optionalMaintenanceChlorineChemistry, state: optionalMaintenanceChlorineState, steps: [
                 .generate(expect: .init(
                     treatmentCount: 1,
-                    treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .optional, badge: "Swim after ~1 hr", category: .poolCare, completionState: .plannedTreatment)],
+                    treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .recommended, badge: "Swim after ~1 hr", category: .poolCare, completionState: .plannedTreatment)],
                     v2State: .readyToSwim,
                     swimmingBlocked: false,
                     testingRequired: false,

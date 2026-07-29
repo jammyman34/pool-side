@@ -72,9 +72,17 @@ struct V2TreatmentClassifier {
             if isRecoveryChlorine(treatment) || !pendingVerificationGateIdentifiers(for: treatment).isEmpty {
                 return .swimBlocking
             }
-            return treatment.urgency == .optional ? .poolCare : .both
+            // ChemistryPolicy authority: a maintenance top-off at/above the CYA-adjusted readiness minimum
+            // does not block swimming, regardless of whether its urgency is Recommended or Optional. The
+            // swim-blocking FC cases (below-minimum corrective, recovery) are handled above.
+            return .poolCare
         case "pH":
-            return .swimBlocking
+            // A COMPLETED pH treatment keeps its swim-blocking classification so its post-completion
+            // circulation / verification hold is preserved (a fresh acid/base dose is still circulating).
+            if treatment.isCompleted { return .swimBlocking }
+            // ChemistryPolicy authority: a PLANNED correction toward ~7.4 for a still-swimmable pH
+            // (7.0–7.2 / 7.6–7.8) is pool care and does not block swimming; only pH outside 7.0–7.8 blocks.
+            return currentPHBlocksSwimming(treatment) ? .swimBlocking : .poolCare
         case "totalAlkalinity":
             return treatment.isAcidTreatment ? .swimBlocking : .poolCare
         case "calciumHardness", "cyanuricAcid", "saltLevel":
@@ -200,6 +208,14 @@ struct V2TreatmentClassifier {
     private func readyAt(for treatment: Treatment, waitMinutes: Int?) -> Date? {
         guard let waitMinutes, let completedAt = treatment.completedAt else { return nil }
         return completedAt.addingTimeInterval(TimeInterval(waitMinutes * 60))
+    }
+
+    /// Whether the pH of the treatment's source test currently blocks swimming, per ChemistryPolicy
+    /// (blocks only outside 7.0–7.8). Used so non-blocking Recommended pH corrections are classified
+    /// as pool care rather than swim-blocking.
+    private func currentPHBlocksSwimming(_ treatment: Treatment) -> Bool {
+        guard let test = treatment.poolTest else { return true }
+        return ChemistryPolicy.classify(.pH, value: test.pH, context: ChemistryPolicyContext(cyanuricAcid: test.cyanuricAcid)).blocksSwimming
     }
 
     private func isRecoveryChlorine(_ treatment: Treatment) -> Bool {

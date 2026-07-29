@@ -383,6 +383,26 @@ final class PoolViewModel {
         )
     }
 
+    // MARK: - Swim Readiness (production authority)
+
+    /// The single production swim-readiness authority: SwimabilityV2Engine over the canonical normalized
+    /// state and ChemistryPolicy gates. Not gated by any DEBUG comparison flag. Presentation layers
+    /// (e.g. Dashboard) map this assessment to UI; they must not re-derive readiness themselves.
+    func swimReadinessAssessment(
+        for test: PoolTest,
+        in tests: [PoolTest],
+        evaluationDate: Date = Date()
+    ) -> SwimabilityV2Assessment {
+        var effectiveConfig = poolConfig
+        effectiveConfig.testMethod = test.testMethod
+        let request = AIRecommendationRequest(
+            currentTest: test,
+            recentHistory: recentHistory(before: test, in: tests, limit: 10),
+            poolConfig: effectiveConfig
+        )
+        return SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+    }
+
     // MARK: - Complete Treatment
 
     @MainActor

@@ -255,31 +255,11 @@ struct DashboardView: View {
         return "Latest pool check"
     }
 
+    /// Presentation only: the Dashboard maps the canonical Swimability V2 assessment (the single
+    /// production readiness authority) to its hero vocabulary. It performs NO chemistry/readiness
+    /// calculation of its own — all thresholds live in ChemistryPolicy / SwimReadinessGateEvaluator.
     private func swimReadinessStatus(for test: PoolTest) -> DashboardSwimReadinessStatus {
-        let indicators = Set(test.visualIndicators)
-        let hasVisibleProblem = indicators.contains(VisualIndicator.greenWater.rawValue)
-            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
-            || indicators.contains(VisualIndicator.cloudyWater.rawValue)
-            || indicators.contains(VisualIndicator.foam.rawValue)
-        let targetRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
-
-        if hasVisibleProblem
-            || test.pH < 7.2
-            || test.pH > 7.8
-            || test.combinedChlorine > 0.5
-            || test.freeChlorine < targetRange.lowerBound {
-            return .notRecommended
-        }
-
-        if test.freeChlorine > max(10, targetRange.upperBound) {
-            return .readyAfterWait
-        }
-
-        if test.visualIndicators.isEmpty {
-            return .unknown
-        }
-
-        return .readyNow
+        DashboardSwimReadinessStatus(swimabilityState: viewModel.swimReadinessAssessment(for: test, in: tests).state)
     }
 
     @ViewBuilder
@@ -736,11 +716,27 @@ private struct DashboardEditRoute: Identifiable {
     var id: UUID { test.id }
 }
 
-private enum DashboardSwimReadinessStatus {
+/// Pure presentation mapping from the canonical Swimability V2 state to the Dashboard hero vocabulary.
+/// Kept `internal` (not private) so it is unit-testable as a presentation layer — it contains no
+/// chemistry logic. If V2 gains states this must map them intentionally rather than hide distinctions.
+enum DashboardSwimReadinessStatus: Equatable {
     case readyNow
     case readyAfterWait
     case notRecommended
     case unknown
+
+    init(swimabilityState state: SwimabilityState) {
+        switch state {
+        case .readyToSwim:
+            self = .readyNow
+        case .expectedReadyAfterTreatment, .expectedReadyAroundTime:
+            self = .readyAfterWait
+        case .doNotSwim, .testBeforeSwimming:
+            self = .notRecommended
+        case .moreInformationNeeded:
+            self = .unknown
+        }
+    }
 }
 
 private enum DashboardWelcomeMessage {
