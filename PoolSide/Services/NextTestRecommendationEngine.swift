@@ -45,6 +45,53 @@ struct NextTestRecommendationEngine {
         treatmentSteps: [Treatment],
         watchlist: [Treatment],
         recentHistory: [PoolTest],
+        config: PoolConfiguration,
+        outstandingCheckDueDates: [Date] = []
+    ) -> NextTestRecommendation {
+        let base = baseRecommendation(
+            for: test,
+            treatmentSteps: treatmentSteps,
+            watchlist: watchlist,
+            recentHistory: recentHistory,
+            config: config
+        )
+        return coordinatingWithOutstandingChecks(base, outstandingCheckDueDates: outstandingCheckDueDates)
+    }
+
+    /// While a treatment workflow still has an outstanding focused Check, that Check is the immediate
+    /// required measurement. The routine full pool test must not be scheduled as a competing event on or
+    /// before the Check's due time — otherwise the user is asked for a full panel that duplicates the
+    /// verification the Check already provides. Rather than an arbitrary fixed postponement, the routine
+    /// test is re-anchored to the Check's own due date and advanced by the engine's normally-computed
+    /// cadence (the interval it already chose). If the routine test was independently due later than the
+    /// Check anyway, it is left untouched.
+    private func coordinatingWithOutstandingChecks(
+        _ base: NextTestRecommendation,
+        outstandingCheckDueDates: [Date]
+    ) -> NextTestRecommendation {
+        guard
+            let latestCheckDue = outstandingCheckDueDates.max(),
+            let routineDate = base.recommendedDate,
+            routineDate <= latestCheckDue
+        else { return base }
+
+        return NextTestRecommendation(
+            recommendedDate: latestCheckDue.addingTimeInterval(base.interval),
+            interval: base.interval,
+            reason: "A focused re-test is still pending; routine full testing is deferred until after it is recorded.",
+            title: base.title,
+            body: "Record the pending focused re-test first. Your next full pool test is scheduled for after that result.",
+            urgency: base.urgency,
+            source: base.source,
+            isPendingTreatmentAction: base.isPendingTreatmentAction
+        )
+    }
+
+    private func baseRecommendation(
+        for test: PoolTest,
+        treatmentSteps: [Treatment],
+        watchlist: [Treatment],
+        recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> NextTestRecommendation {
         let confidence = ChemistryEngine().recommendationConfidenceInput(for: test, recentHistory: recentHistory)

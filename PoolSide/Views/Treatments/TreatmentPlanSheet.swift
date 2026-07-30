@@ -1543,73 +1543,18 @@ struct TreatmentPlanSheet: View {
 
     @MainActor
     private func completeTreatment(_ treatment: Treatment) async {
-        let minutesToWait = treatment.minutesBeforeNext
-
-        // Mark complete
-        viewModel.completeTreatment(treatment)
-
-        // Find next pending step
-        let nextPending = treatmentSteps
-            .filter { !$0.isCompleted && !$0.isSkipped }
-            .sorted { $0.sortOrder < $1.sortOrder }
-            .first
-
-        var scheduledMessages: [String] = []
-
-        await NotificationService.shared.checkAuthorizationStatus()
-
-        if viewModel.poolConfig.enableTreatmentStepReminders,
-           NotificationService.shared.isAuthorized,
-           minutesToWait > 0,
-           let next = nextPending {
-            if let identifier = await NotificationService.shared.scheduleTreatmentStepReminder(
-                treatmentID: treatment.id,
-                nextTreatmentName: next.chemicalName,
-                afterMinutes: minutesToWait
-            ) {
-                treatment.reminderNotificationIdentifier = identifier
-                treatment.stepReminderNotificationIdentifier = identifier
-                scheduledMessages.append("next step in \(NotificationService.waitLabel(minutes: minutesToWait))")
-            }
-        }
-
-        if NotificationService.shared.isAuthorized,
-           let retest = NextTestRecommendationEngine().treatmentRetestRecommendation(
-                for: treatment,
-                completedAt: treatment.completedAt ?? Date()
-           ) {
-            let minutes = max(1, Int(retest.interval / 60))
-            if let identifier = await NotificationService.shared.scheduleTreatmentRetestReminder(
-                treatmentID: treatment.id,
-                parameter: treatment.targetParameter,
-                afterMinutes: minutes,
-                reason: retest.scheduledReason
-            ) {
-                treatment.retestReminderNotificationIdentifier = identifier
-                scheduledMessages.append("retest in \(NotificationService.waitLabel(minutes: minutes))")
-            }
-        }
-
-        do {
-            try modelContext.save()
-            await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
-            viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
-                for: test,
-                recentTests: recentHistory,
-                context: "Treatment Completed"
-            )
-            if !scheduledMessages.isEmpty {
-                toastMessage = ToastMessage.notificationSet(label: scheduledMessages.joined(separator: ", "))
-            } else if minutesToWait > 0, nextPending != nil {
-                toastMessage = ToastMessage(
-                    text: "Step reminder not set. Notifications are off.",
-                    icon: "bell.slash",
-                    color: PoolColor.secondaryText
-                )
-            }
-        } catch {
-            viewModel.lastError = error.localizedDescription
-        }
+        // Single completion authority lives in the ViewModel: it marks complete, schedules the Check-owned
+        // verification reminder (or a next-step reminder only for a real subsequent chemical step), and
+        // refreshes routine testing. The view only presents feedback.
+        await viewModel.completeTreatment(treatment, in: tests, modelContext: modelContext)
+        let awaitsCheck = viewModel.dependentCheck(for: treatment) != nil
+        toastMessage = ToastMessage(
+            text: awaitsCheck
+                ? "Marked complete. We'll remind you when it's time to re-test."
+                : "Treatment marked complete.",
+            icon: "checkmark.circle.fill",
+            color: PoolColor.statusIdeal
+        )
     }
 
     private func recalculateRecommendations() {
@@ -1660,36 +1605,22 @@ struct TreatmentPlanSheet: View {
     }
 
     @MainActor
-    private func saveFocusedCheck(_ checkStep: Treatment, values: [String: Double]) async throws {
-        try await viewModel.saveFocusedCheck(
+    private func saveFocusedCheck(_ checkStep: Treatment, values: [String: Double]) async throws -> FocusedCheckResult {
+        // The ViewModel is the single authority: it records evidence, regenerates the plan, recomputes the
+        // routine reminder, and returns the explicit closure outcome. The sheet presents that outcome.
+        let result = try await viewModel.saveFocusedCheck(
             checkStep,
             values: values,
             for: test,
             allTests: tests,
             modelContext: modelContext
         )
-        await viewModel.replaceNextPoolTestReminder(for: test, allTests: tests)
         viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
             for: test,
             recentTests: recentHistory,
             context: "Focused Check Saved"
         )
-        toastMessage = ToastMessage(
-            text: focusedCheckFeedback(for: checkStep),
-            icon: "testtube.2",
-            color: PoolColor.statusTesting
-        )
-    }
-
-    private func focusedCheckFeedback(for checkStep: Treatment) -> String {
-        let nextStep = workflowSteps
-            .filter { !$0.isCompleted && !$0.isSkipped }
-            .sorted { $0.sortOrder < $1.sortOrder }
-            .first
-        guard let nextStep, nextStep.id != checkStep.id else {
-            return "Check complete. Treatment plan updated."
-        }
-        return "Treatment plan updated. Next step: \(nextStep.chemicalName)."
+        return result
     }
 
     @MainActor
@@ -1911,59 +1842,70 @@ private extension PoolConditions {
 private struct FocusedCheckEntrySheet: View {
     let checkStep: Treatment
     let sourceTest: PoolTest
-    let onSave: ([String: Double]) async throws -> Void
+    let onSave: ([String: Double]) async throws -> FocusedCheckResult
 
     @Environment(\.dismiss) private var dismiss
     @State private var values: [String: String] = [:]
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var result: FocusedCheckResult?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Text(checkStep.instructions)
-                        .font(.subheadline)
-                        .foregroundStyle(PoolColor.secondaryText)
-                }
-
-                Section("Measurements") {
-                    ForEach(checkStep.checkParameters, id: \.self) { parameter in
-                        HStack {
-                            Text(displayName(for: parameter))
-                            Spacer()
-                            TextField("0", text: binding(for: parameter))
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(maxWidth: 110)
-                            Text(unit(for: parameter))
-                                .foregroundStyle(PoolColor.secondaryText)
-                        }
-                    }
-                }
-
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(PoolColor.statusOffRange)
-                    }
-                }
+            if let result {
+                FocusedCheckResultView(result: result) { dismiss() }
+                    .navigationTitle("Check Result")
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                entryForm
             }
-            .navigationTitle(checkStep.chemicalName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save Check") {
-                        Task { await save() }
-                    }
-                    .disabled(isSaving)
-                }
-            }
-            .onAppear(perform: seedValues)
         }
+    }
+
+    private var entryForm: some View {
+        Form {
+            Section {
+                Text(checkStep.instructions)
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.secondaryText)
+            }
+
+            Section("Measurements") {
+                ForEach(checkStep.checkParameters, id: \.self) { parameter in
+                    HStack {
+                        Text(displayName(for: parameter))
+                        Spacer()
+                        TextField("0", text: binding(for: parameter))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 110)
+                        Text(unit(for: parameter))
+                            .foregroundStyle(PoolColor.secondaryText)
+                    }
+                }
+            }
+
+            if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(PoolColor.statusOffRange)
+                }
+            }
+        }
+        .navigationTitle(checkStep.chemicalName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save Check") {
+                    Task { await save() }
+                }
+                .disabled(isSaving)
+            }
+        }
+        .onAppear(perform: seedValues)
     }
 
     private func binding(for parameter: String) -> Binding<String> {
@@ -1994,8 +1936,8 @@ private struct FocusedCheckEntrySheet: View {
 
         isSaving = true
         do {
-            try await onSave(parsed)
-            dismiss()
+            // Present the explicit outcome instead of dismissing straight back to the plan.
+            result = try await onSave(parsed)
         } catch {
             errorMessage = "Could not save this check."
         }
@@ -2032,6 +1974,95 @@ private struct FocusedCheckEntrySheet: View {
 
     private func unit(for parameter: String) -> String {
         parameter == "pH" ? "" : "ppm"
+    }
+}
+
+/// Explicit interpretation of a focused Check, shown immediately after Save so the user never has to
+/// infer success from the absence of another treatment card.
+private struct FocusedCheckResultView: View {
+    let result: FocusedCheckResult
+    let onContinue: () -> Void
+
+    private var isSuccess: Bool { result.allResolved && !result.anyBlocksSwimming }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 12) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 34))
+                        .foregroundStyle(accentColor)
+                    Text(result.title)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(PoolColor.cloudWhite)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    resultRow(label: "Result", value: measuredSummary)
+                    Divider().overlay(PoolColor.cloudWhite.opacity(0.08))
+                    labeledParagraph(title: "What this means", text: result.interpretation)
+                    Divider().overlay(PoolColor.cloudWhite.opacity(0.08))
+                    labeledParagraph(title: "Next", text: result.nextAction)
+                }
+                .padding(16)
+                .background(PoolColor.oceanBlue, in: RoundedRectangle(cornerRadius: 16))
+
+                Button(action: onContinue) {
+                    Text(result.hasFollowUpTreatment ? "View updated plan" : "Continue")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(PoolColor.poolTeal, in: RoundedRectangle(cornerRadius: 14))
+                        .foregroundStyle(PoolColor.cloudWhite)
+                }
+            }
+            .padding(20)
+        }
+        .background(PoolColor.appBackground)
+    }
+
+    private var iconName: String {
+        if result.anyBlocksSwimming { return "exclamationmark.triangle.fill" }
+        if isSuccess { return "checkmark.seal.fill" }
+        return "arrow.triangle.2.circlepath"
+    }
+
+    private var accentColor: Color {
+        if result.anyBlocksSwimming { return PoolColor.statusCritical }
+        if isSuccess { return PoolColor.statusIdeal }
+        return PoolColor.sunshine
+    }
+
+    private var measuredSummary: String {
+        result.parameterOutcomes
+            .map { "\($0.displayName) \($0.measuredValue.formattedTreatmentAmount)" }
+            .joined(separator: ", ")
+    }
+
+    private func resultRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(PoolColor.cloudWhite.opacity(0.6))
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.cloudWhite)
+        }
+    }
+
+    private func labeledParagraph(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2)
+                .tracking(0.5)
+                .foregroundStyle(PoolColor.cloudWhite.opacity(0.5))
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(PoolColor.cloudWhite.opacity(0.9))
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -2080,6 +2111,8 @@ struct ExternalReviewExportBuilder {
             """
         }.joined(separator: "\n\n")
 
+        let checkOutcomes = focusedCheckOutcomesSection(config: config, test: test, recentHistory: recentHistory)
+
         return """
         External Review Treatment Audit
         - Preferred chlorine: \(config.chlorinePreference.displayName) (\(config.chlorinePreference.productID.concentrationLabel))
@@ -2091,7 +2124,76 @@ struct ExternalReviewExportBuilder {
         - Suppressed treatment reasons: \(suppressed)
 
         \(treatmentLines.isEmpty ? "No active treatment products." : treatmentLines)
+        \(checkOutcomes)
         """
+    }
+
+    /// Interpreted outcomes for completed focused Checks. Deterministically reconstructed from the Check's
+    /// result test + the current (post-Check) plan; no historical outcome is fabricated when the result
+    /// test cannot be resolved.
+    private static func focusedCheckOutcomesSection(
+        config: PoolConfiguration,
+        test: PoolTest,
+        recentHistory: [PoolTest]
+    ) -> String {
+        let completedChecks = test.treatments
+            .filter { $0.isFocusedCheckStep && $0.isCompleted }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        guard !completedChecks.isEmpty else { return "" }
+
+        let candidateTests = [test] + recentHistory
+        let evaluator = FocusedCheckOutcomeEvaluator()
+
+        let lines = completedChecks.compactMap { check -> String? in
+            guard
+                let resultTestID = check.checkResultTestID,
+                let resultTest = candidateTests.first(where: { $0.id == resultTestID })
+            else { return nil }
+
+            let parameterLines = check.checkParameters.map { parameter -> String in
+                let outcome = evaluator.outcome(
+                    parameter: parameter,
+                    priorValue: nil,
+                    measuredValue: measuredValue(of: parameter, in: resultTest),
+                    postCheckTest: resultTest,
+                    postCheckTreatments: test.treatments,
+                    config: config
+                )
+                let outcomeText: String
+                switch outcome.kind {
+                case .resolved:
+                    outcomeText = "returned to operating range"
+                case .noChemicalActionNeeded:
+                    outcomeText = "outside ideal but no chemical correction warranted"
+                default:
+                    outcomeText = "still outside operating range"
+                }
+                let further = outcome.hasFollowUpTreatment ? "generated from the new measurement" : "none"
+                return """
+                  - \(outcome.displayName) result: \(outcome.measuredValue.formattedTreatmentAmount)
+                    Outcome: \(outcomeText)
+                    Further \(outcome.displayName) correction: \(further)
+                """
+            }.joined(separator: "\n")
+
+            return "- \(check.chemicalName) (completed):\n\(parameterLines)"
+        }
+
+        guard !lines.isEmpty else { return "" }
+        return "\nCompleted focused-check outcomes:\n" + lines.joined(separator: "\n")
+    }
+
+    private static func measuredValue(of parameter: String, in test: PoolTest) -> Double {
+        switch parameter {
+        case "freeChlorine": return test.freeChlorine
+        case "combinedChlorine": return test.combinedChlorine
+        case "pH": return test.pH
+        case "totalAlkalinity": return test.totalAlkalinity
+        case "calciumHardness": return test.calciumHardness
+        case "cyanuricAcid": return test.cyanuricAcid
+        case "saltLevel": return test.saltLevel ?? 0
+        default: return 0
+        }
     }
 
     private static func globalPreference(for treatment: Treatment, config: PoolConfiguration) -> String {

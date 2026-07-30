@@ -1446,6 +1446,90 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
     }
 
+    // MARK: - pH treatment generation is ChemistryPolicy-authoritative (history never gates existence)
+
+    private func phClassification(_ value: Double, config: PoolConfiguration, totalAlkalinity: Double) -> ParameterClassification {
+        ChemistryPolicy.classify(.pH, value: value, context: .make(
+            config: config,
+            cyanuricAcid: 55,
+            pH: value,
+            totalAlkalinity: totalAlkalinity,
+            hasScalingEvidence: false,
+            chlorineSampleSize: nil
+        ))
+    }
+
+    // A. Fresh pH 7.8 with no history still produces the approved Recommended staged pH-lowering correction.
+    func testFreshHighPH78WithNoHistoryGeneratesRecommendedStagedCorrection() throws {
+        let config = ChemistryTestFixtures.config()
+        let test = ChemistryTestFixtures.currentPool(pH: 7.8, freeChlorine: 6, totalAlkalinity: 100)
+        let treatment = try actionableTreatment(target: "pH", config: config, test: test, history: [])
+
+        XCTAssertEqual(treatment.urgency, .recommended, "7.8 is a Recommended correction, independent of history.")
+        XCTAssertTrue(treatment.isAcidTreatment, "High pH is lowered with acid.")
+        XCTAssertEqual(treatment.expectedDelta, 7.4 - 7.8, accuracy: 0.0001, "Correction targets ~7.4.")
+        XCTAssertGreaterThan(treatment.amount, 0)
+        // Staged application preserved: conservative dose, circulate, retest before repeating.
+        XCTAssertTrue(treatment.instructions.localizedCaseInsensitiveContains("conservative"))
+        XCTAssertTrue(treatment.instructions.localizedCaseInsensitiveContains("retest"))
+        // Swimmable before treatment.
+        XCTAssertFalse(phClassification(7.8, config: config, totalAlkalinity: 100).blocksSwimming)
+    }
+
+    // B. pH 7.7 with no history behaves identically (Recommended, non-blocking, staged).
+    func testFreshHighPH77WithNoHistoryGeneratesRecommendedNonBlockingCorrection() throws {
+        let config = ChemistryTestFixtures.config()
+        let test = ChemistryTestFixtures.currentPool(pH: 7.7, freeChlorine: 6, totalAlkalinity: 100)
+        let treatment = try actionableTreatment(target: "pH", config: config, test: test, history: [])
+
+        XCTAssertEqual(treatment.urgency, .recommended)
+        XCTAssertTrue(treatment.isAcidTreatment)
+        XCTAssertEqual(treatment.expectedDelta, 7.4 - 7.7, accuracy: 0.0001)
+        XCTAssertFalse(phClassification(7.7, config: config, totalAlkalinity: 100).blocksSwimming)
+    }
+
+    // C. pH 7.6 is inside the operating range — no pH correction.
+    func testIdealPH76GeneratesNoPHCorrection() throws {
+        let config = ChemistryTestFixtures.config()
+        let test = ChemistryTestFixtures.currentPool(pH: 7.6, freeChlorine: 6, totalAlkalinity: 100)
+        let phTreatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+            .filter { $0.targetParameter == "pH" && $0.amount > 0 }
+        XCTAssertTrue(phTreatments.isEmpty, "7.6 is ideal; no pH correction is generated.")
+        XCTAssertNil(phClassification(7.6, config: config, totalAlkalinity: 100).correctionTarget)
+    }
+
+    // D. pH 7.9 is Act Now / swim-blocking.
+    func testHighPH79IsActNowAndSwimBlocking() throws {
+        let config = ChemistryTestFixtures.config()
+        let test = ChemistryTestFixtures.currentPool(pH: 7.9, freeChlorine: 6, totalAlkalinity: 100)
+        let treatment = try actionableTreatment(target: "pH", config: config, test: test, history: [])
+
+        XCTAssertEqual(treatment.urgency, .immediate, "Above 7.8 is Act Now.")
+        XCTAssertTrue(treatment.isAcidTreatment)
+        XCTAssertTrue(phClassification(7.9, config: config, totalAlkalinity: 100).blocksSwimming, "Above 7.8 blocks swimming.")
+    }
+
+    // E. Rising-history pH 7.8 is still treated; history may alter copy but is not required for treatment.
+    func testRisingHistoryPH78StillTreatedWithHistoryAwareCopy() throws {
+        let config = ChemistryTestFixtures.config()
+        let risingHistory = [
+            ChemistryTestFixtures.historicalTest(daysAgo: 2, pH: 7.6, totalAlkalinity: 150),
+            ChemistryTestFixtures.historicalTest(daysAgo: 5, pH: 7.5, totalAlkalinity: 150),
+            ChemistryTestFixtures.historicalTest(daysAgo: 8, pH: 7.4, totalAlkalinity: 150)
+        ]
+        let test = ChemistryTestFixtures.currentPool(pH: 7.8, freeChlorine: 6, totalAlkalinity: 150)
+
+        let withHistory = try actionableTreatment(target: "pH", config: config, test: test, history: risingHistory)
+        let withoutHistory = try actionableTreatment(target: "pH", config: config, test: test, history: [])
+
+        // Treatment exists and is Recommended in BOTH cases — history is not required for generation.
+        XCTAssertEqual(withHistory.urgency, .recommended)
+        XCTAssertEqual(withoutHistory.urgency, .recommended)
+        XCTAssertTrue(withHistory.isAcidTreatment)
+        XCTAssertEqual(withHistory.expectedDelta, withoutHistory.expectedDelta, accuracy: 0.0001,
+                       "Same measured pH yields the same correction target regardless of history.")
+    }
+
     private func actionableTreatment(
         target: String,
         config: PoolConfiguration,

@@ -7,8 +7,33 @@ enum PoolNotificationPurpose: String, Codable {
     case treatmentRetest
 }
 
+/// Seam for the notification effects the verification lifecycle drives. PoolViewModel depends on this
+/// (default `NotificationService.shared`); tests inject a spy that records scheduled/cancelled identifiers
+/// so Check-owned notification behavior is deterministically verifiable without device authorization.
 @MainActor
-final class NotificationService: ObservableObject {
+protocol PoolNotificationScheduling: AnyObject {
+    var isAuthorized: Bool { get }
+    func checkAuthorizationStatus() async
+    @discardableResult
+    func scheduleCheckReminder(checkID: UUID, parameters: [String], at date: Date) async -> String?
+    @discardableResult
+    func scheduleTreatmentStepReminder(treatmentID: UUID, nextTreatmentName: String, afterMinutes: Int) async -> String?
+    func cancel(identifier: String)
+    func cancelNextPoolTestReminder()
+    @discardableResult
+    func replaceNextPoolTestReminder(at date: Date, reason: String) async -> String?
+    func cancelTreatmentReminder(for treatment: Treatment)
+}
+
+extension PoolNotificationScheduling {
+    /// Convenience: cancel an optional identifier if present (no-op when nil).
+    func cancel(identifier: String?) {
+        if let identifier { cancel(identifier: identifier) }
+    }
+}
+
+@MainActor
+final class NotificationService: ObservableObject, PoolNotificationScheduling {
 
     static let shared = NotificationService()
     static let nextPoolTestIdentifier = "next-pool-test"
@@ -116,6 +141,28 @@ final class NotificationService: ObservableObject {
         return identifier
     }
 
+    /// Check-owned targeted verification reminder. Per the Check-owned verification model, the focused
+    /// Check owns the "retest X" notification; it is scheduled at parent-treatment completion for the
+    /// Check's due time (completedAt + policy delay) so iOS fires it while Pool Side is closed.
+    @discardableResult
+    func scheduleCheckReminder(checkID: UUID, parameters: [String], at date: Date) async -> String? {
+        guard isAuthorized else { return nil }
+        let identifier = Self.checkReminderIdentifier(for: checkID)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Retest \(displayParameter(parameters.first ?? "pool water"))"
+        content.body = "Your pool has circulated long enough — record the follow-up measurement to confirm the treatment worked."
+        content.sound = .default
+        content.categoryIdentifier = "POOL_TEST_REMINDER"
+
+        await schedule(identifier: identifier, content: content, date: adjustedFutureDate(date))
+        return identifier
+    }
+
+    static func checkReminderIdentifier(for checkID: UUID) -> String {
+        "check-retest-\(checkID.uuidString)"
+    }
+
     /// Compatibility wrapper for the pre-refactor API.
     @discardableResult
     func scheduleNextStepReminder(nextTreatmentName: String, afterMinutes: Int) async -> String {
@@ -148,7 +195,8 @@ final class NotificationService: ObservableObject {
         [
             treatment.reminderNotificationIdentifier,
             treatment.stepReminderNotificationIdentifier,
-            treatment.retestReminderNotificationIdentifier
+            treatment.retestReminderNotificationIdentifier,
+            treatment.checkReminderNotificationIdentifier
         ]
         .compactMap { $0 }
         .forEach { cancel(identifier: $0) }
@@ -156,6 +204,7 @@ final class NotificationService: ObservableObject {
         treatment.reminderNotificationIdentifier = nil
         treatment.stepReminderNotificationIdentifier = nil
         treatment.retestReminderNotificationIdentifier = nil
+        treatment.checkReminderNotificationIdentifier = nil
     }
 
     func cancelAllPoolSideNotifications() {

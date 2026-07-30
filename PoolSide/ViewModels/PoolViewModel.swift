@@ -15,7 +15,14 @@ final class PoolViewModel {
     // MARK: - Services
     private let chemistryEngine = ChemistryEngine()
     private let nextTestRecommendationEngine = NextTestRecommendationEngine()
+    private let workflowEngine = TreatmentWorkflowEngine()
     private var aiService: AIService?
+
+    /// Notification effects seam. Defaults to the production `NotificationService.shared`; tests inject a
+    /// spy. Resolved lazily inside @MainActor methods so the singleton is not touched at init.
+    var notificationSchedulerOverride: PoolNotificationScheduling?
+    @MainActor
+    private var notifications: PoolNotificationScheduling { notificationSchedulerOverride ?? NotificationService.shared }
 
     // MARK: - Init
     init() {
@@ -220,7 +227,7 @@ final class PoolViewModel {
     private func deleteTreatments(_ treatments: [Treatment], from test: PoolTest, modelContext: ModelContext) {
         let deletedIDs = Set(treatments.map(\.id))
         treatments.forEach {
-            NotificationService.shared.cancelTreatmentReminder(for: $0)
+            notifications.cancelTreatmentReminder(for: $0)
             modelContext.delete($0)
         }
         test.treatments.removeAll { deletedIDs.contains($0.id) }
@@ -403,26 +410,200 @@ final class PoolViewModel {
         return SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
     }
 
-    // MARK: - Complete Treatment
+    // MARK: - Complete Treatment (single production authority)
 
+    /// The canonical treatment-completion routine. Views call this and must not independently mutate
+    /// completion state, compute verification timing, or schedule notifications.
+    ///
+    /// Establishes completion timing, then — per the Check-owned verification model — schedules the
+    /// dependent focused Check's targeted reminder for its due time (completedAt + policy delay). A plain
+    /// "next step" reminder is scheduled ONLY when a real subsequent chemical treatment follows (never for
+    /// a Check, which already owns its reminder). Finally refreshes the routine Next Full Pool Test.
     @MainActor
-    func completeTreatment(_ treatment: Treatment) {
+    func completeTreatment(_ treatment: Treatment, in tests: [PoolTest], modelContext: ModelContext) async {
         treatment.isCompleted = true
         treatment.completedAt = Date()
         treatment.isSkipped = false
         treatment.skippedAt = nil
+
+        await notifications.checkAuthorizationStatus()
+        let remindersEnabled = poolConfig.enableTreatmentStepReminders && notifications.isAuthorized
+
+        if let check = dependentCheck(for: treatment) {
+            // Check owns the verification notification, scheduled for its derived due time.
+            if remindersEnabled,
+               let due = workflowEngine.availableDate(for: check, in: treatment.poolTest?.treatments ?? []) {
+                check.checkReminderNotificationIdentifier = await notifications.scheduleCheckReminder(
+                    checkID: check.id,
+                    parameters: check.checkParameters.isEmpty ? [check.targetParameter] : check.checkParameters,
+                    at: due
+                )
+            }
+        } else if treatment.minutesBeforeNext > 0, let next = nextChemicalTreatment(after: treatment) {
+            // Only a genuine subsequent chemical treatment gets a next-step reminder.
+            if remindersEnabled {
+                let identifier = await notifications.scheduleTreatmentStepReminder(
+                    treatmentID: treatment.id,
+                    nextTreatmentName: next.chemicalName,
+                    afterMinutes: treatment.minutesBeforeNext
+                )
+                treatment.reminderNotificationIdentifier = identifier
+                treatment.stepReminderNotificationIdentifier = identifier
+            }
+        }
+
+        try? modelContext.save()
+        let anchorTest = treatment.poolTest ?? latestTest(in: tests)
+        await replaceNextPoolTestReminder(for: anchorTest, allTests: tests)
+        if let anchorTest {
+            runSwimabilityV2ComparisonAfterTreatmentStateChange(
+                for: anchorTest,
+                recentTests: recentHistory(before: anchorTest, in: tests),
+                context: "Treatment Completed"
+            )
+        }
+    }
+
+    /// The uncompleted focused Check that verifies this treatment, if one exists and is still actionable.
+    @MainActor
+    func dependentCheck(for treatment: Treatment) -> Treatment? {
+        guard !treatment.isFocusedCheckStep else { return nil }
+        return treatment.poolTest?.treatments.first {
+            $0.isFocusedCheckStep && $0.parentTreatmentID == treatment.id && !$0.isCompleted && !$0.isSkipped
+        }
+    }
+
+    /// The next actionable chemical treatment step after this one (excludes Checks and watchlist items).
+    private func nextChemicalTreatment(after treatment: Treatment) -> Treatment? {
+        (treatment.poolTest?.treatments ?? [])
+            .filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep && !$0.isCompleted && !$0.isSkipped && $0.id != treatment.id && $0.amount > 0 }
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .first { $0.sortOrder > treatment.sortOrder }
+    }
+
+    private func latestTest(in tests: [PoolTest]) -> PoolTest? {
+        tests.sorted { $0.date > $1.date }.first
+    }
+
+    /// §11–12 — A newly logged full test can verify (supersede) a prior pending focused Check, but ONLY
+    /// when ALL of the following hold: the full test is newer than the parent treatment's completion; it
+    /// is at or after the Check's due time; it measures every Check parameter; and no other treatment
+    /// affecting those parameters completed between the parent and this test. A full test logged before
+    /// the Check is due never verifies (§12). When a Check is superseded, its verification notification is
+    /// cancelled so the user is not nagged to repeat a measurement they have already provided.
+    @MainActor
+    func resolveChecksSatisfiedByFullTest(_ fullTest: PoolTest, allTests: [PoolTest], modelContext: ModelContext) {
+        // A partial focused-check entry is not a full test and never supersedes another Check.
+        guard !fullTest.isFocusedCheck else { return }
+
+        let allTreatments = allTests.flatMap(\.treatments)
+        let pendingChecks = allTreatments.filter {
+            $0.isFocusedCheckStep && !$0.isCompleted && !$0.isSkipped
+        }
+        guard !pendingChecks.isEmpty else { return }
+
+        var didResolveAny = false
+        for check in pendingChecks {
+            guard
+                let parentID = check.parentTreatmentID,
+                let parent = allTreatments.first(where: { $0.id == parentID }),
+                parent.isCompleted,
+                let parentCompletedAt = parent.completedAt
+            else { continue }
+
+            // (1) The full test post-dates the parent's completion.
+            guard fullTest.date > parentCompletedAt else { continue }
+            // (2) The full test is at or after the Check's due time (§12: earlier tests never verify).
+            guard
+                let dueDate = workflowEngine.availableDate(for: check, in: parent.poolTest?.treatments ?? []),
+                fullTest.date >= dueDate
+            else { continue }
+            // (3) The full test measures every Check parameter.
+            let params = check.checkParameters.isEmpty ? [check.targetParameter] : check.checkParameters
+            guard params.allSatisfy({ fullTestContainsParameter(fullTest, $0) }) else { continue }
+            // (4) No other treatment affecting those parameters completed between the parent and this test.
+            let families = Set(params.map(parameterFamily))
+            let hasInterveningTreatment = allTreatments.contains { other in
+                other.id != parent.id
+                    && other.isCompleted
+                    && !other.isFocusedCheckStep
+                    && (other.completedAt.map { $0 > parentCompletedAt && $0 < fullTest.date } ?? false)
+                    && families.contains(parameterFamily(other.targetParameter))
+            }
+            guard !hasInterveningTreatment else { continue }
+
+            // All conditions hold — this full test IS the verification the Check was waiting for.
+            check.isCompleted = true
+            check.completedAt = fullTest.date
+            check.checkResultTestID = fullTest.id
+            notifications.cancel(identifier: check.checkReminderNotificationIdentifier)
+            check.checkReminderNotificationIdentifier = nil
+            didResolveAny = true
+        }
+
+        if didResolveAny {
+            try? modelContext.save()
+        }
+    }
+
+    /// Canonical parameter family so a chlorine treatment is recognized as affecting both FC and CC.
+    private func parameterFamily(_ parameter: String) -> String {
+        switch parameter {
+        case "freeChlorine", "combinedChlorine", "totalChlorine": return "chlorine"
+        default: return parameter
+        }
+    }
+
+    /// A standard full test always records the core chemistry parameters; salt only when configured.
+    private func fullTestContainsParameter(_ test: PoolTest, _ parameter: String) -> Bool {
+        switch parameter {
+        case "freeChlorine", "combinedChlorine", "totalChlorine", "pH",
+             "totalAlkalinity", "calciumHardness", "cyanuricAcid":
+            return true
+        case "saltLevel":
+            return test.saltLevel != nil
+        default:
+            return false
+        }
     }
 
     @MainActor
     func markTreatmentIncomplete(_ treatment: Treatment) {
         treatment.isCompleted = false
         treatment.completedAt = nil
-        NotificationService.shared.cancelTreatmentReminder(for: treatment)
+        notifications.cancel(identifier: treatment.reminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.stepReminderNotificationIdentifier)
+        treatment.reminderNotificationIdentifier = nil
+        treatment.stepReminderNotificationIdentifier = nil
+        // A treatment reverted to incomplete invalidates its Check's due-time notification.
+        if let check = treatment.poolTest?.treatments.first(where: { $0.isFocusedCheckStep && $0.parentTreatmentID == treatment.id }) {
+            notifications.cancel(identifier: check.checkReminderNotificationIdentifier)
+            check.checkReminderNotificationIdentifier = nil
+        }
     }
 
     @MainActor
     func skipTreatment(_ treatment: Treatment) {
-        NotificationService.shared.cancelTreatmentReminder(for: treatment)
+        notifications.cancel(identifier: treatment.reminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.stepReminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.retestReminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.checkReminderNotificationIdentifier)
+        treatment.reminderNotificationIdentifier = nil
+        treatment.stepReminderNotificationIdentifier = nil
+        treatment.retestReminderNotificationIdentifier = nil
+        treatment.checkReminderNotificationIdentifier = nil
+
+        // Skipping a parent treatment makes its dependent Check inapplicable — it must never become
+        // actionable without the treatment having been performed. Cancel its notification and skip it.
+        if !treatment.isFocusedCheckStep,
+           let check = treatment.poolTest?.treatments.first(where: { $0.isFocusedCheckStep && $0.parentTreatmentID == treatment.id }),
+           !check.isCompleted {
+            notifications.cancel(identifier: check.checkReminderNotificationIdentifier)
+            check.checkReminderNotificationIdentifier = nil
+            check.isSkipped = true
+            check.skippedAt = Date()
+        }
+
         treatment.isSkipped = true
         treatment.skippedAt = Date()
         treatment.isCompleted = false
@@ -433,6 +614,14 @@ final class PoolViewModel {
     func restoreTreatment(_ treatment: Treatment) {
         treatment.isSkipped = false
         treatment.skippedAt = nil
+        // Restore a parent's dependent Check to a non-skipped upcoming state. It cannot become due until
+        // the parent is completed (its due time derives from the parent's completedAt).
+        if !treatment.isFocusedCheckStep,
+           let check = treatment.poolTest?.treatments.first(where: { $0.isFocusedCheckStep && $0.parentTreatmentID == treatment.id }),
+           check.isSkipped, !check.isCompleted {
+            check.isSkipped = false
+            check.skippedAt = nil
+        }
     }
 
     // MARK: - Pending Treatments (across all tests)
@@ -463,11 +652,28 @@ final class PoolViewModel {
             treatmentSteps: treatmentSteps,
             watchlist: watchlist,
             recentHistory: recentHistory(before: test, in: tests, limit: 10),
-            config: poolConfig
+            config: poolConfig,
+            outstandingCheckDueDates: outstandingCheckDueDates(in: tests)
         )
     }
 
+    /// Due dates of all pending focused Checks whose parent treatment has been completed, across every
+    /// test. Used to keep routine full-test timing from competing with an outstanding verification.
+    private func outstandingCheckDueDates(in tests: [PoolTest]) -> [Date] {
+        let allTreatments = tests.flatMap(\.treatments)
+        return allTreatments.compactMap { check -> Date? in
+            guard
+                check.isFocusedCheckStep, !check.isCompleted, !check.isSkipped,
+                let parentID = check.parentTreatmentID,
+                let parent = allTreatments.first(where: { $0.id == parentID }),
+                parent.isCompleted
+            else { return nil }
+            return workflowEngine.availableDate(for: check, in: parent.poolTest?.treatments ?? [])
+        }
+    }
+
     @MainActor
+    @discardableResult
     func saveFocusedCheck(
         _ checkStep: Treatment,
         values: [String: Double],
@@ -475,7 +681,12 @@ final class PoolViewModel {
         allTests: [PoolTest],
         modelContext: ModelContext,
         measuredAt: Date = Date()
-    ) async throws {
+    ) async throws -> FocusedCheckResult {
+        // Capture the pre-check readings so the outcome can describe movement (improved / no change /
+        // crossed past) at the method's measurement resolution.
+        let checkedParameters = checkStep.checkParameters.isEmpty ? Array(values.keys) : checkStep.checkParameters
+        let priorValues = priorValuesForCheck(checkedParameters, in: test)
+
         applyFocusedCheckValues(values, to: test, measuredAt: measuredAt)
         test.isFocusedCheck = test.isFocusedCheck || !values.isEmpty
         test.focusedCheckParameters = Array(Set(test.focusedCheckParameters + values.keys)).sorted()
@@ -485,6 +696,10 @@ final class PoolViewModel {
         checkStep.skippedAt = nil
         checkStep.focusedCheckSummary = focusedCheckSummary(values)
         checkStep.checkResultTestID = test.id
+        // The Check owns its verification notification; completing it cancels that reminder so it never
+        // fires for an action the user has already performed.
+        notifications.cancel(identifier: checkStep.checkReminderNotificationIdentifier)
+        checkStep.checkReminderNotificationIdentifier = nil
 
         let history = recentHistory(before: test, in: allTests, limit: 10)
         await generateRecommendations(
@@ -494,6 +709,41 @@ final class PoolViewModel {
             replacingCompletedPlan: false
         )
         try modelContext.save()
+
+        // The focused Check produced new evidence and a regenerated plan; recompute the routine full-test
+        // reminder from the new effective state so a now-stale routine date is not silently retained.
+        let mergedTests = allTests.contains(where: { $0.id == test.id }) ? allTests : ([test] + allTests)
+        await replaceNextPoolTestReminder(for: latestTest(in: mergedTests) ?? test, allTests: mergedTests)
+
+        // Derive the explicit closure outcome from the POST-check reassessment (ChemistryPolicy operating
+        // state + the regenerated plan), consuming Swimability V2 for overall readiness.
+        let swimState = swimReadinessAssessment(for: test, in: mergedTests).state
+        return FocusedCheckOutcomeEvaluator().result(
+            checkedParameters: checkedParameters,
+            priorValues: priorValues,
+            measuredValues: values,
+            postCheckTest: test,
+            postCheckTreatments: test.treatments,
+            config: poolConfig,
+            swimState: swimState
+        )
+    }
+
+    private func priorValuesForCheck(_ parameters: [String], in test: PoolTest) -> [String: Double] {
+        var result: [String: Double] = [:]
+        for parameter in parameters {
+            switch parameter {
+            case "freeChlorine": result[parameter] = test.freeChlorine
+            case "combinedChlorine": result[parameter] = test.combinedChlorine
+            case "pH": result[parameter] = test.pH
+            case "totalAlkalinity": result[parameter] = test.totalAlkalinity
+            case "calciumHardness": result[parameter] = test.calciumHardness
+            case "cyanuricAcid": result[parameter] = test.cyanuricAcid
+            case "saltLevel": if let salt = test.saltLevel { result[parameter] = salt }
+            default: break
+            }
+        }
+        return result
     }
 
     private func applyFocusedCheckValues(_ values: [String: Double], to test: PoolTest, measuredAt: Date) {
@@ -555,23 +805,23 @@ final class PoolViewModel {
     @MainActor
     func replaceNextPoolTestReminder(for latestTest: PoolTest?, allTests: [PoolTest]) async {
         guard poolConfig.enableNextPoolTestReminders else {
-            NotificationService.shared.cancelNextPoolTestReminder()
+            notifications.cancelNextPoolTestReminder()
             return
         }
 
-        await NotificationService.shared.checkAuthorizationStatus()
-        guard NotificationService.shared.isAuthorized, let latestTest else {
-            NotificationService.shared.cancelNextPoolTestReminder()
+        await notifications.checkAuthorizationStatus()
+        guard notifications.isAuthorized, let latestTest else {
+            notifications.cancelNextPoolTestReminder()
             return
         }
 
         let recommendation = nextTestRecommendation(for: latestTest, in: allTests)
         guard let recommendedDate = recommendation.recommendedDate else {
-            NotificationService.shared.cancelNextPoolTestReminder()
+            notifications.cancelNextPoolTestReminder()
             return
         }
 
-        _ = await NotificationService.shared.replaceNextPoolTestReminder(
+        _ = await notifications.replaceNextPoolTestReminder(
             at: recommendedDate,
             reason: recommendation.scheduledReason
         )
@@ -580,7 +830,7 @@ final class PoolViewModel {
     @MainActor
     func deletePoolTest(_ test: PoolTest, modelContext: ModelContext) throws {
         for treatment in test.treatments {
-            NotificationService.shared.cancelTreatmentReminder(for: treatment)
+            notifications.cancelTreatmentReminder(for: treatment)
         }
 
         modelContext.delete(test)

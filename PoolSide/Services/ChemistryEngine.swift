@@ -620,28 +620,11 @@ struct ChemistryEngine {
         return alkalinity >= 200 && test.pH > 7.6
     }
 
-    private func shouldTreatHighPHWithAcid(_ pH: Double, test: PoolTest, previousTest: PoolTest?, recentHistory: [PoolTest]) -> Bool {
-        if hasActiveRecentAcidTreatment(recentHistory: recentHistory) { return false }
-        if pH > 8.0 { return true }
-        if pH >= 7.8 {
-            return hasScaling(test)
-                || isPHRising(current: test, previousTest: previousTest)
-                || pHHistorySupportsConservativeAcid(current: test, recentHistory: recentHistory)
-        }
-        if pH > 7.6 {
-            return isPHRising(current: test, previousTest: previousTest) || hasScaling(test)
-        }
-        return false
-    }
-
-    private func pHDecreaserUrgency(for pH: Double, test: PoolTest, previousTest: PoolTest?, recentHistory: [PoolTest]) -> TreatmentUrgency {
-        if pH > 8.0 { return .immediate }
-        if hasScaling(test) || isPHRising(current: test, previousTest: previousTest) || pHHistorySupportsConservativeAcid(current: test, recentHistory: recentHistory) {
-            return .recommended
-        }
-        return .optional
-    }
-
+    // Note: whether an out-of-operating-range pH is treated is decided solely by ChemistryPolicy
+    // (see `treatmentTemplate(for:)` pH case). The former `shouldTreatHighPHWithAcid` /
+    // `pHDecreaserUrgency` history gates were removed so history can only influence dose conservatism,
+    // explanation copy, and confidence — never treatment existence. The helper below remains because it
+    // drives history-aware *copy* in `pHAcidActionDescription`, not the treat/no-treat decision.
     private func pHHistorySupportsConservativeAcid(current test: PoolTest, recentHistory: [PoolTest]) -> Bool {
         let historical = Array(recentHistory.prefix(5).reversed())
         guard historical.count >= 3 else { return false }

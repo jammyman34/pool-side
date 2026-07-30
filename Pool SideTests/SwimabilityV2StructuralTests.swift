@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 @testable import Pool_Side
 
 final class SwimabilityV2StructuralTests: XCTestCase {
@@ -999,7 +1000,13 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         let viewModel = PoolViewModel()
         viewModel.saveConfig(config)
 
-        viewModel.completeTreatment(chlorine)
+        let container = try ModelContainer(
+            for: PoolTest.self, Treatment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        context.insert(test)
+        await viewModel.completeTreatment(chlorine, in: [test], modelContext: context)
         chlorine.completedAt = completedAt
         let comparison = try XCTUnwrap(viewModel.runSwimabilityV2ComparisonAfterTreatmentStateChange(
             for: test,

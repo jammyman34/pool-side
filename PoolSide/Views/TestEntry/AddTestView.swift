@@ -2803,6 +2803,9 @@ private var heroBanner: some View {
         do {
             try modelContext.save()
             let testsForReminder = [test] + tests.filter { $0.id != test.id }
+            // A genuinely-due full test can verify a prior pending Check (§11–12); resolve before
+            // recomputing routine timing so the next-test reminder reflects the satisfied Check.
+            viewModel.resolveChecksSatisfiedByFullTest(test, allTests: testsForReminder, modelContext: modelContext)
             let latestTest = testsForReminder.sorted { $0.date > $1.date }.first
             await viewModel.replaceNextPoolTestReminder(for: latestTest, allTests: testsForReminder)
         } catch {
