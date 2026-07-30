@@ -193,6 +193,97 @@ struct TreatmentWorkflowEngine {
     }
 }
 
+// MARK: - Dashboard workflow presentation model
+
+/// The single user-facing state of a test's evolving treatment workflow on the Dashboard.
+enum DashboardWorkflowState: String, Sendable, Equatable {
+    case treatmentNeeded
+    case awaitingPoolCheck
+    case completed
+}
+
+/// Derived, render-ready summary of one root test's workflow. Contains no chemistry/score/Check
+/// authority of its own — every field is produced from canonical workflow + score sources.
+struct DashboardWorkflowItem: Identifiable, Equatable {
+    let rootTestID: UUID
+    let originalTestDate: Date
+    let state: DashboardWorkflowState
+    /// When the next required action should occur (active ordering). nil for completed.
+    let nextActionDate: Date?
+    /// True when the next action is available now or overdue (earliest ordering bucket).
+    let isActionable: Bool
+    /// Final evidence-based score/grade — completed workflows only.
+    let finalScore: Int?
+    let finalGrade: String?
+
+    var id: UUID { rootTestID }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMMM d"; return f
+    }()
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.timeStyle = .short; return f
+    }()
+
+    var accessibilityLabel: String {
+        let when = "\(Self.dateFormatter.string(from: originalTestDate)) at \(Self.timeFormatter.string(from: originalTestDate))"
+        switch state {
+        case .treatmentNeeded:
+            return "\(when). Treatment needed."
+        case .awaitingPoolCheck:
+            return "\(when). Awaiting pool check."
+        case .completed:
+            if let finalScore, let finalGrade {
+                return "\(when). Score \(finalScore). \(finalGrade)."
+            }
+            return "\(when). Completed."
+        }
+    }
+}
+
+extension TreatmentWorkflowEngine {
+
+    /// Canonical workflow state for a root test, following the approved precedence:
+    /// 1) any required (immediate/recommended) chemical treatment still pending → treatmentNeeded
+    /// 2) otherwise any dependent focused Check still pending → awaitingPoolCheck
+    /// 3) otherwise → completed
+    func workflowState(for rootTest: PoolTest, evaluationDate: Date = Date()) -> DashboardWorkflowState {
+        let treatments = rootTest.treatments
+
+        let hasPendingRequiredTreatment = treatments.contains { t in
+            !t.isWatchlistItem && !t.isFocusedCheckStep
+                && !t.isCompleted && !t.isSkipped
+                && t.amount > 0
+                && (t.urgency == .immediate || t.urgency == .recommended)
+        }
+        if hasPendingRequiredTreatment { return .treatmentNeeded }
+
+        let hasPendingCheck = treatments.contains { c in
+            c.isFocusedCheckStep && !c.isCompleted && !c.isSkipped
+        }
+        if hasPendingCheck { return .awaitingPoolCheck }
+
+        return .completed
+    }
+
+    /// The next-required-action time used to order Active Tests. Treatments are actionable from the test
+    /// date; a Check is actionable at its derived availableDate. Returns nil for completed workflows.
+    func nextActionDate(for rootTest: PoolTest, state: DashboardWorkflowState, evaluationDate: Date = Date()) -> Date? {
+        switch state {
+        case .treatmentNeeded:
+            return rootTest.date
+        case .awaitingPoolCheck:
+            let steps = rootTest.treatments
+            let dueDates = steps
+                .filter { $0.isFocusedCheckStep && !$0.isCompleted && !$0.isSkipped }
+                .compactMap { availableDate(for: $0, in: steps) }
+            return dueDates.min() ?? rootTest.date
+        case .completed:
+            return nil
+        }
+    }
+}
+
 // MARK: - Focused Check outcome (explicit closure interpretation)
 
 /// The user-relevant conclusion of a focused Check for one parameter, derived from the POST-check

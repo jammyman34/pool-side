@@ -119,6 +119,77 @@ final class PoolViewModel {
         )
     }
 
+    /// Canonical score → grade label. Single source shared by the score card and completed workflow rows.
+    func scoreGrade(_ score: Int) -> String {
+        switch score {
+        case 90...100: return "Great"
+        case 75..<90:  return "Good"
+        case 60..<75:  return "Alright"
+        case 40..<60:  return "Not Great"
+        default:       return "Real Bad"
+        }
+    }
+
+    // MARK: - Dashboard workflow items (Active / Completed)
+
+    /// Splits every test into its evolving-workflow row model. Active rows are ordered by the next
+    /// required action (earliest first); completed rows are newest-first and carry the final
+    /// evidence-based score/grade (recomputed through the canonical score engine — never a View-side
+    /// or theoretical value). A root test appears in exactly one section.
+    ///
+    /// Active ordering tie-break: (1) actionable/overdue before future, (2) earlier next-action date,
+    /// (3) newer original test date.
+    func dashboardWorkflows(
+        from tests: [PoolTest],
+        evaluationDate: Date = Date()
+    ) -> (active: [DashboardWorkflowItem], completed: [DashboardWorkflowItem]) {
+        var active: [DashboardWorkflowItem] = []
+        var completed: [DashboardWorkflowItem] = []
+
+        for test in tests {
+            let state = workflowEngine.workflowState(for: test, evaluationDate: evaluationDate)
+            switch state {
+            case .completed:
+                let score = overallScore(
+                    for: test,
+                    previousTest: previousTest(before: test, in: tests),
+                    recentHistory: recentHistory(before: test, in: tests)
+                )
+                completed.append(DashboardWorkflowItem(
+                    rootTestID: test.id,
+                    originalTestDate: test.date,
+                    state: .completed,
+                    nextActionDate: nil,
+                    isActionable: false,
+                    finalScore: score,
+                    finalGrade: scoreGrade(score)
+                ))
+            case .treatmentNeeded, .awaitingPoolCheck:
+                let nextAction = workflowEngine.nextActionDate(for: test, state: state, evaluationDate: evaluationDate)
+                active.append(DashboardWorkflowItem(
+                    rootTestID: test.id,
+                    originalTestDate: test.date,
+                    state: state,
+                    nextActionDate: nextAction,
+                    isActionable: (nextAction ?? evaluationDate) <= evaluationDate,
+                    finalScore: nil,
+                    finalGrade: nil
+                ))
+            }
+        }
+
+        active.sort { lhs, rhs in
+            if lhs.isActionable != rhs.isActionable { return lhs.isActionable && !rhs.isActionable }
+            let lDate = lhs.nextActionDate ?? evaluationDate
+            let rDate = rhs.nextActionDate ?? evaluationDate
+            if lDate != rDate { return lDate < rDate }
+            return lhs.originalTestDate > rhs.originalTestDate
+        }
+        completed.sort { $0.originalTestDate > $1.originalTestDate }
+
+        return (active, completed)
+    }
+
     // MARK: - Generate Recommendations
 
     @MainActor
