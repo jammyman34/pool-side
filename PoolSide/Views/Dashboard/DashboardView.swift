@@ -7,6 +7,7 @@ struct DashboardView: View {
     @Binding var showingSettings: Bool
     @Environment(PoolViewModel.self) private var viewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     @State private var showingHistory = false
@@ -122,6 +123,12 @@ struct DashboardView: View {
             .task(id: weatherTaskID) {
                 await refreshWeatherIfPossible()
             }
+            // Re-check the forecast whenever the app returns to the foreground. This is a non-forced
+            // refresh, so PoolWeatherService's freshness cache (30 min) avoids redundant network calls.
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                Task { await refreshWeatherIfPossible() }
+            }
             .dashboardWalkthrough(isEligible: latestTest != nil)
             // Full history sheet
             .sheet(isPresented: $showingHistory) {
@@ -183,18 +190,6 @@ struct DashboardView: View {
                 .frame(height: latestTest == nil ? 112 : 112)
                 .zIndex(0)
 //                .border(.red, width: 0.5)
-
-            if let test = latestTest {
-                HStack(spacing: 5) {
-                    Text("Latest Test")
-                        .fontWeight(.bold)
-                        .foregroundStyle(PoolColor.primaryText)
-                    Text("• \(test.date.relativeDisplay), \(timeString(test.date))")
-                        .foregroundStyle(PoolColor.secondaryText)
-                }
-                .font(.system(size: 17, weight: .medium))
-                .padding(.top, 10)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -228,27 +223,35 @@ struct DashboardView: View {
     }
 
     private func dashboardHeroTitle(for test: PoolTest) -> String {
+        // The hero headline is driven first by the canonical Swimability V2 readiness state (mapped via`swimReadinessStatus`). Only when V2 can't produce a definitive readiness (`.unknown`) do we fall back to describing the treatment-plan state.
         switch swimReadinessStatus(for: test) {
         case .readyNow:
-            return "Pool is ready"
+            // Shown when Swimability V2 says the pool is ready to swim right now (all swim gates pass, evidence is fresh). This is the "green light" headline.
+            return "Pool is ready, enjoy!"
         case .readyAfterWait:
+            // Shown when V2 expects the pool to become swim-ready after a wait — e.g. a treatment is circulating or a product needs time to disperse, but no gate currently fails outright.
             return "Almost swim-ready"
         case .notRecommended:
+            // Shown when V2 actively blocks swimming (a gate fails — e.g. low sanitizer, high pH/CC, algae/cloudy water). This is the "do not swim / verify first" headline.
             return "Check before swimming"
         case .unknown:
+            // V2 has no definitive readiness (e.g. insufficient/stale evidence). Fall through to the treatment-plan-based headlines below.
             break
         }
 
+        // Reached only on `.unknown`. If a required correction is still outstanding, prompt the user to act — surfaced when at least one non-watchlist treatment step is pending at immediate/recommended urgency.
         let pendingActions = test.treatments.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
         if pendingActions.contains(where: { $0.urgency == .immediate || $0.urgency == .recommended }) {
             return "Review your plan"
         }
 
+        // Reached on `.unknown` with no required treatment outstanding. If nothing at all is in progress (no incomplete/non-skipped treatments or checks), the workflow is quiet — surface a reassuring "nothing to do" headline.
         let activeTreatments = test.treatments.filter { !$0.isCompleted && !$0.isSkipped }
         if activeTreatments.isEmpty {
             return "All clear for now"
         }
 
+        // Reached on `.unknown` when work is still in progress but nothing is a *required* action right now (e.g. only optional/advisory steps or a pending focused Check remain). A neutral fallback headline.
         return "Latest pool check"
     }
 
@@ -660,8 +663,18 @@ struct DashboardView: View {
         print("\n===== WEATHER REFRESH BEGIN =====")
         print("[Weather] Config snapshot: location=\(loc), lat=\(latStr), lon=\(lonStr), force=\(force)")
 
+        // Backfill coordinates from a typed location string if they were never captured (only "Use Current
+        // Location" previously set coordinates). This is what lets weather work for manually entered places.
+        if viewModel.poolConfig.latitude == nil || viewModel.poolConfig.longitude == nil {
+            await viewModel.resolveCoordinatesIfNeeded()
+        }
+
         guard let latitude = viewModel.poolConfig.latitude, let longitude = viewModel.poolConfig.longitude else {
-            print("[Weather] Decision: SKIP — coordinates are nil (cannot query weather provider)")
+            let hasLocationText = !viewModel.poolConfig.location.trimmingCharacters(in: .whitespaces).isEmpty
+            weather.lastErrorMessage = hasLocationText
+                ? "Couldn't find “\(viewModel.poolConfig.location)”. Try a nearby city, or tap Use Current Location in Settings."
+                : "Add your location in Settings to see local weather."
+            print("[Weather] Decision: SKIP — no coordinates (hasLocationText=\(hasLocationText))")
             print("===== WEATHER REFRESH END =====\n")
             return
         }

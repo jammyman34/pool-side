@@ -219,6 +219,17 @@ struct SettingsView: View {
             location = newValue
             latitude = locationService.latitude
             longitude = locationService.longitude
+            // Persist GPS coordinates immediately. CLLocationManager is the reliable coordinate source;
+            // this guarantees weather works even before the user taps Save and without relying on the
+            // (rate-limited, error-prone) forward geocoder.
+            if let lat = locationService.latitude, let lon = locationService.longitude {
+                viewModel.updateConfig { config in
+                    config.location = newValue
+                    config.latitude = lat
+                    config.longitude = lon
+                }
+                print(String(format: "[Location] Persisted coordinates to config: %.5f, %.5f", lat, lon))
+            }
         }
         .onChange(of: locationService.isLocating) { _, locating in
             if locating {
@@ -461,6 +472,16 @@ struct SettingsView: View {
                     .foregroundStyle(PoolColor.secondaryText)
                     .multilineTextAlignment(.trailing)
                     .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        let query = location
+                        Task {
+                            if let coords = await PoolLocationService.coordinates(for: query) {
+                                latitude = coords.latitude
+                                longitude = coords.longitude
+                            }
+                        }
+                    }
 
                 Button {
                     let generator = UIImpactFeedbackGenerator(style: .light)
@@ -653,6 +674,27 @@ struct SettingsView: View {
     }
 
     private func save() {
+        Task { await performSave() }
+    }
+
+    @MainActor
+    private func performSave() async {
+        let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedLocation.isEmpty {
+            // No location → no coordinates.
+            latitude = nil
+            longitude = nil
+        } else if latitude == nil || longitude == nil {
+            // Typed-only location with no coordinates yet: best-effort forward geocode. On failure keep
+            // coordinates nil (the Dashboard will retry) — never fabricate or clobber valid coordinates.
+            if let coords = await PoolLocationService.coordinates(for: location) {
+                latitude = coords.latitude
+                longitude = coords.longitude
+            }
+        }
+        // If coordinates already exist (e.g. from "Use Current Location"), keep them — a failing geocoder
+        // must never wipe out a good location fix.
+
         normalizeBrandForCurrentMethod()
         var updatedConfig = currentConfig
         updatedConfig.normalizeChemicalPreferences()
@@ -1623,6 +1665,27 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
         print("[Location] didFailWithError: \(error.localizedDescription)")
         isLocating = false
         errorMessage = "Could not get your current location. You can still type it manually."
+    }
+}
+
+extension PoolLocationService {
+    /// Forward-geocodes a typed location string (e.g. "Phoenix, AZ") into coordinates so weather can be
+    /// fetched for manually entered locations, not just "Use Current Location".
+    static func coordinates(for address: String) async -> (latitude: Double, longitude: Double)? {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            let placemarks = try await CLGeocoder().geocodeAddressString(trimmed)
+            guard let location = placemarks.first?.location else {
+                print("[Location] Forward geocode produced no placemark for '\(trimmed)'")
+                return nil
+            }
+            print(String(format: "[Location] Forward geocoded '%@' → %.5f, %.5f", trimmed, location.coordinate.latitude, location.coordinate.longitude))
+            return (location.coordinate.latitude, location.coordinate.longitude)
+        } catch {
+            print("[Location] Forward geocode failed for '\(trimmed)': \(error.localizedDescription)")
+            return nil
+        }
     }
 }
 

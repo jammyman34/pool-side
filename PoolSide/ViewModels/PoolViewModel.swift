@@ -62,6 +62,23 @@ final class PoolViewModel {
         }
     }
 
+    /// Backfills missing coordinates from a saved location string by forward-geocoding it. Fixes weather
+    /// for users who typed a location (which never captured coordinates) rather than using "Use Current
+    /// Location". Returns true when coordinates are available afterward.
+    @MainActor
+    @discardableResult
+    func resolveCoordinatesIfNeeded() async -> Bool {
+        if poolConfig.latitude != nil && poolConfig.longitude != nil { return true }
+        guard !poolConfig.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        guard let coords = await PoolLocationService.coordinates(for: poolConfig.location) else { return false }
+        var updated = poolConfig
+        updated.latitude = coords.latitude
+        updated.longitude = coords.longitude
+        saveConfig(updated)
+        return true
+    }
+
     func updateConfig(_ update: (inout PoolConfiguration) -> Void) {
         var latest = PoolConfiguration.current
         update(&latest)
