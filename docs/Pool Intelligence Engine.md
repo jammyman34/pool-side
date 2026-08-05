@@ -1,6 +1,6 @@
 # Pool Intelligence Engine
 
-_Last updated: July 2026_
+_Last updated: August 2026_
 
 ## Purpose
 
@@ -58,6 +58,20 @@ Represents the safe order in which treatments and verification should occur.
 Represents when the user should perform the next normal complete chemistry test.
 
 These systems inform one another but answer different questions.
+
+---
+
+# Chemistry Classification
+
+Underneath all of these systems is one shared classification authority.
+
+A single reading — its operating band, its action state (from clearly-low through in-range to clearly-high), whether it blocks swimming, and what disposition it warrants — is classified in exactly one place. That classification is:
+
+- sanitizer-aware (alkalinity is judged differently for hypochlorite versus acidic/stabilized chlorine)
+- surface-aware (calcium is judged differently by pool surface)
+- configuration-aware (salt ranges follow the pool's generator, not a universal assumption)
+
+Every downstream system — Pool Score, Swimability, treatment generation, and the workflow — consumes this one classification rather than re-deriving its own ranges. This is what keeps the score, the swim gates, and the treatment plan from disagreeing about whether the same value is acceptable.
 
 ---
 
@@ -268,15 +282,19 @@ Inputs may include:
 - contextual penalties
 - safety floors
 
-Approximate interpretation:
+The canonical user-facing grade bands are:
 
-90–100: Excellent
-80–89: Healthy
-70–79: Good / watch
-60–69: Needs attention
-Below 60: Significant issues
+90–100: Great
+75–89: Good
+60–74: Alright
+40–59: Not Great
+Below 40: Real Bad
 
-The score is intentionally separate from swimming readiness.
+These grade labels come from a single source (`ChemistryEngine.scoreGrade`) shared by the Dashboard, completed rows, and export, so the same score always reads the same way everywhere.
+
+Production reads the score as a structured assessment (score, grade, and canonical drivers) rather than a bare number. Whether an individual reading counts as "in range" for scoring is decided by ChemistryPolicy — the score does not carry its own separate ranges. Score drivers are named by their actual policy action state (for example "above operating range" vs "critically high") rather than raw-value guesses.
+
+The score is intentionally separate from swimming readiness. It communicates maintenance/health, never permission to swim.
 
 ---
 
@@ -459,17 +477,17 @@ pH treatment should distinguish between:
 - alkalinity-driven drift
 - scaling risk
 
-The engine intentionally avoids automatically adding acid at every isolated high-ish pH measurement.
+The pH operating bands come from ChemistryPolicy: roughly 7.2–7.6 is in range, 7.7–7.8 is above the operating range but still swimmable, and 7.9 and above is treated as clearly high (and swim-blocking at the extreme). Corresponding low bands mirror this.
 
-For example, pH around the treatment boundary may require supporting evidence such as:
+Clearly-high pH (the actNowHigh band) generates corrective acid on the current reading alone; it does not wait for a rising-history confirmation.
+
+The nuance applies at the boundary. In the recommendedHigh band — above the operating range but not yet clearly high — the engine avoids reflexively adding acid at every isolated reading and instead weighs supporting evidence such as:
 
 - rising pH history
 - sustained high pH
 - scaling evidence
 
-before acid is generated.
-
-This reduces unnecessary acid treatment.
+This reduces unnecessary acid treatment for pools that are only slightly high, without deferring correction when pH is genuinely high.
 
 ---
 
@@ -708,6 +726,22 @@ This prevents the application from blindly following recommendations that were g
 
 ---
 
+# Check Completion and Integrity
+
+A Check reaches a completed state through only one path: the user enters its measured result and saves it. There is deliberately no automatic completion.
+
+In particular, logging a later full pool test does not complete a pending Check, even if that test measures the Check's parameter after the Check is due. A full test does not prove the user actually performed the treatment's follow-up measurement, so the Check remains pending until the user checks it. The Check's reminder is a nudge to perform that measurement — it never completes the Check on its own.
+
+Because a Check carries verification evidence, the engine defends its state:
+
+- A generic "mark complete" does not complete a Check.
+- The passage of the Check's due time does not complete it.
+- A completed or inapplicable Check rejects skip, restore, and uncomplete. The rejection is typed so the interface and the underlying logic agree on why the action was refused.
+
+The purpose is to ensure a Check is only ever completed by a measurement the user actually took.
+
+---
+
 # Skipped Treatments
 
 Skipping means:
@@ -858,6 +892,17 @@ The engine should favor:
 - explicit uncertainty
 
 The engine should not manufacture certainty from missing information.
+
+---
+
+# Open Limitations
+
+Stated plainly so they are not mistaken for solved problems:
+
+- There is no maintained product-label database. Product suitability and staged dosing are encoded in engine logic rather than looked up from real product concentrations. Calcium in particular has a single product (Calcium Chloride); the engine raises calcium and does not shop between calcium alternatives.
+- Salt classification follows the configured generator range. A wrong configuration yields wrong classification.
+- Weather is not yet an engine input. It is anticipated future intelligence, not a current factor in recommendations.
+- Passing scenario tests demonstrate internal consistency, not that the underlying chemistry policy is correct for every real pool. Real-world dogfooding remains the check on the policy itself.
 
 ---
 

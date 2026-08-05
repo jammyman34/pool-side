@@ -472,6 +472,72 @@ struct ChemistryEngine {
         return Int(score.rounded())
     }
 
+    /// The single canonical Pool Score result: numeric score, grade label, and canonical parameter-state
+    /// drivers (from ChemistryPolicy). All production score consumers should read this rather than
+    /// re-deriving score/grade/drivers independently. Pool Score is a health/maintenance summary and never
+    /// decides swim readiness (that is Swimability V2's authority).
+    func scoreAssessment(
+        for test: PoolTest,
+        previousTest: PoolTest? = nil,
+        recentHistory: [PoolTest] = [],
+        config: PoolConfiguration = .current
+    ) -> PoolScoreAssessment {
+        let score = overallScore(for: test, previousTest: previousTest, recentHistory: recentHistory, config: config)
+        return PoolScoreAssessment(
+            score: score,
+            grade: Self.scoreGrade(for: score),
+            drivers: canonicalScoreDrivers(for: test, config: config)
+        )
+    }
+
+    /// Canonical score grade label. Single source shared by the Dashboard, completed rows, and export.
+    static func scoreGrade(for score: Int) -> String {
+        switch score {
+        case 90...100: return "Great"
+        case 75..<90:  return "Good"
+        case 60..<75:  return "Alright"
+        case 40..<60:  return "Not Great"
+        default:       return "Real Bad"
+        }
+    }
+
+    /// Score drivers named by their actual ChemistryPolicy action state (never raw-value heuristics).
+    private func canonicalScoreDrivers(for test: PoolTest, config: PoolConfiguration) -> [String] {
+        let context = ChemistryPolicyContext.make(
+            config: config,
+            cyanuricAcid: test.cyanuricAcid,
+            pH: test.pH,
+            totalAlkalinity: test.totalAlkalinity,
+            hasScalingEvidence: hasScaling(test),
+            chlorineSampleSize: test.taylorSampleSize
+        )
+        var params: [(String, ChemistryParameter, Double)] = [
+            ("FC", .freeChlorine, test.freeChlorine),
+            ("CC", .combinedChlorine, test.combinedChlorine),
+            ("pH", .pH, test.pH),
+            ("TA", .totalAlkalinity, test.totalAlkalinity),
+            ("CH", .calciumHardness, test.calciumHardness),
+            ("CYA", .cyanuricAcid, test.cyanuricAcid)
+        ]
+        if let salt = test.saltLevel { params.append(("Salt", .saltLevel, salt)) }
+
+        return params.compactMap { label, parameter, value in
+            let classification = ChemistryPolicy.classify(parameter, value: value, context: context)
+            guard classification.actionState != .ideal else { return nil }
+            return "\(label) \(Self.canonicalStateText(classification.actionState))"
+        }
+    }
+
+    private static func canonicalStateText(_ state: ChemistryActionState) -> String {
+        switch state {
+        case .actNowLow:      return "critically low"
+        case .recommendedLow: return "below operating range"
+        case .ideal:          return "in range"
+        case .recommendedHigh: return "above operating range"
+        case .actNowHigh:     return "critically high"
+        }
+    }
+
     private func scorePenalty(
         for reading: ChemicalReading,
         test: PoolTest,
@@ -532,7 +598,18 @@ struct ChemistryEngine {
         recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> Double {
-        guard reading.status != .ideal && reading.status != .testing else { return 0 }
+        guard reading.status != .testing else { return 0 }
+        // Pool Score's "is this parameter ideal?" decision defers to ChemistryPolicy for the sanitizer- and
+        // surface-aware pool-care parameters (TA, CH, CYA, salt), rather than the legacy score-only status
+        // bands. FC/pH/CC continue to use their existing (policy-consistent) status. This removes the
+        // legacy TA 80–120 / CH band drift so the same effective state scores consistently with policy.
+        if let policyParameter = poolCareScoreParameter(for: reading.key) {
+            if policyClassification(policyParameter, value: reading.value, test: test, config: config).actionState == .ideal {
+                return 0
+            }
+        } else if reading.status == .ideal {
+            return 0
+        }
 
         switch reading.key {
         case "pH":
@@ -582,6 +659,18 @@ struct ChemistryEngine {
 
         default:
             return 5
+        }
+    }
+
+    /// Pool-care parameters whose Pool Score ideal-band is resolved by ChemistryPolicy (sanitizer/surface
+    /// aware) rather than the legacy score status. FC/pH/CC are excluded (handled by their own logic).
+    private func poolCareScoreParameter(for key: String) -> ChemistryParameter? {
+        switch key {
+        case "totalAlkalinity": return .totalAlkalinity
+        case "calciumHardness": return .calciumHardness
+        case "cyanuricAcid":    return .cyanuricAcid
+        case "saltLevel":       return .saltLevel
+        default:                return nil
         }
     }
 
@@ -1504,7 +1593,7 @@ struct ChemistryEngine {
                     actionDescription: "Raise low alkalinity toward the sanitizer-appropriate operating range so pH is less likely to swing",
                     amount: lbs.rounded(toPlaces: 1),
                     unit: "lbs",
-                    instructions: "Add directly to pool with pump running. Allow 6-8 hours of circulation before retesting TA or making another alkalinity adjustment.",
+                    instructions: "\(Self.labelFirstApplicationGuidance) Allow 6-8 hours of circulation before retesting TA or making another alkalinity adjustment.",
                     targetParameter: "totalAlkalinity",
                     urgency: taClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "totalAlkalinity",
@@ -1527,7 +1616,7 @@ struct ChemistryEngine {
                     actionDescription: "Lower TA only because pH is high or drifting upward",
                     amount: product.amount,
                     unit: product.unit,
-                    instructions: "Use the acid/aeration process: add this conservative dose carefully, circulate, then aerate to raise pH without restoring TA. Retest pH in 4 hours and TA after circulation before adding more.",
+                    instructions: "\(Self.labelFirstApplicationGuidance) Use the acid/aeration approach so alkalinity comes down without over-lowering pH: after the acid circulates, aerate to bring pH back up without restoring TA. Retest pH in 4 hours and TA after circulation before adding more.",
                     targetParameter: "totalAlkalinity",
                     urgency: .optional,
                     expectedEffectParameter: "totalAlkalinity",
@@ -1700,7 +1789,7 @@ struct ChemistryEngine {
                     actionDescription: "Raise salt into the chlorinator operating range",
                     amount: pounds.rounded(toPlaces: 1),
                     unit: "lbs",
-                    instructions: "Broadcast salt across the shallow end with the pump running and brush until dissolved. Do not add through the skimmer. Retest after 24 hours of circulation.",
+                    instructions: "\(Self.labelFirstApplicationGuidance) Retest after 24 hours of circulation.",
                     targetParameter: "saltLevel",
                     urgency: saltClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "saltLevel",
@@ -1903,6 +1992,12 @@ struct ChemistryEngine {
     private func waterChangeScore(for test: PoolTest) -> Int {
         test.resolvedPoolConditions.waterChangeContribution
     }
+
+    /// Physical application (PPE, pre-dissolving, broadcasting, where/how fast to pour, pump-running,
+    /// brushing, container/mixing, product-specific re-entry) is owned by the product label — Pool Side
+    /// does not invent handling procedures. Pool Side owns dose, sequence, wait/verification timing.
+    static let labelFirstApplicationGuidance =
+        "Follow the product label for protective equipment, handling, mixing, application, circulation, and re-entry."
 
     private func chlorineInstructions(for product: ChemicalProduct, test: PoolTest) -> String {
         var parts = [product.instructions]
@@ -2141,7 +2236,7 @@ struct ChemistryEngine {
                 id: .trichlorTablets,
                 amount: 1,
                 unit: "dose per label",
-                instructions: "Use tablets in a floater, feeder, or chlorinator for maintenance according to the product label. Tablets dissolve slowly, so for an urgent free-chlorine correction use liquid chlorine or chlorine granules instead."
+                instructions: "\(Self.labelFirstApplicationGuidance) Tablets dissolve slowly, so for an urgent free-chlorine correction use liquid chlorine or chlorine granules instead."
             )
         case .calHypo:
             let pounds = ChemicalDoseCalculator.calHypoPounds(volumeGallons: volume, ppmIncrease: ppmIncrease)
@@ -2149,7 +2244,7 @@ struct ChemistryEngine {
                 id: .calHypoGranules,
                 amount: pounds.rounded(toPlaces: 2),
                 unit: "lbs",
-                instructions: "Pre-dissolve in a bucket of pool water. Add to the pool at dusk with the pump running. Keep swimmers out until free chlorine drops below 4 ppm."
+                instructions: Self.labelFirstApplicationGuidance
             )
         case .liquidChlorine10:
             let gallons = ChemicalDoseCalculator.liquidChlorineGallons(volumeGallons: volume, ppmIncrease: ppmIncrease, strengthPercent: 10)
@@ -2157,7 +2252,7 @@ struct ChemistryEngine {
                 id: .liquidChlorine10,
                 amount: gallons.roundedLiquidChlorineDose(),
                 unit: "gal",
-                instructions: "Pour slowly in front of a return jet at dusk with the pump running. Brush and circulate, then retest free chlorine after 30-60 minutes."
+                instructions: Self.labelFirstApplicationGuidance
             )
         case .liquidChlorine12_5:
             let gallons = ChemicalDoseCalculator.liquidChlorineGallons(volumeGallons: volume, ppmIncrease: ppmIncrease, strengthPercent: 12.5)
@@ -2165,7 +2260,7 @@ struct ChemistryEngine {
                 id: .liquidChlorine12_5,
                 amount: gallons.roundedLiquidChlorineDose(),
                 unit: "gal",
-                instructions: "Pour slowly in front of a return jet at dusk with the pump running. Brush and circulate, then retest free chlorine after 30-60 minutes."
+                instructions: Self.labelFirstApplicationGuidance
             )
         case .dichlor:
             let pounds = ChemicalDoseCalculator.dichlorPounds(volumeGallons: volume, ppmIncrease: ppmIncrease)
@@ -2173,7 +2268,7 @@ struct ChemistryEngine {
                 id: .dichlorGranules,
                 amount: pounds.rounded(toPlaces: 2),
                 unit: "lbs",
-                instructions: "Pre-dissolve in a bucket of pool water and add with the pump running. Dichlor also adds CYA, so avoid repeated use when stabilizer is already high."
+                instructions: Self.labelFirstApplicationGuidance
             )
         }
     }
@@ -2185,14 +2280,14 @@ struct ChemistryEngine {
                 id: .sodaAsh,
                 amount: (ounces / 16).rounded(toPlaces: 1),
                 unit: "lbs",
-                instructions: "Pre-dissolve in a bucket of pool water. Add solution with the pump running. Retest pH in 4-6 hours."
+                instructions: "\(Self.labelFirstApplicationGuidance) Retest pH in 4-6 hours before adding more."
             )
         case .borax:
             return ChemicalProduct(
                 id: .borax,
                 amount: ((ounces * 1.9) / 16).rounded(toPlaces: 1),
                 unit: "lbs",
-                instructions: "Add slowly with the pump running, brushing any settled product. Borax has less impact on alkalinity than soda ash. Retest pH in 4-6 hours."
+                instructions: "\(Self.labelFirstApplicationGuidance) Borax has less impact on alkalinity than soda ash. Retest pH in 4-6 hours before adding more."
             )
         }
     }
@@ -2225,7 +2320,7 @@ struct ChemistryEngine {
                 id: .muriaticAcid31,
                 amount: application.currentAmount,
                 unit: application.currentUnit,
-                instructions: "Add slowly to the deep end with the pump running. Never pre-mix with other chemicals. Circulate at least 1 hour. Retest pH before adding more; repeat only after a new test still calls for acid.",
+                instructions: "\(Self.labelFirstApplicationGuidance) Never mix different pool chemicals together. Retest pH before adding more; repeat only after a new test still calls for acid.",
                 calculatedAmountBeforeCap: application.totalCalculatedAmount,
                 calculatedUnitBeforeCap: application.totalCalculatedUnit,
                 wasCapped: application.isApplicationLimited
@@ -2251,7 +2346,7 @@ struct ChemistryEngine {
                 id: .muriaticAcid20,
                 amount: currentDose.amount,
                 unit: currentDose.unit,
-                instructions: "Add slowly to the deep end with the pump running. Low-fume acid is weaker than 31.45% muriatic acid, so it requires more liquid volume for the same pH change. Retest pH in 4 hours before adding more.",
+                instructions: "\(Self.labelFirstApplicationGuidance) Low-fume acid is weaker than 31.45% muriatic acid, so it requires more liquid volume for the same pH change. Retest pH in 4 hours before adding more.",
                 calculatedAmountBeforeCap: totalDose.amount,
                 calculatedUnitBeforeCap: totalDose.unit,
                 wasCapped: isLimited
@@ -2274,7 +2369,7 @@ struct ChemistryEngine {
                 id: .dryAcid,
                 amount: (currentDryOunces / 16).rounded(toPlaces: 1),
                 unit: "lbs",
-                instructions: "Pre-dissolve in a bucket of pool water and add slowly with the pump running. Dry acid adds sulfate over time, so avoid using it as a frequent large-dose product unless it is the product you intentionally maintain. Retest pH in 4 hours before adding more.",
+                instructions: "\(Self.labelFirstApplicationGuidance) Dry acid adds sulfate over time, so avoid using it as a frequent large-dose product unless it is the product you intentionally maintain. Retest pH in 4 hours before adding more.",
                 calculatedAmountBeforeCap: (totalDryOunces / 16).rounded(toPlaces: 1),
                 calculatedUnitBeforeCap: "lbs",
                 wasCapped: isLimited
@@ -2311,7 +2406,7 @@ struct ChemistryEngine {
                 id: .granularCYA,
                 amount: pounds.rounded(toPlaces: 1),
                 unit: "lbs",
-                instructions: "Place stabilizer in a sock or mesh bag in front of a return jet with the pump running. Do not leave undissolved stabilizer sitting in the skimmer basket. Retest CYA after 24-48 hours of circulation and avoid backwashing or cleaning the filter for several days when practical."
+                instructions: "\(Self.labelFirstApplicationGuidance) Retest CYA after 24-48 hours of circulation, and avoid backwashing or cleaning the filter for several days when practical."
             )
         case .liquidConditioner:
             return ChemicalProduct(

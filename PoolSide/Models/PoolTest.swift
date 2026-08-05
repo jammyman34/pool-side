@@ -325,8 +325,22 @@ final class PoolTest {
     }
 
     /// Overall pool health score 0–100 based on weighted chemistry risk.
+    ///
+    /// Convenience only: uses the globally-saved configuration and no history. Production consumers must
+    /// use `PoolViewModel.overallScore(for:previousTest:recentHistory:)` (or `scoreAssessment`), which pass
+    /// the explicit pool configuration and history so one pool's score never depends on which pool is
+    /// currently selected in `PoolConfiguration.current`.
     var overallScore: Int {
         let engine = ChemistryEngine()
         return engine.overallScore(for: self, config: .current)
     }
+}
+
+/// Canonical Pool Score result. Pool Score is a health/maintenance summary — it never decides swim
+/// readiness (Swimability V2 is the single readiness authority).
+struct PoolScoreAssessment: Equatable {
+    let score: Int
+    let grade: String
+    /// Canonical parameter-state drivers, named by their ChemistryPolicy action state.
+    let drivers: [String]
 }

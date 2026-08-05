@@ -102,6 +102,86 @@ struct TreatmentWorkflowEngine {
         }
     }
 
+    /// Why a treatment needs a focused verification Check. A Check exists only when the measured result is
+    /// genuinely needed to continue — never merely because of the treatment's type. A recommended
+    /// optimization on an already-safe pool (even one whose dose is capped toward an optimization target)
+    /// resolves to `.none`: the workflow can close and the next routine test confirms the result.
+    enum FocusedCheckReason: Equatable {
+        /// The pool is not swim-safe for this parameter until the result is verified.
+        case swimSafety
+        /// A staged/capped corrective dose — the workflow must re-measure before recommending another
+        /// application, so it does not over- or under-shoot.
+        case requiredBeforeNextTreatment
+        /// A non-swim-gating parameter (calcium, alkalinity, CYA, salt) is at a corrective extreme where
+        /// repeating the correction blindly could harm the pool surface or equipment — verify before repeating.
+        case poolOrEquipmentProtection
+        /// No Check required — the treatment card carries any wait guidance and routine testing confirms later.
+        case none
+    }
+
+    func requiresFocusedCheck(for treatment: Treatment, config: PoolConfiguration) -> Bool {
+        focusedCheckReason(for: treatment, config: config) != .none
+    }
+
+    /// Resolves the required-follow-up reason for a treatment. Order of precedence: swim safety, then a
+    /// staged corrective dose, then surface/equipment protection; otherwise `.none`.
+    func focusedCheckReason(for treatment: Treatment, config: PoolConfiguration) -> FocusedCheckReason {
+        guard !treatment.isWatchlistItem, !treatment.isFocusedCheckStep, treatment.amount > 0 else { return .none }
+
+        // 1. Swimming is blocked for this parameter until the result is verified (FC readiness / CC / pH
+        //    outside the 7.0–7.8 approved swim range).
+        if TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: treatment) { return .swimSafety }
+
+        // Classify the treatment's target parameter against its (pre-treatment) reading.
+        guard let test = treatment.poolTest,
+              let parameter = Self.policyParameter(for: treatment.targetParameter),
+              let value = Self.reading(for: treatment.targetParameter, in: test) else { return .none }
+
+        let context = ChemistryPolicyContext.make(
+            config: config,
+            cyanuricAcid: test.cyanuricAcid,
+            pH: test.pH,
+            totalAlkalinity: test.totalAlkalinity,
+            hasScalingEvidence: false,
+            chlorineSampleSize: test.taylorSampleSize
+        )
+        let state = ChemistryPolicy.classify(parameter, value: value, context: context).actionState
+        let isCorrectiveExtreme = state == .actNowLow || state == .actNowHigh
+        guard isCorrectiveExtreme else { return .none }
+
+        // 2. A staged/capped corrective dose must be re-measured before another application is recommended.
+        if treatment.wasDoseCapped { return .requiredBeforeNextTreatment }
+
+        // 3. A non-swim-gating parameter at a corrective extreme risks the surface/equipment if repeated blindly.
+        return .poolOrEquipmentProtection
+    }
+
+    private static func policyParameter(for target: String) -> ChemistryParameter? {
+        switch target {
+        case "freeChlorine":    return .freeChlorine
+        case "combinedChlorine": return .combinedChlorine
+        case "pH":              return .pH
+        case "totalAlkalinity": return .totalAlkalinity
+        case "calciumHardness": return .calciumHardness
+        case "cyanuricAcid":    return .cyanuricAcid
+        case "saltLevel":       return .saltLevel
+        default:                return nil
+        }
+    }
+
+    private static func reading(for target: String, in test: PoolTest) -> Double? {
+        switch target {
+        case "freeChlorine":    return test.freeChlorine
+        case "combinedChlorine": return test.combinedChlorine
+        case "pH":              return test.pH
+        case "totalAlkalinity": return test.totalAlkalinity
+        case "calciumHardness": return test.calciumHardness
+        case "cyanuricAcid":    return test.cyanuricAcid
+        case "saltLevel":       return test.saltLevel
+        default:                return nil
+        }
+    }
+
     func makeCheckStep(after treatment: Treatment, sortOrder: Int) -> Treatment? {
         guard let descriptor = checkDescriptor(for: treatment) else { return nil }
         let check = Treatment(

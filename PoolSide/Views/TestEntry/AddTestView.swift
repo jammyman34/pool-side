@@ -546,7 +546,15 @@ struct AddTestView: View {
                                 }
                                 .coordinateSpace(name: "chemicalList")
                                 .onPreferenceChange(ChemicalRowFramePreferenceKey.self) { frames in
-                                    chemicalRowFrames = frames
+                                    // The row frame readers publish continuously, and the implicit reorder
+                                    // animation on this same subtree re-emits them every interpolation tick.
+                                    // Writing straight into @State from inside that layout/preference pass is
+                                    // what makes SwiftUI warn "tried to update multiple times per frame" — the
+                                    // write invalidates the very subtree that produced the preference. These
+                                    // frames are consumed only by drag-to-reorder, never by row layout, so we
+                                    // skip redundant writes and hop off the current pass to break the cycle.
+                                    guard frames != chemicalRowFrames else { return }
+                                    DispatchQueue.main.async { chemicalRowFrames = frames }
                                 }
                                 .background(Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -2803,9 +2811,7 @@ private var heroBanner: some View {
         do {
             try modelContext.save()
             let testsForReminder = [test] + tests.filter { $0.id != test.id }
-            // A genuinely-due full test can verify a prior pending Check (§11–12); resolve before
-            // recomputing routine timing so the next-test reminder reflects the satisfied Check.
-            viewModel.resolveChecksSatisfiedByFullTest(test, allTests: testsForReminder, modelContext: modelContext)
+            // Logging a full test never auto-completes a pending Check — Checks are user-completed only.
             let latestTest = testsForReminder.sorted { $0.date > $1.date }.first
             await viewModel.replaceNextPoolTestReminder(for: latestTest, allTests: testsForReminder)
         } catch {

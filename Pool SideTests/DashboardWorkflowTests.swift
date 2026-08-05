@@ -155,7 +155,7 @@ final class DashboardWorkflowTests: XCTestCase {
     func testFocusedCheckUpdatesScoreFromMeasuredEvidenceOnly() async throws {
         let context = try makeContext()
         let vm = makeViewModel()
-        let test = poolTest(Date(), pH: 7.8)
+        let test = poolTest(Date(), pH: 8.2)  // blocks swimming → acid generates a verification Check
         context.insert(test)
         await vm.generateRecommendations(for: test, recentTests: [], modelContext: context)
         let acid = try XCTUnwrap(test.treatments.first { $0.targetParameter == "pH" && $0.isAcidTreatment && $0.amount > 0 })
@@ -175,7 +175,7 @@ final class DashboardWorkflowTests: XCTestCase {
     func testCheckGeneratingTreatmentReturnsToTreatmentNeeded() async throws {
         let context = try makeContext()
         let vm = makeViewModel()
-        let test = poolTest(Date(), pH: 7.8)
+        let test = poolTest(Date(), pH: 8.2)  // blocks swimming → acid generates a verification Check
         context.insert(test)
         await vm.generateRecommendations(for: test, recentTests: [], modelContext: context)
         let acid = try XCTUnwrap(test.treatments.first { $0.targetParameter == "pH" && $0.isAcidTreatment && $0.amount > 0 })
@@ -193,7 +193,7 @@ final class DashboardWorkflowTests: XCTestCase {
     func testFinalCheckMovesToCompletedWithFinalEvidenceScore() async throws {
         let context = try makeContext()
         let vm = makeViewModel()
-        let test = poolTest(Date(), pH: 7.8)
+        let test = poolTest(Date(), pH: 8.2)  // blocks swimming → acid generates a verification Check
         context.insert(test)
         await vm.generateRecommendations(for: test, recentTests: [], modelContext: context)
         let initialScore = vm.overallScore(for: test)
@@ -211,8 +211,9 @@ final class DashboardWorkflowTests: XCTestCase {
         XCTAssertNotNil(completed.first?.finalGrade)
     }
 
-    // K. A valid full test supersedes a pending Check → the root workflow becomes Completed.
-    func testFullTestSupersessionCompletesRootWorkflow() async throws {
+    // K. A later full test never completes a pending Check → the root workflow stays Active until the user
+    //    completes the Check themselves. (Full-test supersession was removed.)
+    func testLaterFullTestLeavesRootWorkflowActive() throws {
         let context = try makeContext()
         let vm = makeViewModel()
         let completedAt = Date(timeIntervalSince1970: 1_800_100_000)
@@ -222,14 +223,13 @@ final class DashboardWorkflowTests: XCTestCase {
         root.treatments = [parent, check]
         context.insert(root)
 
-        // pH Check due 4h after completion; a full test at +5h is a valid superseding measurement.
+        // A later full test at +5h measures pH but must NOT complete the pending Check.
         let fresh = poolTest(completedAt.addingTimeInterval(5 * 3600), pH: 7.4)
         context.insert(fresh)
-        vm.resolveChecksSatisfiedByFullTest(fresh, allTests: [root, fresh], modelContext: context)
 
         let (active, completed) = vm.dashboardWorkflows(from: [fresh, root])
-        XCTAssertTrue(active.isEmpty, "Superseded Check resolves the root workflow.")
-        XCTAssertTrue(completed.contains { $0.rootTestID == root.id })
+        XCTAssertTrue(active.contains { $0.rootTestID == root.id }, "The pending Check keeps the workflow Active.")
+        XCTAssertFalse(completed.contains { $0.rootTestID == root.id })
     }
 
     // L. Skipping the parent (which cascades to the Check) completes the workflow; restoring reactivates it.

@@ -29,6 +29,13 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
         return "treatment-step-\(treatmentID.uuidString)"
     }
 
+    private(set) var scheduledWaitCompleteTreatmentIDs: [UUID] = []
+    func scheduleWaitCompleteReminder(treatmentID: UUID, treatmentName: String, afterMinutes: Int) async -> String? {
+        guard isAuthorized else { return nil }
+        scheduledWaitCompleteTreatmentIDs.append(treatmentID)
+        return "treatment-wait-\(treatmentID.uuidString)"
+    }
+
     func cancel(identifier: String) {
         cancelledIdentifiers.append(identifier)
     }
@@ -254,23 +261,22 @@ final class CheckVerificationLifecycleTests: XCTestCase {
         let viewModel = makeViewModel(spy: spy)
         viewModel.saveConfig(PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false))
 
-        // Fresh, no-history plaster pool: only pH is out of the operating range.
-        let test = PoolTest(date: Date(timeIntervalSince1970: 1_800_100_000), pH: 7.8,
+        // Fresh, no-history plaster pool: pH is high enough to block swimming (verification required).
+        let test = PoolTest(date: Date(timeIntervalSince1970: 1_800_100_000), pH: 8.2,
                             freeChlorine: 8, totalChlorine: 8, totalAlkalinity: 100,
                             calciumHardness: 350, cyanuricAcid: 60)
         context.insert(test)
         await viewModel.generateRecommendations(for: test, recentTests: [], modelContext: context)
 
-        // Stage 1: 7.8 generates a Recommended acid correction with a dependent Check.
-        let acid1 = try XCTUnwrap(pendingPHAcid(on: test, viewModel: viewModel), "pH 7.8 must generate an acid correction.")
-        XCTAssertEqual(acid1.urgency, .recommended)
+        // Stage 1: pH 8.2 blocks swimming, so the acid correction generates a dependent verification Check.
+        let acid1 = try XCTUnwrap(pendingPHAcid(on: test, viewModel: viewModel), "pH 8.2 must generate an acid correction.")
         await viewModel.completeTreatment(acid1, in: [test], modelContext: context)
         let check1 = try XCTUnwrap(viewModel.dependentCheck(for: acid1), "Completing the acid creates a pH Check.")
 
-        // Measure 7.7 — still above the operating range, so a NEW correction is generated from evidence.
-        try await viewModel.saveFocusedCheck(check1, values: ["pH": 7.7], for: test, allTests: [test], modelContext: context)
-        XCTAssertEqual(test.pH, 7.7)
-        let acid2 = try XCTUnwrap(pendingPHAcid(on: test, viewModel: viewModel), "pH 7.7 must re-treat from measured evidence.")
+        // Measure 7.9 — still blocks swimming, so a NEW correction (with its own Check) is generated.
+        try await viewModel.saveFocusedCheck(check1, values: ["pH": 7.9], for: test, allTests: [test], modelContext: context)
+        XCTAssertEqual(test.pH, 7.9)
+        let acid2 = try XCTUnwrap(pendingPHAcid(on: test, viewModel: viewModel), "pH 7.9 must re-treat from measured evidence.")
         XCTAssertNotEqual(acid2.id, acid1.id, "The re-treatment is a fresh step, not the completed one.")
 
         // Stage 2: complete the second acid, then measure 7.4 (ideal) — the workflow stops, no remainder.
@@ -326,87 +332,25 @@ final class CheckVerificationLifecycleTests: XCTestCase {
         return test
     }
 
-    // §11 — A due full test with no intervening treatment supersedes the Check and cancels its reminder.
-    func testDueFullTestSupersedesPendingCheck() async throws {
+    // A focused Check is completed ONLY by the user's measured result. Logging a full pool test — even a
+    // fresh one, dated after the Check's due time, that measures the Check's parameter — never completes it,
+    // never becomes its verification evidence, and never cancels its reminder. (Full-test supersession was
+    // removed: logging a full test does not prove the user performed the treatment's follow-up measurement.)
+    func testFullTestNeverAutoCompletesPendingCheck() async throws {
         let context = try makeContext()
         let spy = NotificationSchedulingSpy()
-        let viewModel = makeViewModel(spy: spy)
+        _ = makeViewModel(spy: spy)
         let parentCompletedAt = Date(timeIntervalSince1970: 1_800_100_000)
-        let (old, _, check) = makeCompletedPlanWithScheduledCheck(parentCompletedAt: parentCompletedAt, in: context)
+        let (_, _, check) = makeCompletedPlanWithScheduledCheck(parentCompletedAt: parentCompletedAt, in: context)
         let identifier = check.checkReminderNotificationIdentifier
 
-        let fresh = makeFullTest(date: parentCompletedAt.addingTimeInterval(2 * 3600), in: context)
-        viewModel.resolveChecksSatisfiedByFullTest(fresh, allTests: [old, fresh], modelContext: context)
+        // A fresh full test measuring every parameter, dated two hours after the Check became due.
+        _ = makeFullTest(date: parentCompletedAt.addingTimeInterval(2 * 3600), in: context)
 
-        XCTAssertTrue(check.isCompleted, "A due full test verifies the pending Check.")
-        XCTAssertEqual(check.checkResultTestID, fresh.id)
-        XCTAssertTrue(spy.didCancel(identifier))
-        XCTAssertNil(check.checkReminderNotificationIdentifier)
-    }
-
-    // §12 — A full test logged before the Check is due does NOT verify.
-    func testFullTestBeforeCheckDueDoesNotSupersede() async throws {
-        let context = try makeContext()
-        let spy = NotificationSchedulingSpy()
-        let viewModel = makeViewModel(spy: spy)
-        let parentCompletedAt = Date(timeIntervalSince1970: 1_800_100_000)
-        let (old, _, check) = makeCompletedPlanWithScheduledCheck(parentCompletedAt: parentCompletedAt, in: context)
-        let identifier = check.checkReminderNotificationIdentifier
-
-        // 30 minutes after completion — before the 1-hour due time.
-        let early = makeFullTest(date: parentCompletedAt.addingTimeInterval(1800), in: context)
-        viewModel.resolveChecksSatisfiedByFullTest(early, allTests: [old, early], modelContext: context)
-
-        XCTAssertFalse(check.isCompleted, "A full test before the Check is due must not verify it.")
-        XCTAssertFalse(spy.didCancel(identifier), "The Check reminder remains scheduled.")
-        XCTAssertNotNil(check.checkReminderNotificationIdentifier)
-    }
-
-    // §11 — An intervening treatment affecting the same parameter blocks supersession.
-    func testInterveningTreatmentBlocksSupersession() async throws {
-        let context = try makeContext()
-        let spy = NotificationSchedulingSpy()
-        let viewModel = makeViewModel(spy: spy)
-        let parentCompletedAt = Date(timeIntervalSince1970: 1_800_100_000)
-        let (old, _, check) = makeCompletedPlanWithScheduledCheck(parentCompletedAt: parentCompletedAt, in: context)
-
-        // A second chlorine dose completed AFTER the parent but BEFORE the fresh test.
-        let intervening = Treatment(
-            chemicalName: "Liquid Chlorine 12.5%",
-            actionDescription: "Additional chlorine",
-            amount: 0.5,
-            unit: "gal",
-            instructions: "Add chlorine.",
-            urgency: .recommended,
-            isCompleted: true,
-            completedAt: parentCompletedAt.addingTimeInterval(3000),
-            targetParameter: "freeChlorine",
-            sortOrder: 3,
-            effectDelayHours: 1,
-            poolTest: old
-        )
-        old.treatments.append(intervening)
-
-        let fresh = makeFullTest(date: parentCompletedAt.addingTimeInterval(2 * 3600), in: context)
-        viewModel.resolveChecksSatisfiedByFullTest(fresh, allTests: [old, fresh], modelContext: context)
-
-        XCTAssertFalse(check.isCompleted, "An intervening same-parameter treatment blocks clean verification.")
-        XCTAssertNotNil(check.checkReminderNotificationIdentifier)
-    }
-
-    // §11 — A full test older than the parent's completion cannot verify.
-    func testFullTestBeforeParentCompletionDoesNotSupersede() async throws {
-        let context = try makeContext()
-        let spy = NotificationSchedulingSpy()
-        let viewModel = makeViewModel(spy: spy)
-        let parentCompletedAt = Date(timeIntervalSince1970: 1_800_100_000)
-        let (old, _, check) = makeCompletedPlanWithScheduledCheck(parentCompletedAt: parentCompletedAt, in: context)
-
-        let stale = makeFullTest(date: parentCompletedAt.addingTimeInterval(-60), in: context)
-        viewModel.resolveChecksSatisfiedByFullTest(stale, allTests: [old, stale], modelContext: context)
-
-        XCTAssertFalse(check.isCompleted)
-        XCTAssertNotNil(check.checkReminderNotificationIdentifier)
+        XCTAssertFalse(check.isCompleted, "Logging a full test must never complete a pending Check.")
+        XCTAssertNil(check.checkResultTestID, "A full test never becomes a Check's verification evidence.")
+        XCTAssertNotNil(check.checkReminderNotificationIdentifier, "The Check's reminder stays scheduled.")
+        XCTAssertFalse(spy.didCancel(identifier), "Logging a full test does not cancel the Check reminder.")
     }
 
     // MARK: - Focused-Check / routine full-test coordination (§13–18)

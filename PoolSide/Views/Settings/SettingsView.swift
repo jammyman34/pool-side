@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import CoreLocation
 import Observation
 import UIKit
@@ -7,6 +8,8 @@ struct SettingsView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     // Pool Settings
     @State private var poolName: String = ""
@@ -31,6 +34,10 @@ struct SettingsView: View {
     @State private var location: String = ""
     @State private var latitude: Double?
     @State private var longitude: Double?
+    /// The location text that `latitude`/`longitude` currently correspond to. When the user edits the
+    /// location field to something different, the stored coordinates are stale and must be re-resolved
+    /// rather than reused — otherwise a new place (e.g. "Richmond, IN") keeps the previous place's weather.
+    @State private var coordinatesSourceLocation: String?
     @State private var locationService = PoolLocationService()
 
     @State private var showingVolumeHelp: Bool = false
@@ -223,6 +230,7 @@ struct SettingsView: View {
             // this guarantees weather works even before the user taps Save and without relying on the
             // (rate-limited, error-prone) forward geocoder.
             if let lat = locationService.latitude, let lon = locationService.longitude {
+                coordinatesSourceLocation = newValue
                 viewModel.updateConfig { config in
                     config.location = newValue
                     config.latitude = lat
@@ -479,6 +487,13 @@ struct SettingsView: View {
                             if let coords = await PoolLocationService.coordinates(for: query) {
                                 latitude = coords.latitude
                                 longitude = coords.longitude
+                                coordinatesSourceLocation = query
+                            } else {
+                                // Geocode failed: drop stale coordinates so save/Dashboard re-resolve
+                                // the new location rather than reusing the previous place's fix.
+                                latitude = nil
+                                longitude = nil
+                                coordinatesSourceLocation = nil
                             }
                         }
                     }
@@ -664,6 +679,8 @@ struct SettingsView: View {
         location = config.location
         latitude = config.latitude
         longitude = config.longitude
+        // Coordinates loaded from config correspond to the saved location text.
+        coordinatesSourceLocation = (config.latitude != nil && config.longitude != nil) ? config.location : nil
         originalConfig = currentConfig
     }
 
@@ -680,25 +697,44 @@ struct SettingsView: View {
     @MainActor
     private func performSave() async {
         let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canReuseCoordinates = LocationCoordinateResolver.canReuseCoordinates(
+            typedLocation: trimmedLocation,
+            coordinateSource: coordinatesSourceLocation,
+            latitude: latitude,
+            longitude: longitude
+        )
         if trimmedLocation.isEmpty {
             // No location → no coordinates.
             latitude = nil
             longitude = nil
-        } else if latitude == nil || longitude == nil {
-            // Typed-only location with no coordinates yet: best-effort forward geocode. On failure keep
-            // coordinates nil (the Dashboard will retry) — never fabricate or clobber valid coordinates.
-            if let coords = await PoolLocationService.coordinates(for: location) {
+            coordinatesSourceLocation = nil
+        } else if !canReuseCoordinates {
+            // Coordinates are missing or belong to a different (previously entered) location. Re-resolve
+            // from the typed location so a new place gets its own weather rather than reusing the old fix.
+            // On failure, drop the stale coordinates so the Dashboard retries against the new location text.
+            if let coords = await PoolLocationService.coordinates(for: trimmedLocation) {
                 latitude = coords.latitude
                 longitude = coords.longitude
+                coordinatesSourceLocation = trimmedLocation
+            } else {
+                latitude = nil
+                longitude = nil
+                coordinatesSourceLocation = nil
             }
         }
-        // If coordinates already exist (e.g. from "Use Current Location"), keep them — a failing geocoder
-        // must never wipe out a good location fix.
+        // If coordinates already match the typed location (e.g. from "Use Current Location"), keep them —
+        // a failing geocoder must never wipe out a good location fix for the same place.
 
         normalizeBrandForCurrentMethod()
         var updatedConfig = currentConfig
         updatedConfig.normalizeChemicalPreferences()
+        let productPreferencesChanged = chemicalProductPreferencesChanged(from: originalConfig, to: updatedConfig)
         viewModel.saveConfig(updatedConfig, marksEquipmentChoicesExplicit: true)
+        // A product-preference change reprices only the unfinished future chemical steps of the active
+        // plan (completed/skipped history is preserved), keeping the plan consistent with the new choice.
+        if productPreferencesChanged {
+            viewModel.repriceUnfinishedTreatmentsForPreferenceChange(in: tests, modelContext: modelContext)
+        }
         if !updatedConfig.enableNextPoolTestReminders {
             NotificationService.shared.cancelNextPoolTestReminder()
         }
@@ -706,6 +742,16 @@ struct SettingsView: View {
             NotificationService.shared.cancelAllPoolSideNotifications()
         }
         dismiss()
+    }
+
+    private func chemicalProductPreferencesChanged(from original: PoolConfiguration?, to updated: PoolConfiguration) -> Bool {
+        guard let original else { return false }
+        return original.chlorinePreference != updated.chlorinePreference
+            || original.pHIncreaserPreference != updated.pHIncreaserPreference
+            || original.pHDecreaserPreference != updated.pHDecreaserPreference
+            || original.alkalinityIncreaserPreference != updated.alkalinityIncreaserPreference
+            || original.calciumIncreaserPreference != updated.calciumIncreaserPreference
+            || original.stabilizerPreference != updated.stabilizerPreference
     }
 }
 

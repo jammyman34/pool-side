@@ -135,7 +135,8 @@ final class FocusedCheckOutcomeTests: XCTestCase {
     @MainActor
     func testRealPHResolvedFlowProducesExplicitSuccessOutcome() async throws {
         let (vm, context) = makeViewModel()
-        let poolTest = PoolTest(date: Date(), pH: 7.8, freeChlorine: 8, totalChlorine: 8,
+        // pH 8.2 blocks swimming, so the acid correction generates a verification Check.
+        let poolTest = PoolTest(date: Date(), pH: 8.2, freeChlorine: 8, totalChlorine: 8,
                                 totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60,
                                 testMethod: .liquidDropKit)
         context.insert(poolTest)
@@ -153,11 +154,12 @@ final class FocusedCheckOutcomeTests: XCTestCase {
         XCTAssertTrue(result.interpretation.localizedCaseInsensitiveContains("7.6"))
     }
 
-    // B (integration) + I: real pH 7.8 → treat → Check 7.7 → follow-up generated, copy says fresh calculation.
+    // B (integration) + I: real pH 8.2 → treat → Check 7.7 → follow-up generated, copy says fresh calculation.
     @MainActor
     func testRealPHImprovedFlowReferencesFreshRecalculationNotRemainder() async throws {
         let (vm, context) = makeViewModel()
-        let poolTest = PoolTest(date: Date(), pH: 7.8, freeChlorine: 8, totalChlorine: 8,
+        // pH 8.2 blocks swimming, so the acid correction generates a verification Check.
+        let poolTest = PoolTest(date: Date(), pH: 8.2, freeChlorine: 8, totalChlorine: 8,
                                 totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60,
                                 testMethod: .liquidDropKit)
         context.insert(poolTest)

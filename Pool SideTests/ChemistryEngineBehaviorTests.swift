@@ -28,7 +28,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             ChemistryTestFixtures.ounces(amount: muriatic.calculatedDoseBeforeCap, unit: muriatic.calculatedDoseBeforeCapUnit) > ChemistryTestFixtures.ounces(amount: muriatic.amount, unit: muriatic.unit)
         )
         XCTAssertEqual(muriatic.expectedDelta, acidTreatment.expectedDelta)
-        XCTAssertTrue(muriatic.instructions.contains("Never pre-mix"))
+        // Physical handling now defers to the product label; Pool Side keeps the universal safety line.
+        XCTAssertTrue(muriatic.instructions.contains("Follow the product label"))
+        XCTAssertTrue(muriatic.instructions.contains("Never mix different pool chemicals together"))
+        XCTAssertFalse(muriatic.instructions.localizedCaseInsensitiveContains("deep end"))
         XCTAssertNotEqual(muriatic.productID, muriatic.globalPreferenceProductID, "Substitution flag should be derivable from selected/global product IDs.")
 
         let lowFume = try XCTUnwrap(engine.repricedTreatmentTemplate(

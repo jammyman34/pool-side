@@ -213,10 +213,10 @@ struct DashboardView: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
-            .background(PoolColor.sand.opacity(0.60), in: Capsule())
+            .background(PoolColor.poolTeal.opacity(0.14), in: Capsule())
             .overlay(
                 Capsule()
-                    .stroke(PoolColor.sunshine.opacity(0.40), lineWidth: 1)
+                    .stroke(PoolColor.poolTeal.opacity(0.40), lineWidth: 1)
             )
             .accessibilityLabel(label)
         }

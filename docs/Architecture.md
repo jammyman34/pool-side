@@ -1,6 +1,6 @@
 # Pool Side Architecture
 
-_Last updated: July 2026_
+_Last updated: August 2026_
 
 ## Overview
 
@@ -54,7 +54,12 @@ Pool Test / Effective Pool State
 
 Historical data feeds the system throughout this process.
 
-The ChemistryEngine remains the source of truth for chemistry and treatment generation. UI components display and interact with engine output rather than independently interpreting pool chemistry.
+Two services share the chemistry authority, and the split matters:
+
+- **ChemistryPolicy** is the canonical authority for how a single reading is _classified_: its operating band, its action state, its correction disposition, and whether it blocks swimming. It is sanitizer-aware (TA bands differ between hypochlorite and acidic/stabilized chlorine) and surface-aware (CH bands differ by surface type). ChemistryPolicy owns the numeric ranges.
+- **ChemistryEngine** is the authority for what to _do_ with those classifications: treatment generation, dose calculation, application policy, suppression, watchlists, Pool Score, and explanation inputs. Where ChemistryEngine needs to decide whether a value is in range, it consults ChemistryPolicy rather than carrying its own duplicate bands.
+
+UI components display and interact with this engine output rather than independently interpreting pool chemistry. When these two documents and the code disagree, the code is authoritative; see the Source-of-Truth Authorities table below.
 
 ---
 
@@ -188,6 +193,27 @@ This distinction affects recommendation confidence.
 
 ---
 
+# ChemistryPolicy
+
+ChemistryPolicy is the single canonical authority for classifying an individual chemistry reading.
+
+Given a parameter, a value, and a context (sanitizer type, surface type, salt configuration, measurement resolution), it returns a classification containing:
+
+- an action state: actNowLow, recommendedLow, ideal, recommendedHigh, actNowHigh
+- a correction disposition (what, if anything, should be done)
+- whether the value blocks swimming
+
+Key properties:
+
+- Operating bands live here, not scattered across the engine. Representative bands include CYA 30–50 (target ~40), CH 200–400 for plaster, and pH ideal 7.2–7.6 with swim-blocking only at the extremes.
+- TA is sanitizer-aware: hypochlorite pools use roughly an 80–100 ideal band (target ~90), while acidic/stabilized-chlorine pools use roughly 100–120 (target ~110).
+- CH is surface-aware, so plaster and vinyl are classified differently.
+- Salt ranges are configurable to the specific chlorine generator rather than assumed universal.
+
+ChemistryPolicy contains no presentation logic and no dosing logic. It answers only "what state is this reading in, and does it block swimming?" Every other subsystem — treatment generation, Pool Score, Swimability V2, Next Full Pool Test — consumes this classification instead of re-deriving ranges.
+
+---
+
 # ChemistryEngine
 
 ChemistryEngine is responsible for interpreting pool chemistry.
@@ -202,7 +228,7 @@ Its responsibilities include:
 - dose calculations
 - application limits
 - conflict avoidance
-- pool score
+- pool score (using ChemistryPolicy to decide which readings are in range)
 - watchlists
 - recommendation confidence inputs
 - historical analysis
@@ -398,6 +424,23 @@ This makes verification part of the treatment-management loop rather than a pass
 
 ---
 
+# Check Completion Authority
+
+A focused Check step reaches a completed state through exactly **one** path: the user opens the Check, enters the required parameter(s), and saves the measured result (`saveFocusedCheck`). Its `checkResultTestID` then points at the Check's own originating test.
+
+There is deliberately **no automatic completion**. In particular, a later complete pool test does **not** verify or complete a pending Check — even if that test measures the Check's parameter after the Check's due time. Logging a full test does not prove the user actually performed the treatment's follow-up measurement, so the purple Check card stays unchecked until the user checks it. (An earlier "full-test supersession" mechanism was removed for exactly this reason.)
+
+No other action completes a Check. In particular:
+
+- Generic "mark treatment complete" does not complete a Check step.
+- Marking a Check incomplete is rejected; a Check is not a manually toggled treatment.
+- The passage of a Check's due time does not complete it — the reminder fires, but the Check remains pending.
+- Skip and Restore are rejected at the ViewModel boundary when the target is a completed or inapplicable Check. The boundary returns a typed result (applied, rejectedCompleted, rejectedSuperseded, rejectedInapplicable) so the UI can disable the gesture and the ViewModel can refuse the state change consistently.
+
+These guards exist because a Check carries verification evidence. Allowing an ad-hoc skip/restore/uncomplete on an already-completed Check would silently corrupt the evidence chain and could make an unsafe pool appear verified.
+
+---
+
 # Workflow Reassessment
 
 A focused Check can change what should happen next.
@@ -513,28 +556,19 @@ Deleted tests must not continue influencing calculations.
 
 # Pool Score
 
-Pool Score is generated by the chemistry intelligence system.
+Pool Score describes overall pool condition. It is explicitly not a swimming-safety decision — Swimability V2 owns swimming readiness, and a good score never unlocks a failed safety gate.
 
-Inputs may include:
+There is one canonical score API. Production reads Pool Score through `PoolViewModel.scoreAssessment(for:in:)`, which delegates to `ChemistryEngine.scoreAssessment(...)` with the previous test, recent history, and the real pool configuration. The result is a structured `PoolScoreAssessment` containing:
 
-- chemistry
-- visual indicators
-- historical behavior
-- pool conditions
-- safety overrides
+- `score` — the numeric 0–100 value
+- `grade` — the human-facing band label (via `ChemistryEngine.scoreGrade(for:)`)
+- `drivers` — the canonical, ChemistryPolicy-classified reasons the score is not perfect
 
-Outputs include:
+Inputs may include chemistry, visual indicators, historical behavior, pool conditions, contextual penalties, and safety floors.
 
-- score
-- penalties
-- floors
-- explanations
+Authority alignment: whether a reading counts as "in range" for scoring is decided by ChemistryPolicy, not by a second set of bands inside the score model. This resolves earlier drift where the score's own TA/CH ranges disagreed with policy. The score's tuned penalty magnitudes are preserved; only the in-range determination is delegated to policy.
 
-Pool Score describes overall pool condition.
-
-It is explicitly not a swimming-safety decision.
-
-Swimability V2 owns swimming readiness.
+`PoolTest.overallScore` remains as a convenience accessor for lightweight/preview use only — it assumes the current configuration and no history. Production surfaces must use `PoolViewModel.scoreAssessment` / `overallScore` so the score reflects real configuration and history and never leaks `PoolConfiguration.current`.
 
 ---
 
@@ -643,6 +677,17 @@ A targeted verification should identify its parameters, such as:
 
 A routine notification should clearly refer to the full pool test.
 
+## Check-Owned Verification Reminders
+
+A focused Check step owns its own verification reminder. The lifecycle is:
+
+- When the parent treatment is completed, the Check's reminder is scheduled for the moment the Check becomes actionable (parent completion time plus the parameter's verification/circulation delay). The scheduled identifier is stored on the Check as `checkReminderNotificationIdentifier`.
+- If the Check is completed (by the user) or its workflow is removed (including by deletion), that reminder is cancelled. State transitions cancel the notification rather than leaving it to fire.
+- The reminder is a nudge to *perform* the follow-up test; it does not complete the Check. When it fires, the Check stays pending until the user enters the result.
+- The reminder is not re-scheduled on every recompute, so a still-pending Check does not repeatedly re-nag.
+
+This keeps the notification bound to the piece of state it represents, so notifications cannot outlive the Check that owns them.
+
 ---
 
 # AIService and External Review
@@ -694,7 +739,14 @@ Responsibilities include displaying:
 - next full pool test
 - recent history
 
-Dashboard should consume engine and workflow output rather than independently calculate chemistry recommendations.
+Dashboard should consume engine and workflow output rather than independently calculate chemistry recommendations. It does not compute swim readiness inline; it displays Swimability V2's result.
+
+The treatment workflows shown on the Dashboard are derived through `PoolViewModel.dashboardWorkflows(from:)`, which partitions the pool's workflows into two groups:
+
+- **active** — workflows with an outstanding actionable step (a treatment to perform or a Check to complete)
+- **completed** — workflows whose steps are all resolved (completed or skipped)
+
+Each entry is a `DashboardWorkflowItem` keyed by its originating (root) test. When the latest test is deleted, the Dashboard falls back to the next valid workflow rather than showing a dangling reference.
 
 ---
 
@@ -720,6 +772,14 @@ Depending on downstream dependencies, this may include:
 - refreshing recommendation confidence
 
 Persistent derived state must not continue referencing deleted evidence.
+
+Deletion is handled by a single orchestration path (`PoolViewModel.deletePoolTestAndRefreshHistory`) so these steps cannot be applied inconsistently.
+
+Because a Check is completed only by the user's own focused result, its `checkResultTestID` always points at its own originating test. Deleting that test cascade-removes the Check with it, so no surviving Check can ever reference a deleted result test — there is no "falsely verified Check" to repair.
+
+Orphaned reminders are still cancelled as part of deletion: Check-owned verification reminders and the routine Next Full Pool Test reminder. Deleting the last remaining test cancels the routine reminder rather than leaving it scheduled against no pool state.
+
+This state survives relaunch: the rebuilt records are what persist.
 
 ---
 
@@ -772,6 +832,40 @@ B. fixture does not faithfully reproduce production conditions
 C. stale or incorrect test expectation
 
 Production logic should only change for category A failures.
+
+---
+
+# Source-of-Truth Authorities
+
+When a question has more than one plausible owner, exactly one subsystem is authoritative. The others consume its output.
+
+| Question | Authoritative owner | Notes |
+| --- | --- | --- |
+| What operating band / action state is a reading in? Does it block swimming? | ChemistryPolicy | Sanitizer-aware TA, surface-aware CH, configurable salt. |
+| What treatment (if any), what dose, in what order? | ChemistryEngine + TreatmentWorkflowEngine | Engine generates and doses; workflow orders and gates. |
+| Is the pool ready to swim right now? | Swimability V2 | The only readiness authority. Pool Score never decides this. |
+| What is overall pool condition (score / grade / drivers)? | `PoolViewModel.scoreAssessment` → `ChemistryEngine.scoreAssessment` | Returns `PoolScoreAssessment`. In-range determination delegated to ChemistryPolicy. |
+| Which chemistry value is the "current" one for a parameter? | Effective Pool State | Newest valid per-parameter evidence; mixed-age; provenance preserved. |
+| When does a Check become actionable, and is it complete? | TreatmentWorkflowEngine + Check Completion Authority | Completes only via the user's saved focused result. No automatic completion. |
+| Should Skip / Restore / uncomplete apply to a Check? | `PoolViewModel.focusedCheckTransitionRejection` | Typed rejection shared by UI and ViewModel. |
+| When is the next full routine pool test? | NextTestRecommendationEngine | Separate from focused verification; always means a complete panel. |
+| Which treatment reminder / verification reminder fires? | The owning Check (Check-owned notifications) | Scheduled at parent completion; cancelled on completion/supersession/deletion. |
+| What survives deleting a test? | `deletePoolTestAndRefreshHistory` | Reopens falsely verified Checks; cancels orphan reminders; rebuilds history. |
+| What does the Dashboard show as active vs completed work? | `PoolViewModel.dashboardWorkflows` | Partitions workflows; consumes engine output, computes no chemistry. |
+
+When this document and the code disagree, the code is authoritative and this table should be corrected.
+
+---
+
+# Open Limitations
+
+Documented honestly so they are not mistaken for solved problems:
+
+- **No product-label database.** Product suitability and staged-dosing behavior are encoded in engine logic, not looked up from a maintained catalog of real product concentrations. There is one calcium product (Calcium Chloride); calcium is raised, not repriced across alternatives.
+- **Salt ranges are user/generator-configured**, not inferred. If the configured range is wrong, salt classification will follow the configured range.
+- **Weather is not yet an engine input.** Long-term intelligence anticipates it, but current recommendations do not consume forecast or observed weather. (Weather-related UI/persistence work is tracked separately.)
+- **`PoolTest.overallScore` is a convenience accessor** that ignores history and assumes current configuration; it is not the production score authority.
+- **Backward-compatible legacy plans** may lack explicit workflow Check steps and are rendered without regenerating unless recalculated.
 
 ---
 

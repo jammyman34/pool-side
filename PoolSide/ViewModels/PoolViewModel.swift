@@ -85,6 +85,78 @@ final class PoolViewModel {
         saveConfig(latest)
     }
 
+    /// Reprices unfinished AI-generated chemical treatment steps in the active (latest) plan to the
+    /// current product preferences, recalculating dose in place. This never rewrites history: completed
+    /// and skipped treatments, completed/skipped Checks, step identity, sequencing, and notification
+    /// ownership are all preserved. Only pending future chemical steps are updated, so the reprice does
+    /// not carry a theoretical remainder and does not change the score (chemistry evidence is unchanged).
+    @MainActor
+    @discardableResult
+    func repriceUnfinishedTreatmentsForPreferenceChange(in tests: [PoolTest], modelContext: ModelContext) -> Bool {
+        guard let latest = latestTest(in: tests) else { return false }
+        let unfinished = latest.treatments.filter {
+            $0.isAIGenerated && !$0.isCompleted && !$0.isSkipped
+                && !$0.isFocusedCheckStep && !$0.isWatchlistItem && $0.amount > 0
+        }
+
+        var didChange = false
+        for treatment in unfinished {
+            guard let newProductID = preferredProductID(for: treatment) else { continue }
+            let newGlobalRaw = newProductID.rawValue
+
+            // Already the preferred product — just realign the recorded global-preference identifier.
+            if treatment.productIdentifier == newGlobalRaw {
+                if treatment.globalPreferenceIdentifier != newGlobalRaw {
+                    treatment.globalPreferenceIdentifier = newGlobalRaw
+                    didChange = true
+                }
+                continue
+            }
+
+            guard let repriced = chemistryEngine.repricedTreatmentTemplate(
+                from: treatment, test: latest, productID: newProductID, config: poolConfig
+            ) else { continue }
+
+            treatment.chemicalName = repriced.chemicalName
+            treatment.actionDescription = repriced.actionDescription
+            treatment.amount = repriced.amount
+            treatment.unit = repriced.unit
+            treatment.instructions = repriced.instructions
+            treatment.productIdentifier = repriced.productID?.rawValue
+            treatment.globalPreferenceIdentifier = newGlobalRaw
+            treatment.calculatedDoseBeforeCap = repriced.calculatedDoseBeforeCap
+            treatment.calculatedDoseBeforeCapUnit = repriced.calculatedDoseBeforeCapUnit
+            treatment.wasDoseCapped = repriced.wasDoseCapped
+            treatment.expectedDelta = repriced.expectedDelta
+            didChange = true
+        }
+
+        if didChange { try? modelContext.save() }
+        return didChange
+    }
+
+    /// The product the current preferences would use for a given treatment's parameter and direction.
+    private func preferredProductID(for treatment: Treatment) -> ChemicalProductID? {
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return poolConfig.chlorinePreference.productID
+        case "pH":
+            return treatment.isAcidTreatment
+                ? poolConfig.pHDecreaserPreference.productID
+                : poolConfig.pHIncreaserPreference.productID
+        case "totalAlkalinity":
+            return treatment.isAcidTreatment
+                ? poolConfig.pHDecreaserPreference.productID
+                : poolConfig.alkalinityIncreaserPreference.productID
+        case "cyanuricAcid":
+            return poolConfig.stabilizerPreference.productID
+        case "calciumHardness":
+            return poolConfig.calciumIncreaserPreference.productID
+        default:
+            return nil
+        }
+    }
+
     // MARK: - Chemistry
 
     func readings(for test: PoolTest, previousTest: PoolTest? = nil) -> [ChemicalReading] {
@@ -116,6 +188,17 @@ final class PoolViewModel {
         )
     }
 
+    /// Canonical structured Pool Score for a test using this pool's explicit configuration + history.
+    /// The single production entry point that Views/exports consume for score, grade, and drivers.
+    func scoreAssessment(for test: PoolTest, in tests: [PoolTest]) -> PoolScoreAssessment {
+        chemistryEngine.scoreAssessment(
+            for: test,
+            previousTest: previousTest(before: test, in: tests),
+            recentHistory: recentHistory(before: test, in: tests),
+            config: poolConfig
+        )
+    }
+
     func currentStatusSummary(for test: PoolTest) -> String {
         chemistryEngine.currentStatusSummary(for: test, treatments: test.treatments, config: poolConfig)
     }
@@ -136,15 +219,9 @@ final class PoolViewModel {
         )
     }
 
-    /// Canonical score → grade label. Single source shared by the score card and completed workflow rows.
+    /// Canonical score → grade label. Delegates to the single engine mapping used by the assessment.
     func scoreGrade(_ score: Int) -> String {
-        switch score {
-        case 90...100: return "Great"
-        case 75..<90:  return "Good"
-        case 60..<75:  return "Alright"
-        case 40..<60:  return "Not Great"
-        default:       return "Real Bad"
-        }
+        ChemistryEngine.scoreGrade(for: score)
     }
 
     // MARK: - Dashboard workflow items (Active / Completed)
@@ -343,6 +420,10 @@ final class PoolViewModel {
         var nextSortOrder = (test.treatments.map(\.sortOrder).max() ?? 0) + 1
 
         for treatment in treatmentSteps where !existingParentIDs.contains(treatment.id) {
+            // A focused Check is created only when the result is actually required (swim safety, a staged
+            // corrective dose, or surface/equipment protection). Recommended optimizations on an already-safe
+            // pool get no Check.
+            guard workflowEngine.requiresFocusedCheck(for: treatment, config: poolConfig) else { continue }
             guard let check = workflowEngine.makeCheckStep(after: treatment, sortOrder: treatment.sortOrder + 1) else { continue }
             shiftSortOrders(in: test, startingAt: check.sortOrder)
             if test.treatments.contains(where: { $0.sortOrder == check.sortOrder }) {
@@ -507,8 +588,22 @@ final class PoolViewModel {
     /// dependent focused Check's targeted reminder for its due time (completedAt + policy delay). A plain
     /// "next step" reminder is scheduled ONLY when a real subsequent chemical treatment follows (never for
     /// a Check, which already owns its reminder). Finally refreshes the routine Next Full Pool Test.
+    /// Outcome of completing a treatment, describing what follow-up (if any) was scheduled so the UI can
+    /// present accurate feedback.
+    enum TreatmentCompletionOutcome: Equatable {
+        case completed                              // nothing scheduled
+        case awaitingCheck                          // a focused Check owns the verification reminder
+        case nextStepScheduled                      // reminder for the next chemical step
+        case waitCompleteScheduled(fireDate: Date)  // "safe to swim" wait-complete reminder scheduled
+    }
+
     @MainActor
-    func completeTreatment(_ treatment: Treatment, in tests: [PoolTest], modelContext: ModelContext) async {
+    @discardableResult
+    func completeTreatment(_ treatment: Treatment, in tests: [PoolTest], modelContext: ModelContext) async -> TreatmentCompletionOutcome {
+        // A focused Check is completed ONLY by submitting a measured result (saveFocusedCheck) — never by the
+        // generic completion path. This guard makes it impossible to complete a Check via any treatment caller.
+        guard !treatment.isFocusedCheckStep else { return .completed }
+
         treatment.isCompleted = true
         treatment.completedAt = Date()
         treatment.isSkipped = false
@@ -516,6 +611,8 @@ final class PoolViewModel {
 
         await notifications.checkAuthorizationStatus()
         let remindersEnabled = poolConfig.enableTreatmentStepReminders && notifications.isAuthorized
+
+        var outcome: TreatmentCompletionOutcome = .completed
 
         if let check = dependentCheck(for: treatment) {
             // Check owns the verification notification, scheduled for its derived due time.
@@ -527,6 +624,7 @@ final class PoolViewModel {
                     at: due
                 )
             }
+            outcome = .awaitingCheck
         } else if treatment.minutesBeforeNext > 0, let next = nextChemicalTreatment(after: treatment) {
             // Only a genuine subsequent chemical treatment gets a next-step reminder.
             if remindersEnabled {
@@ -538,6 +636,20 @@ final class PoolViewModel {
                 treatment.reminderNotificationIdentifier = identifier
                 treatment.stepReminderNotificationIdentifier = identifier
             }
+            outcome = .nextStepScheduled
+        } else if remindersEnabled, let waitMinutes = TreatmentTimingGuidance.swimWaitMinutes(for: treatment) {
+            // No Check and no following chemical, but this treatment imposes a circulation wait before
+            // swimming. Only because the user marked it COMPLETE do we schedule a wait-complete "safe to
+            // swim" reminder. (Skipping never schedules this — the user has opted out of the treatment.)
+            let fireDate = Date().addingTimeInterval(TimeInterval(waitMinutes * 60))
+            let identifier = await notifications.scheduleWaitCompleteReminder(
+                treatmentID: treatment.id,
+                treatmentName: treatment.chemicalName,
+                afterMinutes: waitMinutes
+            )
+            treatment.reminderNotificationIdentifier = identifier
+            treatment.stepReminderNotificationIdentifier = identifier
+            if identifier != nil { outcome = .waitCompleteScheduled(fireDate: fireDate) }
         }
 
         try? modelContext.save()
@@ -550,6 +662,7 @@ final class PoolViewModel {
                 context: "Treatment Completed"
             )
         }
+        return outcome
     }
 
     /// The uncompleted focused Check that verifies this treatment, if one exists and is still actionable.
@@ -573,90 +686,51 @@ final class PoolViewModel {
         tests.sorted { $0.date > $1.date }.first
     }
 
-    /// §11–12 — A newly logged full test can verify (supersede) a prior pending focused Check, but ONLY
-    /// when ALL of the following hold: the full test is newer than the parent treatment's completion; it
-    /// is at or after the Check's due time; it measures every Check parameter; and no other treatment
-    /// affecting those parameters completed between the parent and this test. A full test logged before
-    /// the Check is due never verifies (§12). When a Check is superseded, its verification notification is
-    /// cancelled so the user is not nagged to repeat a measurement they have already provided.
+    // NOTE: A focused Check is completed ONLY by the user entering its measured result (`saveFocusedCheck`).
+    // There is deliberately no automatic completion path. A later full pool test — even one that measures
+    // the Check's parameter after the Check's due time — does NOT verify or complete the Check, because
+    // logging a full test does not prove the user actually performed that treatment's follow-up measurement.
+    // Purple Check cards remain unchecked until the user checks them. (Removed: full-test supersession.)
+
+    /// Result of a manual Skip/Restore request. Focused Checks that are already resolved (completed by a
+    /// measured result, or satisfied by a qualifying full test) or inapplicable (parent skipped) reject
+    /// the transition and leave persisted state untouched. Regular treatments always report `.applied`.
+    enum CheckTransitionResult: Equatable {
+        case applied
+        case rejectedCompleted
+        case rejectedSuperseded
+        case rejectedInapplicable
+    }
+
+    /// Returns a rejection reason if the focused Check may NOT be manually skipped/restored, or `nil` when
+    /// the transition is eligible (this is also `nil` for any non-Check treatment).
     @MainActor
-    func resolveChecksSatisfiedByFullTest(_ fullTest: PoolTest, allTests: [PoolTest], modelContext: ModelContext) {
-        // A partial focused-check entry is not a full test and never supersedes another Check.
-        guard !fullTest.isFocusedCheck else { return }
-
-        let allTreatments = allTests.flatMap(\.treatments)
-        let pendingChecks = allTreatments.filter {
-            $0.isFocusedCheckStep && !$0.isCompleted && !$0.isSkipped
-        }
-        guard !pendingChecks.isEmpty else { return }
-
-        var didResolveAny = false
-        for check in pendingChecks {
-            guard
-                let parentID = check.parentTreatmentID,
-                let parent = allTreatments.first(where: { $0.id == parentID }),
-                parent.isCompleted,
-                let parentCompletedAt = parent.completedAt
-            else { continue }
-
-            // (1) The full test post-dates the parent's completion.
-            guard fullTest.date > parentCompletedAt else { continue }
-            // (2) The full test is at or after the Check's due time (§12: earlier tests never verify).
-            guard
-                let dueDate = workflowEngine.availableDate(for: check, in: parent.poolTest?.treatments ?? []),
-                fullTest.date >= dueDate
-            else { continue }
-            // (3) The full test measures every Check parameter.
-            let params = check.checkParameters.isEmpty ? [check.targetParameter] : check.checkParameters
-            guard params.allSatisfy({ fullTestContainsParameter(fullTest, $0) }) else { continue }
-            // (4) No other treatment affecting those parameters completed between the parent and this test.
-            let families = Set(params.map(parameterFamily))
-            let hasInterveningTreatment = allTreatments.contains { other in
-                other.id != parent.id
-                    && other.isCompleted
-                    && !other.isFocusedCheckStep
-                    && (other.completedAt.map { $0 > parentCompletedAt && $0 < fullTest.date } ?? false)
-                    && families.contains(parameterFamily(other.targetParameter))
+    func focusedCheckTransitionRejection(_ treatment: Treatment) -> CheckTransitionResult? {
+        guard treatment.isFocusedCheckStep else { return nil }
+        if treatment.isCompleted {
+            let ownTestID = treatment.poolTest?.id
+            if let resultID = treatment.checkResultTestID, resultID != ownTestID {
+                return .rejectedSuperseded
             }
-            guard !hasInterveningTreatment else { continue }
-
-            // All conditions hold — this full test IS the verification the Check was waiting for.
-            check.isCompleted = true
-            check.completedAt = fullTest.date
-            check.checkResultTestID = fullTest.id
-            notifications.cancel(identifier: check.checkReminderNotificationIdentifier)
-            check.checkReminderNotificationIdentifier = nil
-            didResolveAny = true
+            return .rejectedCompleted
         }
-
-        if didResolveAny {
-            try? modelContext.save()
+        // Resolved by valid evidence even if the completion flag was not set — treat as superseded.
+        if treatment.checkResultTestID != nil { return .rejectedSuperseded }
+        // A Check whose parent was skipped is inapplicable; it is only restored by restoring the parent.
+        if let parentID = treatment.parentTreatmentID,
+           let parent = treatment.poolTest?.treatments.first(where: { $0.id == parentID }),
+           parent.isSkipped {
+            return .rejectedInapplicable
         }
-    }
-
-    /// Canonical parameter family so a chlorine treatment is recognized as affecting both FC and CC.
-    private func parameterFamily(_ parameter: String) -> String {
-        switch parameter {
-        case "freeChlorine", "combinedChlorine", "totalChlorine": return "chlorine"
-        default: return parameter
-        }
-    }
-
-    /// A standard full test always records the core chemistry parameters; salt only when configured.
-    private func fullTestContainsParameter(_ test: PoolTest, _ parameter: String) -> Bool {
-        switch parameter {
-        case "freeChlorine", "combinedChlorine", "totalChlorine", "pH",
-             "totalAlkalinity", "calciumHardness", "cyanuricAcid":
-            return true
-        case "saltLevel":
-            return test.saltLevel != nil
-        default:
-            return false
-        }
+        return nil
     }
 
     @MainActor
     func markTreatmentIncomplete(_ treatment: Treatment) {
+        // A focused Check is completed only by the user's measured result; the generic "mark incomplete"
+        // path must never revert it.
+        guard !treatment.isFocusedCheckStep else { return }
+
         treatment.isCompleted = false
         treatment.completedAt = nil
         notifications.cancel(identifier: treatment.reminderNotificationIdentifier)
@@ -670,8 +744,40 @@ final class PoolViewModel {
         }
     }
 
+    /// One-time data repair for the removed full-test supersession behavior. Reopens any focused Check that
+    /// an earlier build auto-completed via a *different* full test. Because a legitimately user-completed
+    /// Check always records its own originating test in `checkResultTestID`, a Check whose `checkResultTestID`
+    /// points at a different test can only be a stale auto-completion — never a real measured result. This is
+    /// precise (it never touches a user's manual completion) and idempotent (reopened Checks clear the link,
+    /// so a second run matches nothing). Returns the number of Checks reopened.
     @MainActor
-    func skipTreatment(_ treatment: Treatment) {
+    @discardableResult
+    func reopenAutoCompletedChecks(in tests: [PoolTest], modelContext: ModelContext) -> Int {
+        var reopened = 0
+        for test in tests {
+            for check in test.treatments where check.isFocusedCheckStep {
+                guard check.isCompleted,
+                      let resultID = check.checkResultTestID,
+                      resultID != test.id
+                else { continue }
+                check.isCompleted = false
+                check.completedAt = nil
+                check.checkResultTestID = nil
+                notifications.cancel(identifier: check.checkReminderNotificationIdentifier)
+                check.checkReminderNotificationIdentifier = nil
+                reopened += 1
+            }
+        }
+        if reopened > 0 { try? modelContext.save() }
+        return reopened
+    }
+
+    @MainActor
+    @discardableResult
+    func skipTreatment(_ treatment: Treatment) -> CheckTransitionResult {
+        // A resolved or inapplicable focused Check must reject Skip and never be un-completed.
+        if let rejection = focusedCheckTransitionRejection(treatment) { return rejection }
+
         notifications.cancel(identifier: treatment.reminderNotificationIdentifier)
         notifications.cancel(identifier: treatment.stepReminderNotificationIdentifier)
         notifications.cancel(identifier: treatment.retestReminderNotificationIdentifier)
@@ -696,10 +802,15 @@ final class PoolViewModel {
         treatment.skippedAt = Date()
         treatment.isCompleted = false
         treatment.completedAt = nil
+        return .applied
     }
 
     @MainActor
-    func restoreTreatment(_ treatment: Treatment) {
+    @discardableResult
+    func restoreTreatment(_ treatment: Treatment) -> CheckTransitionResult {
+        // A completed/superseded Check was never validly skipped — reject Restore and leave it historical.
+        if let rejection = focusedCheckTransitionRejection(treatment) { return rejection }
+
         treatment.isSkipped = false
         treatment.skippedAt = nil
         // Restore a parent's dependent Check to a non-skipped upcoming state. It cannot become due until
@@ -710,21 +821,24 @@ final class PoolViewModel {
             check.isSkipped = false
             check.skippedAt = nil
         }
+        return .applied
     }
 
     // MARK: - Pending Treatments (across all tests)
 
     func pendingTreatments(from tests: [PoolTest]) -> [Treatment] {
+        // Focused Checks are verification steps handled by their own workflow UI (measurement entry), not
+        // completable treatment rows — they must never appear in a list with a completing checkbox.
         tests
             .flatMap { $0.treatments }
-            .filter { !$0.isCompleted && !$0.isSkipped }
+            .filter { !$0.isCompleted && !$0.isSkipped && !$0.isFocusedCheckStep }
             .sorted { $0.urgency.sortOrder < $1.urgency.sortOrder }
     }
 
     func completedTreatments(from tests: [PoolTest]) -> [Treatment] {
         tests
             .flatMap { $0.treatments }
-            .filter { $0.isCompleted }
+            .filter { $0.isCompleted && !$0.isFocusedCheckStep }
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
     }
 
@@ -937,6 +1051,9 @@ final class PoolViewModel {
             .filter { $0.id != deletedID }
             .sorted { $0.date < $1.date }
 
+        // A Check is only ever completed by the user's own focused result, whose `checkResultTestID` points
+        // at the Check's own originating test. If that test is deleted the Check is cascade-removed with it,
+        // so no surviving Check can reference a deleted result test — there is nothing to repair here.
         try deletePoolTest(test, modelContext: modelContext)
 
         for remainingTest in remainingTests where remainingTest.date > deletedDate {

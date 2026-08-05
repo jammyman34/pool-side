@@ -4,6 +4,7 @@ import SwiftData
 struct ContentView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     @State private var selectedTab: Tab = .dashboard
@@ -51,6 +52,10 @@ struct ContentView: View {
             viewModel.refreshConfigFromStorage(reconcilingWith: tests)
         }
         .task {
+            // One-time cleanup: reopen any Check that an earlier build auto-completed via full-test
+            // supersession (now removed). Idempotent and safe — never touches a user's own completions.
+            viewModel.reopenAutoCompletedChecks(in: tests, modelContext: modelContext)
+
             try? await Task.sleep(for: .milliseconds(1000))
             withAnimation(.easeOut(duration: 0.2)) {
                 showingStartupSplash = false

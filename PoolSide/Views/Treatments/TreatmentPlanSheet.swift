@@ -52,6 +52,16 @@ struct TreatmentPlanSheet: View {
         workflowSteps
     }
 
+    /// Actual chemical/action treatment steps only — focused Checks excluded. "Why This Plan" narrative
+    /// and any treatment-summary reasoning must use this, never `treatmentSteps` (which includes Checks).
+    private var treatmentActions: [Treatment] {
+        workflowSteps.filter { !$0.isFocusedCheckStep }
+    }
+
+    private var focusedChecks: [Treatment] {
+        workflowSteps.filter { $0.isFocusedCheckStep }
+    }
+
     private var watchlistItems: [Treatment] {
         allTreatments.filter { !$0.isSkipped && $0.isWatchlistItem }
     }
@@ -206,7 +216,11 @@ struct TreatmentPlanSheet: View {
                                 } else {
                                     VStack(spacing: 0) {
                                         ForEach(Array(workflowSteps.enumerated()), id: \.element.id) { index, step in
+                                            // 6pt of separation between Check cards shown back-to-back.
+                                            let previousStepIsCheck = index > 0 && workflowSteps[index - 1].isFocusedCheckStep
+                                            let needsCheckGap = step.isFocusedCheckStep && previousStepIsCheck
                                             workflowStepCard(step, index: index)
+                                                .padding(.top, needsCheckGap ? 6 : 0)
                                         }
                                     }
                                 }
@@ -461,7 +475,11 @@ struct TreatmentPlanSheet: View {
             if case .current = state { return true }
             return false
         }()
-        let showsDivider = index < workflowSteps.count - 1
+        // Consecutive Check cards are separated by a 6pt gap (added at the ForEach), so the joining
+        // internal divider is suppressed between two Checks to avoid a divider-then-gap seam.
+        let nextStep = index + 1 < workflowSteps.count ? workflowSteps[index + 1] : nil
+        let nextStepIsCheck = nextStep?.isFocusedCheckStep ?? false
+        let showsDivider = nextStep != nil && !(step.isFocusedCheckStep && nextStepIsCheck)
 
         if step.isFocusedCheckStep {
             focusedCheckCard(step, state: state, sequenceNumber: index + 1, showsDivider: showsDivider)
@@ -531,7 +549,11 @@ struct TreatmentPlanSheet: View {
             return false
         }()
 
-        return VStack(alignment: .leading, spacing: 0) {
+        // Swipe Skip/Restore is offered only when the canonical ViewModel rule would accept the transition
+        // (unresolved, not superseded, parent not skipped) — the UI and ViewModel agree by construction.
+        let gestureEnabled = viewModel.focusedCheckTransitionRejection(checkStep) == nil
+
+        let cardBody = VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "testtube.2")
                     .font(.system(size: 18, weight: .semibold))
@@ -542,6 +564,7 @@ struct TreatmentPlanSheet: View {
                     Text(checkStep.chemicalName)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(PoolColor.primaryText)
+                        .strikethrough(checkStep.isSkipped, color: PoolColor.secondaryText)
 
                     Text(checkStep.actionDescription)
                         .font(.caption)
@@ -580,45 +603,61 @@ struct TreatmentPlanSheet: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(PoolColor.statusTesting, lineWidth: 1)
         )
+
+        return SwipeableSkipRow(
+            itemID: checkStep.id,
+            isSkipped: checkStep.isSkipped,
+            gestureEnabled: gestureEnabled,
+            cornerRadius: 14,
+            skipAccessibilityLabel: "Skip check",
+            restoreAccessibilityLabel: "Restore check",
+            openSwipeID: $openSwipeTreatmentID,
+            onSkip: { await skipTreatment(checkStep) },
+            onRestore: { await restoreTreatment(checkStep) }
+        ) {
+            cardBody
+        }
         .overlay(alignment: .topLeading) {
             sequenceBadge(sequenceNumber, state: state)
                 .offset(x: 6, y: 8)
         }
     }
 
+    /// The Check's status control. It NEVER completes the Check — the current-state control only opens the
+    /// measurement-entry sheet. A checkmark appears ONLY for a genuinely completed Check; the active step
+    /// shows an explicit "Enter" call-to-action so it can never be mistaken for a completed check. Skip/
+    /// Restore are handled by the shared swipe row, not inline buttons.
     @ViewBuilder
     private func checkControl(for checkStep: Treatment, state: TreatmentWorkflowEngine.StepState, isCurrent: Bool) -> some View {
         if checkStep.isCompleted {
             Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
                 .foregroundStyle(PoolColor.statusIdeal)
+                .accessibilityLabel("Check complete")
         } else if checkStep.isSkipped {
-            Button("Restore") {
-                Task { await restoreTreatment(checkStep) }
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(PoolColor.poolTeal)
+            Image(systemName: "slash.circle")
+                .font(.title3)
+                .foregroundStyle(PoolColor.statusSlight)
+                .accessibilityLabel("Check skipped")
         } else if isCurrent {
-            HStack(spacing: 10) {
-                Button("Skip") {
-                    Task { await skipTreatment(checkStep) }
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(PoolColor.secondaryText)
-
-                Button {
-                    focusedCheckStep = checkStep
-                } label: {
-                    Image(systemName: "checkmark.circle")
-                        .font(.title3)
-                        .foregroundStyle(PoolColor.poolTeal)
-                }
-                .accessibilityLabel("Start \(checkStep.chemicalName)")
+            Button {
+                focusedCheckStep = checkStep
+            } label: {
+                Text("Enter")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(PoolColor.poolTeal, in: Capsule())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Enter \(checkStep.chemicalName) results")
+            .accessibilityHint("Opens measurement entry. The Check is not complete until you save a result.")
         } else {
             Image(systemName: "circle")
                 .font(.title3)
                 .foregroundStyle(PoolColor.divider)
+                .accessibilityLabel("Check not yet due")
         }
     }
 
@@ -949,31 +988,13 @@ struct TreatmentPlanSheet: View {
     }
 
     private var whyPlanSummary: [String] {
-        var lines: [String] = []
-        let engine = ChemistryEngine()
-        let fcRange = engine.freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
-
-        if treatmentSteps.isEmpty {
-            lines.append("Based on the data logged, your pool does not need an added treatment step right now.")
-        } else if test.freeChlorine < fcRange.lowerBound {
-            lines.append("Your pool is mostly stable, but free chlorine is below the target for your current CYA.")
-        } else {
-            lines.append("Based on the data logged, this plan prioritizes the items most likely to affect pool safety and comfort.")
-        }
-
-        if confidenceInput.chlorineDemandScore >= 3 {
-            lines.append("Recent logged pool conditions increased expected chlorine demand.")
-        } else if !confidenceInput.hasPoolConditions {
-            lines.append("Pool conditions were not logged, so this plan is based mostly on chemistry and history.")
-        }
-
-        if let acid = treatmentSteps.first(where: { $0.isAcidTreatment }) {
-            lines.append(acid.actionDescription)
-        } else if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) {
-            lines.append("Your pH is safe, so elevated alkalinity is being monitored instead of treated.")
-        }
-
-        return Array(lines.prefix(3))
+        WhyThisPlanNarrative.summaryLines(
+            treatmentActions: treatmentActions,
+            focusedChecks: focusedChecks,
+            test: test,
+            chlorineDemandScore: confidenceInput.chlorineDemandScore,
+            hasPoolConditions: confidenceInput.hasPoolConditions
+        )
     }
 
     private var confidenceBasedOn: [String] {
@@ -1006,7 +1027,7 @@ struct TreatmentPlanSheet: View {
         if test.cyanuricAcid > 50 && test.cyanuricAcid < 90 {
             factors.append("CYA is elevated but manageable, so FC must run higher.")
         }
-        let hasAcidTreatment = treatmentSteps.contains(where: { $0.isAcidTreatment })
+        let hasAcidTreatment = treatmentActions.contains(where: { $0.isAcidTreatment })
         if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) && !hasAcidTreatment {
             factors.append("pH is safe; acid is not currently needed.")
         }
@@ -1037,22 +1058,11 @@ struct TreatmentPlanSheet: View {
     }
 
     private var expectedOutcomes: [String] {
-        var outcomes: [String] = []
-
-        if let chlorine = treatmentSteps.first(where: { $0.targetParameter == "freeChlorine" }) {
-            outcomes.append("Adding \(chlorine.amount.formattedTreatmentAmount) \(chlorine.unit) of \(chlorine.chemicalName) should raise FC toward the normal target range.")
-        }
-        if let acid = treatmentSteps.first(where: { $0.isAcidTreatment }) {
-            outcomes.append("Adding \(acid.amount.formattedTreatmentAmount) \(acid.unit) of \(acid.chemicalName) should move pH toward the conservative target without chasing alkalinity in the same step.")
-        }
-        if !treatmentSteps.contains(where: { $0.isAcidTreatment }) && (7.2...7.8).contains(test.pH) {
-            outcomes.append("No acid is recommended because pH is currently safe.")
-        }
-        if outcomes.isEmpty {
-            outcomes.append("Continue circulation and normal testing so Pool Side can confirm the pool remains stable.")
-        }
-
-        return Array(outcomes.prefix(4))
+        WhyThisPlanNarrative.expectedOutcomes(
+            treatmentActions: treatmentActions,
+            focusedChecks: focusedChecks,
+            test: test
+        )
     }
 
     private var nextTestTiming: String {
@@ -1093,6 +1103,8 @@ struct TreatmentPlanSheet: View {
     private var validationPrompt: String {
         let config = viewModel.poolConfig
         let previousLogs = Array(recentHistory.prefix(5))
+        let swimAssessment = viewModel.swimReadinessAssessment(for: test, in: tests)
+        let poolScoreAssessment = viewModel.scoreAssessment(for: test, in: tests)
 
         return """
         POOL SIDE EXTERNAL REVIEW EXPORT
@@ -1147,18 +1159,24 @@ struct TreatmentPlanSheet: View {
         - Confidence inputs used: \(confidenceBasedOn.isEmpty ? "None" : confidenceBasedOn.joined(separator: ", "))
         - Missing/limited data: \(confidenceMissingOrLimited.isEmpty ? "None" : confidenceMissingOrLimited.joined(separator: ", "))
 
-        7. Current Pool Score
-        - Score: \(currentScore)
-        - Label: \(scoreLabel(currentScore))
-        - Main score drivers: \(scoreDriverSummary())
+        7. Current Pool Score (maintenance/health summary — not a swim-readiness authority)
+        - Score: \(poolScoreAssessment.score)
+        - Label: \(poolScoreAssessment.grade)
+        - Main score drivers (canonical ChemistryPolicy states): \(poolScoreAssessment.drivers.isEmpty ? "All parameters within their operating range." : poolScoreAssessment.drivers.joined(separator: ", "))
 
-        8. Treatment Steps
-        \(treatmentSteps.isEmpty ? "No actionable treatment steps." : treatmentSteps.map(treatmentStepExport).joined(separator: "\n\n"))
+        8. Swim Readiness (Swimability V2)
+        \(ExternalReviewExportBuilder.swimReadinessSection(swimAssessment))
 
-        9. Watchlist
+        9. Treatment Actions
+        \(ExternalReviewExportBuilder.treatmentActionsSection(chemicalActions: treatmentSteps, test: test, config: config))
+
+        10. Focused Checks
+        \(ExternalReviewExportBuilder.focusedChecksSection(allTreatments: allTreatments, test: test, recentHistory: recentHistory, config: config))
+
+        11. Watchlist / Monitoring
         \(watchlistItems.isEmpty ? "No watchlist items." : watchlistItems.map(watchlistExport).joined(separator: "\n\n"))
 
-        10. Why This Treatment
+        12. Why This Plan
         Summary:
         \(bulletedLines(whyPlanSummary))
 
@@ -1171,13 +1189,13 @@ struct TreatmentPlanSheet: View {
         Expected outcome:
         \(bulletedLines(expectedOutcomes))
 
-        Next test timing:
+        13. Engine Deferrals / Avoided Recommendations
+        \(ExternalReviewExportBuilder.engineDeferralsSection(allTreatments: allTreatments))
+
+        14. Next Full Pool Test
         - \(nextTestTiming)
 
-        11. Suppressed or Avoided Recommendations
-        \(suppressedRecommendationsExport())
-
-        12. Product and Timing Audit
+        15. Product and Timing Audit
         \(ExternalReviewExportBuilder.treatmentAuditSection(
             config: config,
             test: test,
@@ -1186,7 +1204,7 @@ struct TreatmentPlanSheet: View {
             routineNextTestTiming: nextTestTiming
         ))
 
-        13. User Prompt
+        16. User Prompt
         Please review this pool test log and treatment plan. Tell me whether the recommendation is chemically sound, whether anything is missing or over-aggressive, and what I should do next.
         """
     }
@@ -1281,17 +1299,14 @@ struct TreatmentPlanSheet: View {
     }
 
     private func recentHistoryExport(_ test: PoolTest) -> String {
-        let treatments = test.treatments.filter { $0.isCompleted || $0.isSkipped }
-        let treatmentSummary = treatments.isEmpty
-            ? "none"
-            : treatments.map { "\($0.chemicalName) (\($0.isCompleted ? "completed" : "skipped"))" }.joined(separator: ", ")
+        let treatmentSummary = ExternalReviewExportBuilder.completedOrSkippedStepsSummary(for: test)
 
         return """
         - Date/time: \(Self.promptDateFormatter.string(from: test.date))
           FC: \(formatPPM(test.freeChlorine)); CC: \(formatPPM(test.combinedChlorine)); pH: \(formatNumber(test.pH)); TA: \(formatPPM(test.totalAlkalinity)); CH: \(formatPPM(test.calciumHardness)); CYA: \(formatPPM(test.cyanuricAcid))
           Pool score: \(viewModel.overallScore(for: test, previousTest: viewModel.previousTest(before: test, in: tests), recentHistory: viewModel.recentHistory(before: test, in: tests, limit: 10)))
           Key pool conditions: \(shortConditionsSummary(for: test.resolvedPoolConditions))
-          Completed/skipped treatments: \(treatmentSummary)
+          Completed/skipped workflow steps attached to this prior test log: \(treatmentSummary)
         """
     }
 
@@ -1543,18 +1558,30 @@ struct TreatmentPlanSheet: View {
 
     @MainActor
     private func completeTreatment(_ treatment: Treatment) async {
-        // Single completion authority lives in the ViewModel: it marks complete, schedules the Check-owned
-        // verification reminder (or a next-step reminder only for a real subsequent chemical step), and
-        // refreshes routine testing. The view only presents feedback.
-        await viewModel.completeTreatment(treatment, in: tests, modelContext: modelContext)
-        let awaitsCheck = viewModel.dependentCheck(for: treatment) != nil
-        toastMessage = ToastMessage(
-            text: awaitsCheck
-                ? "Marked complete. We'll remind you when it's time to re-test."
-                : "Treatment marked complete.",
-            icon: "checkmark.circle.fill",
-            color: PoolColor.statusIdeal
-        )
+        // Single completion authority lives in the ViewModel: it marks complete and schedules the right
+        // follow-up (a Check-owned reminder, a next-step reminder, or a wait-complete "safe to swim"
+        // reminder). The view presents feedback based on the reported outcome.
+        let outcome = await viewModel.completeTreatment(treatment, in: tests, modelContext: modelContext)
+        switch outcome {
+        case .awaitingCheck:
+            toastMessage = ToastMessage(
+                text: "Marked complete. We'll remind you when it's time to re-test.",
+                icon: "checkmark.circle.fill",
+                color: PoolColor.statusIdeal
+            )
+        case .waitCompleteScheduled(let fireDate):
+            toastMessage = ToastMessage(
+                text: "Marked complete. We'll remind you when the circulation wait is up (around \(fireDate.formatted(date: .omitted, time: .shortened))).",
+                icon: "bell.badge.fill",
+                color: PoolColor.poolTeal
+            )
+        case .nextStepScheduled, .completed:
+            toastMessage = ToastMessage(
+                text: "Treatment marked complete.",
+                icon: "checkmark.circle.fill",
+                color: PoolColor.statusIdeal
+            )
+        }
     }
 
     private func recalculateRecommendations() {
@@ -2081,7 +2108,9 @@ struct ExternalReviewExportBuilder {
         let acidTiming = timeSinceLastCompletedAcidTreatment(recentHistory: recentHistory)
         let suppressed = suppressedRecommendationReasons(treatments: treatments)
 
-        let treatmentLines = treatments.map { treatment in
+        // Focused Checks are verification steps, not chemical products — never model them here.
+        let chemicalTreatments = treatments.filter { !$0.isFocusedCheckStep }
+        let treatmentLines = chemicalTreatments.map { treatment in
             let selectedProduct = treatment.productIdentifier
                 .flatMap(ChemicalProductID.init(rawValue:))
             let globalProduct = treatment.globalPreferenceIdentifier
@@ -2107,9 +2136,9 @@ struct ExternalReviewExportBuilder {
               Why now: \(treatment.actionDescription)
               Treatment verification classification: \(verificationClassification(for: treatment, test: test))
               Treatment verification timing: \(verificationTiming(for: treatment, test: test))
-              Recommended next routine test timing: \(routineNextTestTiming)
             """
         }.joined(separator: "\n\n")
+        _ = routineNextTestTiming
 
         let checkOutcomes = focusedCheckOutcomesSection(config: config, test: test, recentHistory: recentHistory)
 
@@ -2236,45 +2265,30 @@ struct ExternalReviewExportBuilder {
     }
 
     private static func suppressedRecommendationReasons(treatments: [Treatment]) -> String {
+        // Focused Checks are verification steps, never "suppressed treatments".
         let reasons = treatments
-            .filter { $0.isWatchlistItem || $0.amount == 0 }
+            .filter { !$0.isFocusedCheckStep && ($0.isWatchlistItem || $0.amount == 0) }
             .map(\.actionDescription)
         return reasons.isEmpty ? "none reported" : reasons.joined(separator: "; ")
     }
 
     private static func verificationClassification(for treatment: Treatment, test: PoolTest) -> String {
-        guard treatment.amount > 0 && !treatment.isWatchlistItem else { return "Routine next test" }
-        switch treatment.targetParameter {
-        case "freeChlorine":
-            return requiresChlorineVerification(treatment, test: test) ? "Required verification" : "Optional verification"
-        case "pH", "totalAlkalinity", "cyanuricAcid":
-            return "Required verification"
-        default:
-            return "Routine next test"
+        switch ExportVerificationRequirement.resolve(for: treatment, test: test, config: .current) {
+        case .required:      return "Required verification"
+        case .discretionary: return "Discretionary verification"
+        case .none:          return "No treatment-specific verification"
         }
-    }
-
-    private static func requiresChlorineVerification(_ treatment: Treatment, test: PoolTest) -> Bool {
-        if treatment.urgency == .immediate { return true }
-        let indicators = Set(test.visualIndicators)
-        let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)
-            || indicators.contains(VisualIndicator.greenWater.rawValue)
-            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
-            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
-        if hasProblemWater { return true }
-        return treatment.urgency == .recommended && test.combinedChlorine > 0.5
     }
 
     private static func verificationTiming(for treatment: Treatment, test: PoolTest) -> String {
-        guard treatment.amount > 0 && !treatment.isWatchlistItem else {
-            return "No treatment-specific verification; use the recommended next routine test."
+        guard treatment.amount > 0 && !treatment.isWatchlistItem && !treatment.isFocusedCheckStep else {
+            return "No treatment-specific verification."
         }
         switch treatment.targetParameter {
         case "freeChlorine":
-            if verificationClassification(for: treatment, test: test) == "Required verification" {
-                return "Verify FC/CC after circulation before swimming or adding more chlorine."
-            }
-            return "Optional FC verification after about 1 hour of circulation."
+            return ExportVerificationRequirement.resolve(for: treatment, test: test, config: .current) == .required
+                ? "Verify FC/CC after circulation before swimming or adding more chlorine."
+                : "Discretionary FC verification after about 1 hour of circulation."
         case "pH", "totalAlkalinity":
             return "Verify pH after circulation, typically about 4 hours."
         case "cyanuricAcid":
@@ -2286,6 +2300,316 @@ struct ExternalReviewExportBuilder {
 
     private static func format(_ value: Double) -> String {
         String(format: "%.1f", value)
+    }
+
+    // MARK: - Swim Readiness V2 (§4)
+
+    /// Sourced directly from the canonical Swimability V2 assessment. No thresholds are reproduced here.
+    static func swimReadinessSection(_ assessment: SwimabilityV2Assessment) -> String {
+        func gateLine(_ gate: SwimReadinessGateResult) -> String {
+            "    - \(gate.identifier.rawValue): \(gate.state.rawValue)\(gate.reason.isEmpty ? "" : " — \(gate.reason)")"
+        }
+        let failed = assessment.failedGates
+        let unknown = assessment.unknownGates
+        let pending = assessment.treatmentAwareContext?.pendingVerificationGateIdentifiers ?? []
+        let readyTime = assessment.earliestPredictedReadyTime.map { ISO8601DateFormatter().string(from: $0) } ?? "not predicted"
+
+        var lines: [String] = [
+            "- V2 state: \(assessment.state.rawValue)",
+            "- Swimming blocked: \(assessment.swimmingBlocked ? "Yes" : "No")",
+            "- Testing required: \(assessment.testingRequired ? "Yes" : "No")",
+            "- Verification required before swimming: \((assessment.treatmentAwareContext?.verificationRequired ?? false) ? "Yes" : "No")",
+            "- Evidence type: \(assessment.evidenceType.rawValue)",
+            "- Confidence: \(assessment.confidence.rawValue)",
+            "- Prediction confidence: \(assessment.predictionConfidence?.rawValue ?? "not applicable")",
+            "- Earliest predicted ready time: \(readyTime)",
+            "- Readiness explanation: \(assessment.summary)"
+        ]
+        lines.append("- Failed gates: \(failed.isEmpty ? "none" : failed.map { $0.identifier.rawValue }.joined(separator: ", "))")
+        if !failed.isEmpty { lines.append(contentsOf: failed.map(gateLine)) }
+        lines.append("- Unknown gates: \(unknown.isEmpty ? "none" : unknown.map { $0.identifier.rawValue }.joined(separator: ", "))")
+        lines.append("- Pending verification gates: \(pending.isEmpty ? "none" : pending.map { $0.rawValue }.sorted().joined(separator: ", "))")
+        if !assessment.invalidationReasons.isEmpty {
+            lines.append("- Evidence invalidation: \(assessment.invalidationReasons.joined(separator: "; "))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Treatment Actions (§1A, §3, §6, §7)
+
+    /// Chemical / non-chemical action steps only (Focused Checks are handled separately). Uses canonical
+    /// verification and staged/capped-aware expected response.
+    static func treatmentActionsSection(chemicalActions: [Treatment], test: PoolTest, config: PoolConfiguration) -> String {
+        let actions = chemicalActions.filter { !$0.isFocusedCheckStep && !$0.isWatchlistItem && $0.urgency != .advisory }
+        guard !actions.isEmpty else { return "No actionable treatment steps." }
+        return actions.map { treatmentActionExport($0, test: test, config: config) }.joined(separator: "\n\n")
+    }
+
+    private static func treatmentActionExport(_ treatment: Treatment, test: PoolTest, config: PoolConfiguration) -> String {
+        var lines: [String] = ["- Title: \(treatment.chemicalName)",
+                               "  Urgency: \(treatment.urgency.displayName)",
+                               "  Target parameter: \(treatment.targetParameter.isEmpty ? "not specified" : treatment.targetParameter)"]
+        if treatment.amount > 0 {
+            lines.append("  Current application: \(treatment.amount.formattedTreatmentAmount)\(treatment.unit.isEmpty ? "" : " \(treatment.unit)")")
+            if let product = treatment.productIdentifier.flatMap(ChemicalProductID.init(rawValue:)) {
+                lines.append("  Selected product: \(product.displayName) — \(product.concentrationLabel)")
+            }
+            if treatment.calculatedDoseBeforeCap > 0 {
+                let total = "\(treatment.calculatedDoseBeforeCap.formattedTreatmentAmount) \(treatment.calculatedDoseBeforeCapUnit)"
+                lines.append("  Total calculated correction: \(treatment.wasDoseCapped ? total : "same as current application")")
+            }
+            lines.append("  Safety/application cap applied: \(treatment.wasDoseCapped ? "Yes" : "No")")
+        } else {
+            lines.append("  Current application: not a dosed addition")
+        }
+        lines.append("  Why recommended: \(treatment.actionDescription)")
+        lines.append("  Expected response: \(expectedResponseText(for: treatment))")
+        lines.append("  Verification requirement: \(ExportVerificationRequirement.resolve(for: treatment, test: test, config: config).label)")
+        lines.append("  Status: \(statusText(treatment))")
+        return lines.joined(separator: "\n")
+    }
+
+    /// §6 — staged/capped treatments never claim the full theoretical delta for the current application.
+    static func expectedResponseText(for treatment: Treatment) -> String {
+        guard treatment.amount > 0, !treatment.expectedEffectParameter.isEmpty else {
+            return "no direct chemical addition"
+        }
+        let param = displayParameterName(treatment.expectedEffectParameter)
+        let staged = treatment.wasDoseCapped
+            || treatment.targetParameter == "pH"
+            || treatment.targetParameter == "totalAlkalinity"
+        if staged {
+            return "This application begins moving \(param) toward the operating range; it is not expected to complete the full correction. Verify with the focused Check after circulation before adding more — the next step is recalculated from the new measurement."
+        }
+        // Uncapped linear addition (e.g. liquid chlorine): a dose-derived estimate of THIS application.
+        let sign = treatment.expectedDelta > 0 ? "+" : ""
+        let delay = treatment.effectDelayHours > 0 ? " after about \(treatment.effectDelayHours)h" : ""
+        return "Approximately \(param) \(sign)\(format(treatment.expectedDelta))\(delay) from this application"
+    }
+
+    // MARK: - Focused Checks (§1B)
+
+    /// Pending and completed focused Checks in their own representation — never as chemical products.
+    static func focusedChecksSection(
+        allTreatments: [Treatment],
+        test: PoolTest,
+        recentHistory: [PoolTest],
+        config: PoolConfiguration,
+        evaluationDate: Date = Date()
+    ) -> String {
+        let checks = allTreatments.filter { $0.isFocusedCheckStep }.sorted { $0.sortOrder < $1.sortOrder }
+        guard !checks.isEmpty else { return "No focused Checks in the active workflow." }
+
+        let engine = TreatmentWorkflowEngine()
+        let evaluator = FocusedCheckOutcomeEvaluator()
+        let candidateTests = [test] + recentHistory
+
+        return checks.map { check -> String in
+            let params = check.checkParameters.isEmpty ? [check.targetParameter] : check.checkParameters
+            let parent = check.parentTreatmentID.flatMap { pid in allTreatments.first { $0.id == pid } }
+            let parentName = parent?.chemicalName ?? "not linked"
+
+            if check.isCompleted, let resultID = check.checkResultTestID,
+               let resultTest = candidateTests.first(where: { $0.id == resultID }) {
+                let measured = params.map { p in
+                    let o = evaluator.outcome(parameter: p, priorValue: nil,
+                                              measuredValue: measuredValue(of: p, in: resultTest),
+                                              postCheckTest: resultTest, postCheckTreatments: test.treatments, config: config)
+                    let outcome: String
+                    switch o.kind {
+                    case .resolved: outcome = "returned to operating range"
+                    case .noChemicalActionNeeded: outcome = "outside ideal but no chemical correction warranted"
+                    default: outcome = "still outside operating range"
+                    }
+                    return "    - \(o.displayName): \(o.measuredValue.formattedTreatmentAmount) — \(outcome); further correction: \(o.hasFollowUpTreatment ? "generated from the new measurement" : "none")"
+                }.joined(separator: "\n")
+                let completedAt = check.completedAt.map { Self.promptDateFormatter.string(from: $0) } ?? "unknown"
+                return "- \(check.chemicalName) (completed \(completedAt))\n  Parent treatment: \(parentName)\n  Measured result(s):\n\(measured)"
+            }
+
+            // Pending / skipped Check
+            let state = engine.state(for: check, in: test.treatments, evaluationDate: evaluationDate)
+            let stateText: String
+            switch state {
+            case .completed: stateText = "completed"
+            case .skipped: stateText = "skipped/inapplicable"
+            case .waiting(let at): stateText = "waiting (available \(Self.promptDateFormatter.string(from: at)))"
+            case .current: stateText = "ready now"
+            case .upcoming: stateText = "upcoming"
+            }
+            // Mirror the parent treatment's canonical verification requirement for consistency.
+            let required: Bool = {
+                if let parent { return ExportVerificationRequirement.resolve(for: parent, test: test, config: config) == .required }
+                return check.urgency != .optional
+            }()
+            return """
+            - \(check.chemicalName) (pending)
+              Checked parameter(s): \(params.joined(separator: ", "))
+              Parent treatment: \(parentName)
+              Timing: \(check.actionDescription)
+              Workflow state: \(stateText)
+              Verification: \(required ? "required" : "discretionary")
+              Instructions: \(check.instructions)
+              Status: \(statusText(check))
+            """
+        }.joined(separator: "\n\n")
+    }
+
+    // MARK: - Engine deferrals / avoided recommendations (§8)
+
+    /// Engine-derived deferral/suppression signals, read from actual production state (never re-derived
+    /// from raw chemistry in the View). Reports the engine's active repeat-suppression wait windows
+    /// (`doNotRepeatBefore`). Monitoring/wait *advisories* the engine emitted are `.advisory` treatments
+    /// and are reported in the Watchlist / Monitoring section. Focused Checks are never included.
+    static func engineDeferralsSection(allTreatments: [Treatment], evaluationDate: Date = Date()) -> String {
+        var lines: [String] = []
+        for treatment in allTreatments where !treatment.isFocusedCheckStep {
+            if let until = treatment.doNotRepeatBefore, until > evaluationDate {
+                let param = displayParameterName(treatment.expectedEffectParameter.isEmpty ? treatment.targetParameter : treatment.expectedEffectParameter)
+                lines.append("- Repeat \(param) dosing is deferred until \(Self.promptDateFormatter.string(from: until)) — a recent \(treatment.chemicalName) dose is still in its wait/retest window (engine repeat-suppression active).")
+            }
+        }
+        return lines.isEmpty
+            ? "No active engine repeat-suppression windows. (Monitoring and wait advisories, if any, appear under Watchlist / Monitoring.)"
+            : lines.joined(separator: "\n")
+    }
+
+    private static func statusText(_ treatment: Treatment) -> String {
+        if treatment.isCompleted {
+            let at = treatment.completedAt.map { " at \(Self.promptDateFormatter.string(from: $0))" } ?? ""
+            return "completed\(at)"
+        }
+        if treatment.isSkipped {
+            let at = treatment.skippedAt.map { " at \(Self.promptDateFormatter.string(from: $0))" } ?? ""
+            return "skipped\(at)"
+        }
+        return "pending"
+    }
+
+    private static func displayParameterName(_ parameter: String) -> String {
+        switch parameter {
+        case "freeChlorine": return "FC"
+        case "combinedChlorine": return "CC"
+        case "pH": return "pH"
+        case "totalAlkalinity": return "TA"
+        case "calciumHardness": return "CH"
+        case "cyanuricAcid": return "CYA"
+        case "saltLevel": return "Salt"
+        default: return parameter
+        }
+    }
+
+    private static let promptDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, yyyy 'at' h:mm a"
+        return f
+    }()
+
+    /// §10 — completed/skipped workflow steps attached to a *prior* test log. Checks are included with
+    /// their kind so a historical completion is never mistaken for a current-preference product.
+    static func completedOrSkippedStepsSummary(for test: PoolTest) -> String {
+        let steps = test.treatments.filter { $0.isCompleted || $0.isSkipped }
+        guard !steps.isEmpty else { return "none" }
+        return steps.map { step in
+            let kind = step.isFocusedCheckStep ? "check" : "treatment"
+            return "\(step.chemicalName) (\(kind), \(step.isCompleted ? "completed" : "skipped"))"
+        }.joined(separator: ", ")
+    }
+}
+
+/// "Why This Plan" narrative. Reasons ONLY from real chemical/action treatment steps when discussing
+/// treatments; focused Checks are referenced only in explicitly verification-related copy. A focused
+/// Check can never become the first treatment, trigger acid/chlorine narrative, produce a chemical
+/// expected outcome, or change treatment-empty decisions.
+enum WhyThisPlanNarrative {
+    static func summaryLines(
+        treatmentActions: [Treatment],
+        focusedChecks: [Treatment],
+        test: PoolTest,
+        chlorineDemandScore: Int,
+        hasPoolConditions: Bool
+    ) -> [String] {
+        var lines: [String] = []
+        let fcRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
+
+        if treatmentActions.isEmpty {
+            if focusedChecks.contains(where: { !$0.isCompleted && !$0.isSkipped }) {
+                lines.append("No new chemical treatment is needed right now; a focused Check is pending to confirm the previous correction.")
+            } else {
+                lines.append("Based on the data logged, your pool does not need an added treatment step right now.")
+            }
+        } else if test.freeChlorine < fcRange.lowerBound {
+            lines.append("Your pool is mostly stable, but free chlorine is below the target for your current CYA.")
+        } else {
+            lines.append("Based on the data logged, this plan prioritizes the items most likely to affect pool safety and comfort.")
+        }
+
+        if chlorineDemandScore >= 3 {
+            lines.append("Recent logged pool conditions increased expected chlorine demand.")
+        } else if !hasPoolConditions {
+            lines.append("Pool conditions were not logged, so this plan is based mostly on chemistry and history.")
+        }
+
+        if let acid = treatmentActions.first(where: { $0.isAcidTreatment }) {
+            lines.append(acid.actionDescription)
+        } else if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) {
+            lines.append("Your pH is safe, so elevated alkalinity is being monitored instead of treated.")
+        }
+
+        return Array(lines.prefix(3))
+    }
+
+    static func expectedOutcomes(
+        treatmentActions: [Treatment],
+        focusedChecks: [Treatment],
+        test: PoolTest
+    ) -> [String] {
+        var outcomes: [String] = []
+
+        if let chlorine = treatmentActions.first(where: { $0.targetParameter == "freeChlorine" && $0.amount > 0 }) {
+            outcomes.append("Adding \(chlorine.amount.formattedTreatmentAmount) \(chlorine.unit) of \(chlorine.chemicalName) should raise FC toward the normal target range.")
+        }
+        if let acid = treatmentActions.first(where: { $0.isAcidTreatment }) {
+            outcomes.append("Adding \(acid.amount.formattedTreatmentAmount) \(acid.unit) of \(acid.chemicalName) should move pH toward the conservative target without chasing alkalinity in the same step.")
+        }
+        if !treatmentActions.contains(where: { $0.isAcidTreatment }) && (7.2...7.8).contains(test.pH) {
+            outcomes.append("No acid is recommended because pH is currently safe.")
+        }
+        // Verification-only narrative may reference a pending focused Check.
+        if treatmentActions.isEmpty, focusedChecks.contains(where: { !$0.isCompleted && !$0.isSkipped }) {
+            outcomes.append("A focused Check is pending to measure the response before any further correction is calculated.")
+        }
+        if outcomes.isEmpty {
+            outcomes.append("Continue circulation and normal testing so Pool Side can confirm the pool remains stable.")
+        }
+
+        return Array(outcomes.prefix(4))
+    }
+}
+
+/// Canonical verification requirement for a chemical treatment, derived from ChemistryPolicy swim gates
+/// and the focused-Check workflow — never from an urgency/CC/visual heuristic (§3).
+enum ExportVerificationRequirement {
+    case required
+    case discretionary
+    case none
+
+    var label: String {
+        switch self {
+        case .required:      return "Required"
+        case .discretionary: return "Discretionary"
+        case .none:          return "None"
+        }
+    }
+
+    static func resolve(for treatment: Treatment, test: PoolTest, config: PoolConfiguration) -> ExportVerificationRequirement {
+        guard treatment.amount > 0, treatment.urgency != .advisory,
+              !treatment.isFocusedCheckStep, !treatment.isWatchlistItem else { return .none }
+
+        // Verification is "required" exactly when the workflow engine would create a focused Check (swim
+        // safety, a staged corrective dose, or surface/equipment protection). A recommended optimization on
+        // an already-safe pool needs no Check, so its verification is discretionary.
+        return TreatmentWorkflowEngine().requiresFocusedCheck(for: treatment, config: config) ? .required : .discretionary
     }
 }
 

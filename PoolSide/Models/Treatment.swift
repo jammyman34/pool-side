@@ -317,7 +317,9 @@ struct TreatmentTimingGuidance {
     static func requiresVerificationBeforeSwimming(for treatment: Treatment) -> Bool {
         if treatment.targetParameter == "pH" {
             guard let test = treatment.poolTest else { return treatment.urgency == .immediate }
-            return !(7.2...7.8).contains(test.pH)
+            // Approved swim range is 7.0–7.8 inclusive (operating range 7.2–7.6). Only pH below 7.0 or above
+            // 7.8 blocks swimming and requires verification; 7.0–7.8 is swim-safe.
+            return !(7.0...7.8).contains(test.pH)
         }
 
         guard treatment.targetParameter == "freeChlorine" else { return false }
@@ -335,6 +337,23 @@ struct TreatmentTimingGuidance {
         return hasProblemWater
             || test.combinedChlorine > 0.5
             || test.freeChlorine < ChemistryEngine().freeChlorineSwimReadinessMinimum(cyanuricAcid: test.cyanuricAcid)
+    }
+
+    /// Minutes to circulate before swimming after this treatment, when it imposes a swim wait. Returns nil
+    /// when the treatment does not gate swimming (e.g. alkalinity/CYA/calcium maintenance adds, which do not
+    /// require waiting to swim). Used to schedule the wait-complete "safe to swim" reminder on completion.
+    static func swimWaitMinutes(for treatment: Treatment) -> Int? {
+        guard treatment.amount > 0 else { return nil }
+        switch treatment.targetParameter {
+        case "freeChlorine":
+            return 60
+        case "pH":
+            return 240
+        case "totalAlkalinity":
+            return treatment.isAcidTreatment ? 240 : nil
+        default:
+            return nil
+        }
     }
 
     static func compactCardTip(

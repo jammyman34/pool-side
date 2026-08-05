@@ -49,7 +49,8 @@ final class ExternalReviewExportTests: XCTestCase {
         XCTAssertTrue(export.contains("Time since last completed acid treatment: none found"))
         XCTAssertTrue(export.contains("Treatment verification classification"))
         XCTAssertTrue(export.contains("Treatment verification timing"))
-        XCTAssertTrue(export.contains("Recommended next routine test timing: Tomorrow"))
+        // Per-treatment routine-test line was intentionally removed (routine testing appears once, plan-level).
+        XCTAssertFalse(export.contains("Recommended next routine test timing"))
         XCTAssertTrue(export.contains("Suppressed treatment reasons"))
         XCTAssertFalse(export.contains("muriatic_acid"), "External export should not expose raw implementation identifiers.")
         XCTAssertFalse(export.contains("dry_acid"), "External export should not expose raw implementation identifiers.")

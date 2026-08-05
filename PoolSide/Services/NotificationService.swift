@@ -18,6 +18,8 @@ protocol PoolNotificationScheduling: AnyObject {
     func scheduleCheckReminder(checkID: UUID, parameters: [String], at date: Date) async -> String?
     @discardableResult
     func scheduleTreatmentStepReminder(treatmentID: UUID, nextTreatmentName: String, afterMinutes: Int) async -> String?
+    @discardableResult
+    func scheduleWaitCompleteReminder(treatmentID: UUID, treatmentName: String, afterMinutes: Int) async -> String?
     func cancel(identifier: String)
     func cancelNextPoolTestReminder()
     @discardableResult
@@ -161,6 +163,29 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
 
     static func checkReminderIdentifier(for checkID: UUID) -> String {
         "check-retest-\(checkID.uuidString)"
+    }
+
+    /// Neutral "circulation time complete" reminder, scheduled only when the user marks a treatment (that
+    /// imposes a circulation wait but needs no focused Check) complete. Deliberately does NOT assert the pool
+    /// is safe to swim — a timer expiring does not prove every swim gate passes, and product re-entry
+    /// restrictions may differ. Never scheduled for a skipped treatment: skipping means the user opted out.
+    @discardableResult
+    func scheduleWaitCompleteReminder(treatmentID: UUID, treatmentName: String, afterMinutes: Int) async -> String? {
+        guard isAuthorized, afterMinutes > 0 else { return nil }
+        let identifier = "treatment-wait-\(treatmentID.uuidString)"
+
+        let content = UNMutableNotificationContent()
+        content.title = "Circulation time complete"
+        content.body = "The recommended wait after adding \(treatmentName) has ended. Check Pool Side's current swim-readiness status and follow the product label before swimming."
+        content.sound = .default
+        content.categoryIdentifier = "TREATMENT_REMINDER"
+
+        await schedule(
+            identifier: identifier,
+            content: content,
+            date: Date().addingTimeInterval(TimeInterval(afterMinutes * 60))
+        )
+        return identifier
     }
 
     /// Compatibility wrapper for the pre-refactor API.
