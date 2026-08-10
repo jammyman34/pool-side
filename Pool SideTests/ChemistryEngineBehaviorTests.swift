@@ -1502,14 +1502,20 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
     }
 
     // D. pH 7.9 is Act Now / swim-blocking.
-    func testHighPH79IsActNowAndSwimBlocking() throws {
+    func testHighPH79IsNeedsAttentionAndSwimBlocking() throws {
         let config = ChemistryTestFixtures.config()
         let test = ChemistryTestFixtures.currentPool(pH: 7.9, freeChlorine: 6, totalAlkalinity: 100)
         let treatment = try actionableTreatment(target: "pH", config: config, test: test, history: [])
 
-        XCTAssertEqual(treatment.urgency, .immediate, "Above 7.8 is Act Now.")
+        // 7.8–8.0 is just outside the swim-safe range: swim-blocking, but Needs Attention rather than Act Now.
+        XCTAssertEqual(treatment.urgency, .needsAttention, "7.8–8.0 is Needs Attention.")
         XCTAssertTrue(treatment.isAcidTreatment)
         XCTAssertTrue(phClassification(7.9, config: config, totalAlkalinity: 100).blocksSwimming, "Above 7.8 blocks swimming.")
+
+        // Above 8.0 escalates to Act Now.
+        let severe = ChemistryTestFixtures.currentPool(pH: 8.1, freeChlorine: 6, totalAlkalinity: 100)
+        let severeTreatment = try actionableTreatment(target: "pH", config: config, test: severe, history: [])
+        XCTAssertEqual(severeTreatment.urgency, .immediate, "Above 8.0 is Act Now.")
     }
 
     // E. Rising-history pH 7.8 is still treated; history may alter copy but is not required for treatment.

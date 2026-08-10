@@ -63,7 +63,33 @@ struct TreatmentPlanSheet: View {
     }
 
     private var watchlistItems: [Treatment] {
-        allTreatments.filter { !$0.isSkipped && $0.isWatchlistItem }
+        // Watchlist is contextual: drop guidance already handled by an active treatment on the same
+        // parameter, de-dupe by title, and order by importance so already-satisfied "continue" notes sink
+        // to the bottom rather than appearing prominently every test.
+        let activeParameters = Set(
+            allTreatments
+                .filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep && !$0.isCompleted && !$0.isSkipped && $0.amount > 0 }
+                .map(\.targetParameter)
+        )
+        var seenTitles = Set<String>()
+        let items = allTreatments
+            .filter { !$0.isSkipped && $0.isWatchlistItem }
+            .filter { !activeParameters.contains($0.targetParameter) }
+            .filter { seenTitles.insert($0.chemicalName).inserted }
+
+        return items.enumerated()
+            .sorted { lhs, rhs in
+                let lp = Self.watchlistPriority(lhs.element)
+                let rp = Self.watchlistPriority(rhs.element)
+                return lp == rp ? lhs.offset < rhs.offset : lp < rp
+            }
+            .map(\.element)
+    }
+
+    /// Lower sorts higher. Already-satisfied "continue as you are" notes are the least actionable, so they
+    /// sink to the bottom of the Watchlist.
+    private static func watchlistPriority(_ treatment: Treatment) -> Int {
+        treatment.chemicalName.localizedCaseInsensitiveContains("continue") ? 100 : 0
     }
 
     private var skippedTreatments: [Treatment] {
@@ -2463,7 +2489,8 @@ struct ExternalReviewExportBuilder {
     /// and are reported in the Watchlist / Monitoring section. Focused Checks are never included.
     static func engineDeferralsSection(allTreatments: [Treatment], evaluationDate: Date = Date()) -> String {
         var lines: [String] = []
-        for treatment in allTreatments where !treatment.isFocusedCheckStep {
+        // Watchlist (advisory) items are observations, not treatments — they never enter repeat-suppression.
+        for treatment in allTreatments where !treatment.isFocusedCheckStep && !treatment.isWatchlistItem {
             if let until = treatment.doNotRepeatBefore, until > evaluationDate {
                 let param = displayParameterName(treatment.expectedEffectParameter.isEmpty ? treatment.targetParameter : treatment.expectedEffectParameter)
                 lines.append("- Repeat \(param) dosing is deferred until \(Self.promptDateFormatter.string(from: until)) — a recent \(treatment.chemicalName) dose is still in its wait/retest window (engine repeat-suppression active).")

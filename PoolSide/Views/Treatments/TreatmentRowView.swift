@@ -9,12 +9,7 @@ struct TreatmentRowView: View {
     @State private var isExpanded: Bool = false
 
     var urgencyColor: Color {
-        switch treatment.urgency {
-        case .immediate:   return PoolColor.statusCritical
-        case .recommended: return PoolColor.statusOffRange
-        case .optional:    return PoolColor.statusSlight
-        case .advisory:    return PoolColor.secondaryText
-        }
+        PoolColor.urgencyStatusColor(treatment.urgency)
     }
 
     var body: some View {

@@ -261,12 +261,13 @@ struct NextTestRecommendationEngine {
     }
 
     private func shouldRetestAfterChlorine(_ treatment: Treatment) -> Bool {
-        treatment.urgency == .immediate || treatment.urgency == .recommended
+        treatment.urgency.isActionable
     }
 
     private func requiresSameDayChlorineVerification(_ treatment: Treatment, test: PoolTest) -> Bool {
         guard treatment.targetParameter == "freeChlorine" else { return false }
-        if treatment.urgency == .immediate { return true }
+        // Act Now and Needs Attention FC both sit below the swim-readiness minimum → verify same day.
+        if treatment.urgency == .immediate || treatment.urgency == .needsAttention { return true }
 
         let indicators = Set(test.visualIndicators)
         let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)

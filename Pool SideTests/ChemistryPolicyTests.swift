@@ -54,12 +54,19 @@ final class ChemistryPolicyTests: XCTestCase {
 
     func testFreeChlorineClassificationBands() {
         let ctx = context()
-        // Below readiness minimum -> Act Now Low, blocks, targets operating range (not the minimum).
+        // Below readiness minimum but not severe -> Needs Attention, blocks, targets the operating range.
         let low = ChemistryPolicy.classify(.freeChlorine, value: 4.0, context: ctx)
         XCTAssertEqual(low.actionState, .actNowLow)
+        XCTAssertEqual(low.severity, .moderate)
         XCTAssertTrue(low.blocksSwimming)
         XCTAssertEqual(low.correctionTarget, 6.0)
-        XCTAssertEqual(low.derivedUrgency, .immediate)
+        XCTAssertEqual(low.derivedUrgency, .needsAttention)
+
+        // Severely low FC (below half the readiness minimum) -> Act Now.
+        let severeLow = ChemistryPolicy.classify(.freeChlorine, value: 1.0, context: ctx)
+        XCTAssertEqual(severeLow.actionState, .actNowLow)
+        XCTAssertEqual(severeLow.severity, .severe)
+        XCTAssertEqual(severeLow.derivedUrgency, .immediate)
 
         // At/above readiness minimum but below operating target -> Recommended (NOT Optional), does not block.
         for fc in [4.5, 5.0] {
@@ -83,11 +90,18 @@ final class ChemistryPolicyTests: XCTestCase {
         XCTAssertFalse(high.blocksSwimming)
         XCTAssertNil(high.derivedUrgency)
 
-        // At/above re-entry ceiling -> blocks (natural reduction).
+        // Above re-entry ceiling but below the severe-high threshold (15) -> Needs Attention, blocks, decays.
         let ceiling = ChemistryPolicy.classify(.freeChlorine, value: 12.0, context: ctx)
         XCTAssertEqual(ceiling.actionState, .actNowHigh)
+        XCTAssertEqual(ceiling.severity, .moderate)
         XCTAssertTrue(ceiling.blocksSwimming)
         XCTAssertEqual(ceiling.disposition, .allowNaturalCorrection)
+
+        // At/above the severe-high threshold (max(15, ceiling)) -> Act Now.
+        let severeHigh = ChemistryPolicy.classify(.freeChlorine, value: 16.0, context: ctx)
+        XCTAssertEqual(severeHigh.actionState, .actNowHigh)
+        XCTAssertEqual(severeHigh.severity, .severe)
+        XCTAssertTrue(severeHigh.blocksSwimming)
     }
 
     // MARK: - Combined chlorine (asymmetric; measurement-resolution aware)
@@ -114,11 +128,11 @@ final class ChemistryPolicyTests: XCTestCase {
         XCTAssertFalse(atThreshold.blocksSwimming)
         XCTAssertEqual(atThreshold.derivedUrgency, .advisory)
 
-        // Above 0.5: corrective, blocks, Recommended (not Optional).
+        // 0.5–1.0: corrective, blocks, Needs Attention (fix before swimming, not an emergency).
         let over = ChemistryPolicy.classify(.combinedChlorine, value: 0.6, context: tenMl)
         XCTAssertTrue(over.blocksSwimming)
         XCTAssertEqual(over.disposition, .treatNow)
-        XCTAssertEqual(over.derivedUrgency, .recommended)
+        XCTAssertEqual(over.derivedUrgency, .needsAttention)
         XCTAssertEqual(over.correctionTarget, 0)
 
         // Severe CC -> Act Now.
@@ -262,14 +276,17 @@ final class ChemistryPolicyTests: XCTestCase {
     // MARK: - Urgency derivation rules
 
     func testDerivedUrgencyMapping() {
-        XCTAssertEqual(TreatmentUrgency.derived(state: .actNowLow, disposition: .treatNow), .immediate)
-        XCTAssertEqual(TreatmentUrgency.derived(state: .actNowHigh, disposition: .dilute), .immediate)
-        XCTAssertEqual(TreatmentUrgency.derived(state: .recommendedLow, disposition: .treatNow), .recommended)
-        XCTAssertEqual(TreatmentUrgency.derived(state: .recommendedHigh, disposition: .treatWhenChemicallyAppropriate), .recommended)
-        XCTAssertEqual(TreatmentUrgency.derived(state: .recommendedHigh, disposition: .monitorOnly), .advisory)
-        XCTAssertNil(TreatmentUrgency.derived(state: .recommendedHigh, disposition: .allowNaturalCorrection))
-        XCTAssertNil(TreatmentUrgency.derived(state: .ideal, disposition: .noAction))
+        // Severe actNow → Act Now; moderate actNow → Needs Attention.
+        XCTAssertEqual(TreatmentUrgency.derived(state: .actNowLow, disposition: .treatNow, severity: .severe), .immediate)
+        XCTAssertEqual(TreatmentUrgency.derived(state: .actNowLow, disposition: .treatNow, severity: .moderate), .needsAttention)
+        XCTAssertEqual(TreatmentUrgency.derived(state: .actNowHigh, disposition: .dilute, severity: .severe), .immediate)
+        XCTAssertEqual(TreatmentUrgency.derived(state: .actNowHigh, disposition: .treatNow, severity: .moderate), .needsAttention)
+        XCTAssertEqual(TreatmentUrgency.derived(state: .recommendedLow, disposition: .treatNow, severity: .none), .recommended)
+        XCTAssertEqual(TreatmentUrgency.derived(state: .recommendedHigh, disposition: .treatWhenChemicallyAppropriate, severity: .none), .recommended)
+        XCTAssertEqual(TreatmentUrgency.derived(state: .recommendedHigh, disposition: .monitorOnly, severity: .none), .advisory)
+        XCTAssertNil(TreatmentUrgency.derived(state: .recommendedHigh, disposition: .allowNaturalCorrection, severity: .none))
+        XCTAssertNil(TreatmentUrgency.derived(state: .ideal, disposition: .noAction, severity: .none))
         // Optional is never derived for normal chemistry correction.
-        XCTAssertNotEqual(TreatmentUrgency.derived(state: .recommendedLow, disposition: .treatNow), .optional)
+        XCTAssertNotEqual(TreatmentUrgency.derived(state: .recommendedLow, disposition: .treatNow, severity: .none), .optional)
     }
 }

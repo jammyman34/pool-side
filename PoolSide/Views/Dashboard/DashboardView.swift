@@ -241,7 +241,7 @@ struct DashboardView: View {
 
         // Reached only on `.unknown`. If a required correction is still outstanding, prompt the user to act — surfaced when at least one non-watchlist treatment step is pending at immediate/recommended urgency.
         let pendingActions = test.treatments.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
-        if pendingActions.contains(where: { $0.urgency == .immediate || $0.urgency == .recommended }) {
+        if pendingActions.contains(where: { $0.urgency.isActionable }) {
             return "Review your plan"
         }
 

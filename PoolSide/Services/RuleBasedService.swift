@@ -30,7 +30,7 @@ final class RuleBasedService: AIService, @unchecked Sendable {
         let readings = engine.allReadings(for: test, config: request.poolConfig)
 
         let criticals = readings.filter { $0.status == .critical }
-        let actionTreatments = treatments.filter { $0.urgency == .immediate || $0.urgency == .recommended }
+        let actionTreatments = treatments.filter { $0.urgency.isActionable }
         let optionalTreatments = treatments.filter { $0.urgency == .optional }
         let advisoryTreatments = treatments.filter { $0.urgency == .advisory }
 

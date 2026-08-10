@@ -503,26 +503,35 @@ struct WatchlistPresentationText {
 // MARK: - TreatmentUrgency
 
 enum TreatmentUrgency: String, CaseIterable, Codable {
-    case immediate   = "immediate"   // Critical — act now
-    case recommended = "recommended" // Low/High — take action
-    case optional    = "optional"    // Slightly off — minor adjustment
-    case advisory    = "advisory"    // Monitor / avoid overcorrection
+    case immediate      = "immediate"      // Act Now — significant risk or potential pool/equipment damage
+    case needsAttention = "needsAttention" // Below a safety threshold / approaching unsafe — fix before swimming
+    case recommended    = "recommended"    // Optimization only — pool already meets safety goals
+    case optional       = "optional"       // (legacy) slightly off — minor adjustment
+    case advisory       = "advisory"       // Monitor / watchlist observation
 
     var displayName: String {
         switch self {
-        case .immediate:   return "Act Now"
-        case .recommended: return "Recommended"
-        case .optional:    return "Optional"
-        case .advisory:    return "Advisory"
+        case .immediate:      return "Act Now"
+        case .needsAttention: return "Needs Attention"
+        case .recommended:    return "Recommended"
+        case .optional:       return "Optional"
+        case .advisory:       return "Advisory"
         }
     }
 
     var sortOrder: Int {
         switch self {
-        case .immediate:   return 0
-        case .recommended: return 1
-        case .optional:    return 2
-        case .advisory:    return 3
+        case .immediate:      return 0
+        case .needsAttention: return 1
+        case .recommended:    return 2
+        case .optional:       return 3
+        case .advisory:       return 4
         }
+    }
+
+    /// Actionable urgencies the workflow treats as "the plan has work to do" — Act Now, Needs Attention, and
+    /// Recommended. Advisory (watchlist) and legacy Optional are excluded.
+    var isActionable: Bool {
+        self == .immediate || self == .needsAttention || self == .recommended
     }
 }

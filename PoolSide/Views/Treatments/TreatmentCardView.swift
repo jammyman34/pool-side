@@ -34,12 +34,7 @@ struct TreatmentCardView: View {
 
     private var urgencyColor: Color {
         if treatment.isSkipped { return PoolColor.statusSlight }
-        switch treatment.urgency {
-        case .immediate:   return PoolColor.statusCritical
-        case .recommended: return PoolColor.statusOffRange
-        case .optional:    return PoolColor.statusSlight
-        case .advisory:    return PoolColor.secondaryText
-        }
+        return PoolColor.urgencyStatusColor(treatment.urgency)
     }
 
     private var urgencyLabel: String {

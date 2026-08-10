@@ -524,17 +524,31 @@ struct ChemistryEngine {
         return params.compactMap { label, parameter, value in
             let classification = ChemistryPolicy.classify(parameter, value: value, context: context)
             guard classification.actionState != .ideal else { return nil }
-            return "\(label) \(Self.canonicalStateText(classification.actionState))"
+            return "\(label) \(Self.canonicalStateText(for: classification))"
         }
     }
 
-    private static func canonicalStateText(_ state: ChemistryActionState) -> String {
-        switch state {
-        case .actNowLow:      return "critically low"
-        case .recommendedLow: return "below operating range"
-        case .ideal:          return "in range"
-        case .recommendedHigh: return "above operating range"
-        case .actNowHigh:     return "critically high"
+    /// Score-driver wording resolved from the SAME canonical classification the treatment engine uses —
+    /// action state + severity, so an FC that is merely below the swim-readiness minimum never reads
+    /// "critically low."
+    private static func canonicalStateText(for classification: ParameterClassification) -> String {
+        switch classification.actionState {
+        case .ideal:
+            return "in range"
+        case .recommendedLow:
+            return "below operating range"
+        case .recommendedHigh:
+            return "above operating range"
+        case .actNowLow:
+            if classification.severity == .severe { return "critically low" }
+            return classification.parameter == .freeChlorine ? "below swim-readiness minimum" : "below the safe range"
+        case .actNowHigh:
+            if classification.severity == .severe { return "critically high" }
+            switch classification.parameter {
+            case .freeChlorine:     return "above the swim re-entry ceiling"
+            case .combinedChlorine: return "elevated"
+            default:                return "above the safe range"
+            }
         }
     }
 
@@ -2134,15 +2148,40 @@ struct ChemistryEngine {
             || test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
             || hasFoam(test)
             || hasStrongChlorineSmell(test) {
-            templates.append(TreatmentTemplate(
-                chemicalName: "Open Cover for Gas Exchange",
-                actionDescription: "Covered pools can accumulate chloramines and organics when FC runs low.",
-                amount: 0,
-                unit: "",
-                instructions: "Open the cover periodically, circulate the pool, and avoid letting FC sit near the minimum. Aim for the upper half of the CYA-adjusted FC range.",
-                targetParameter: "cover",
-                urgency: .advisory
-            ))
+            // Adapt to reported cover behavior: if the user is already airing the pool (cover open ≥2 hours
+            // or mostly open) and FC isn't low, the gas-exchange advice is already satisfied — reword it to a
+            // low-priority "keep it up" note instead of repeating "open the cover." Only when the cover is
+            // kept largely closed (or FC is low) does the actionable "open the cover" advisory apply.
+            let coverOpenTime = test.resolvedPoolConditions.coverOpenTime
+            let regularlyAired: Bool = {
+                switch coverOpenTime {
+                case .mostlyOpen, .sixToEighteenHours, .twoToSixHours: return true
+                case .lessThanTwoHours, .unknown: return false
+                }
+            }()
+            let fcLow = test.freeChlorine < freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
+
+            if regularlyAired && !fcLow && !hasFoam(test) && !hasStrongChlorineSmell(test) {
+                templates.append(TreatmentTemplate(
+                    chemicalName: "Continue opening the cover regularly for gas exchange.",
+                    actionDescription: "You're already airing the pool regularly, which helps release chloramines and CO₂.",
+                    amount: 0,
+                    unit: "",
+                    instructions: "Keep letting the pool breathe as you have been, and keep FC in the upper half of the CYA-adjusted range. No change needed.",
+                    targetParameter: "cover",
+                    urgency: .advisory
+                ))
+            } else {
+                templates.append(TreatmentTemplate(
+                    chemicalName: "Open Cover for Gas Exchange",
+                    actionDescription: "Covered pools can accumulate chloramines and organics when FC runs low.",
+                    amount: 0,
+                    unit: "",
+                    instructions: "Open the cover periodically, circulate the pool, and avoid letting FC sit near the minimum. Aim for the upper half of the CYA-adjusted FC range.",
+                    targetParameter: "cover",
+                    urgency: .advisory
+                ))
+            }
         }
 
         if test.cyanuricAcid >= 50 && test.cyanuricAcid < 90 {
@@ -2546,7 +2585,12 @@ struct TreatmentTemplate {
             expectedDelta: expectedDelta,
             effectDelayHours: effectDelayHours,
             effectDurationHours: effectDurationHours,
-            doNotRepeatBefore: doNotRepeatHours > 0 ? Date().addingTimeInterval(TimeInterval(doNotRepeatHours * 3600)) : nil,
+            // Watchlist (advisory) items are observations, never treatments — they must never carry a
+            // repeat-suppression timestamp, so they can never enter the repeat-treatment deferral pipeline
+            // ("Repeat … dosing is deferred …"). Only real corrective treatments carry doNotRepeatBefore.
+            doNotRepeatBefore: (urgency != .advisory && doNotRepeatHours > 0)
+                ? Date().addingTimeInterval(TimeInterval(doNotRepeatHours * 3600))
+                : nil,
             poolTest: test
         )
     }

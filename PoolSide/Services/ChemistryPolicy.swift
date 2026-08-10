@@ -80,25 +80,41 @@ struct SwimGateCapability: Sendable, Equatable {
     static let never = SwimGateCapability(lowCanBlock: false, highCanBlock: false)
 }
 
+// MARK: Severity within an action band
+
+/// How serious an out-of-range condition is *within* its action band. This is the single canonical axis that
+/// splits an `actNow` state into "Needs Attention" (moderate — below a safety threshold / approaching unsafe)
+/// versus "Act Now" (severe — significant risk or potential pool/equipment damage). `.none` is used for ideal
+/// and for in-band (recommended) optimization states, where severity does not modulate urgency.
+enum ChemistrySeverity: String, Sendable, Equatable {
+    case none
+    case moderate
+    case severe
+}
+
 // MARK: User-facing urgency derivation
 
 extension TreatmentUrgency {
-    /// Derives the user-facing urgency from action state + disposition, per the approved policy.
-    /// `.optional` is intentionally NOT produced here: normal out-of-target chemistry correction
-    /// is `.recommended`, not optional, merely because swimming remains allowed.
-    static func derived(state: ChemistryActionState, disposition: CorrectionDisposition) -> TreatmentUrgency? {
+    /// Derives the treatment-CARD urgency from action state + disposition + severity, per the approved policy.
+    /// A card is produced only for dispositions that call for user action; informational / natural-correction
+    /// states produce no card. Within an `actNow` band, severe → Act Now, moderate → Needs Attention.
+    static func derived(
+        state: ChemistryActionState,
+        disposition: CorrectionDisposition,
+        severity: ChemistrySeverity
+    ) -> TreatmentUrgency? {
         switch disposition {
         case .noAction:
             return nil
         case .allowNaturalCorrection:
-            // Informational guidance, not a chemical treatment card.
+            // Informational guidance (e.g. high FC decaying), not a chemical treatment card.
             return nil
         case .monitorOnly:
             return .advisory
         case .treatNow, .treatWhenChemicallyAppropriate, .dilute:
             switch state {
             case .actNowLow, .actNowHigh:
-                return .immediate
+                return severity == .severe ? .immediate : .needsAttention
             case .recommendedLow, .recommendedHigh:
                 return .recommended
             case .ideal:
@@ -249,10 +265,27 @@ struct ParameterClassification: Sendable, Equatable {
     let actionState: ChemistryActionState
     let disposition: CorrectionDisposition
     let blocksSwimming: Bool
+    /// Severity within the action band — the canonical axis that splits `actNow` into Needs Attention
+    /// (moderate) vs Act Now (severe). `.none` for ideal / in-band recommended states.
+    let severity: ChemistrySeverity
     /// Where a correction should aim (nil for ideal/noAction or dilution-only states).
     let correctionTarget: Double?
-    /// Derived user-facing urgency (nil = no treatment card).
+    /// Derived treatment-CARD urgency (nil = no treatment card). Disposition-gated.
     let derivedUrgency: TreatmentUrgency?
+
+    /// Canonical STATUS urgency for the parameter — a function of action state + severity only (independent
+    /// of disposition), so status/color/score wording is consistent even where no treatment card is produced
+    /// (e.g. high FC awaiting natural decline). Views and Pool Score consume this, never re-deriving color.
+    var statusUrgency: TreatmentUrgency? {
+        switch actionState {
+        case .ideal:
+            return nil
+        case .recommendedLow, .recommendedHigh:
+            return .recommended
+        case .actNowLow, .actNowHigh:
+            return severity == .severe ? .immediate : .needsAttention
+        }
+    }
 }
 
 // MARK: - ChemistryPolicy façade
@@ -314,37 +347,51 @@ enum FreeChlorinePolicy {
         max(10, operatingRange(cyanuricAcid: cyanuricAcid).upperBound)
     }
 
+    /// Explicit "severely high FC" boundary — the point at which high FC escalates from Needs Attention to
+    /// Act Now. Deliberately NOT the shock level (which is a recovery target). Independently replaceable.
+    static func severeHighThreshold(cyanuricAcid: Double?) -> Double {
+        max(15, reentryCeiling(cyanuricAcid: cyanuricAcid))
+    }
+
     static func classify(_ value: Double, _ context: ChemistryPolicyContext) -> ParameterClassification {
         let cya = context.cyanuricAcid
         let minimum = readinessMinimum(cyanuricAcid: cya)
         let range = operatingRange(cyanuricAcid: cya)
         let ceiling = reentryCeiling(cyanuricAcid: cya)
+        let severeHigh = severeHighThreshold(cyanuricAcid: cya)
 
         let state: ChemistryActionState
         let disposition: CorrectionDisposition
         let blocks: Bool
         let target: Double?
+        let severity: ChemistrySeverity
 
         if value < 0.5 * minimum {
-            state = .actNowLow; disposition = .treatNow; blocks = true; target = range.lowerBound
+            // Severely low: significant sanitizer risk.
+            state = .actNowLow; disposition = .treatNow; blocks = true; target = range.lowerBound; severity = .severe
         } else if value < minimum {
-            // Below readiness but not critically so: still swim-blocking corrective.
-            state = .actNowLow; disposition = .treatNow; blocks = true; target = range.lowerBound
+            // Below the swim-readiness minimum but not severe: correct before swimming, not an emergency.
+            state = .actNowLow; disposition = .treatNow; blocks = true; target = range.lowerBound; severity = .moderate
         } else if value < range.lowerBound {
-            // >= readiness minimum but below operating target: Recommended maintenance (NOT Optional).
-            state = .recommendedLow; disposition = .treatNow; blocks = false; target = range.lowerBound
+            // >= readiness minimum but below operating target: Recommended optimization (pool is swim-safe).
+            state = .recommendedLow; disposition = .treatNow; blocks = false; target = range.lowerBound; severity = .none
         } else if value <= range.upperBound {
-            state = .ideal; disposition = .noAction; blocks = false; target = nil
+            state = .ideal; disposition = .noAction; blocks = false; target = nil; severity = .none
         } else if value < ceiling {
-            state = .recommendedHigh; disposition = .allowNaturalCorrection; blocks = false; target = nil
+            // Above operating target but below the re-entry ceiling: informational, allow natural decline.
+            state = .recommendedHigh; disposition = .allowNaturalCorrection; blocks = false; target = nil; severity = .none
+        } else if value < severeHigh {
+            // Above the re-entry ceiling but not severe: swim-blocking, Needs Attention (let it decline).
+            state = .actNowHigh; disposition = .allowNaturalCorrection; blocks = true; target = nil; severity = .moderate
         } else {
-            state = .actNowHigh; disposition = .allowNaturalCorrection; blocks = true; target = nil
+            // Severely high FC.
+            state = .actNowHigh; disposition = .allowNaturalCorrection; blocks = true; target = nil; severity = .severe
         }
 
         return ParameterClassification(
             parameter: .freeChlorine, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: blocks, correctionTarget: target,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: blocks, severity: severity, correctionTarget: target,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }
@@ -359,25 +406,29 @@ enum CombinedChlorinePolicy {
         let disposition: CorrectionDisposition
         let blocks: Bool
 
+        let severity: ChemistrySeverity
+
         // Respect measurement resolution: values below one observable increment are treated as 0.
         let increment = context.measurement.increment(for: .combinedChlorine)
         let observable = value >= increment - 1e-9
 
         if !observable {
-            state = .ideal; disposition = .noAction; blocks = false
+            state = .ideal; disposition = .noAction; blocks = false; severity = .none
         } else if value <= readinessThreshold + 1e-9 {
             // Detectable but within the readiness threshold: drive toward zero opportunistically.
-            state = .recommendedHigh; disposition = .monitorOnly; blocks = false
+            state = .recommendedHigh; disposition = .monitorOnly; blocks = false; severity = .none
         } else if value <= 1.0 + 1e-9 {
-            state = .recommendedHigh; disposition = .treatNow; blocks = true
+            // 0.5–1.0: elevated combined chlorine — Needs Attention (correct before swimming).
+            state = .actNowHigh; disposition = .treatNow; blocks = true; severity = .moderate
         } else {
-            state = .actNowHigh; disposition = .treatNow; blocks = true
+            // Above 1.0: significant chloramine load — Act Now.
+            state = .actNowHigh; disposition = .treatNow; blocks = true; severity = .severe
         }
 
         return ParameterClassification(
             parameter: .combinedChlorine, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: blocks, correctionTarget: state == .ideal ? nil : 0,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: blocks, severity: severity, correctionTarget: state == .ideal ? nil : 0,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }
@@ -389,27 +440,38 @@ enum PHPolicy {
     static let swimRange = 7.0...7.8
     static let correctionTarget = 7.4
 
+    /// Severe pH boundaries — outside these, pH is Act Now; between them and the swim range, Needs Attention.
+    static let severeLowThreshold = 6.8
+    static let severeHighThreshold = 8.0
+
     static func classify(_ value: Double, _ context: ChemistryPolicyContext) -> ParameterClassification {
         let state: ChemistryActionState
         let disposition: CorrectionDisposition
         let blocks: Bool
+        let severity: ChemistrySeverity
 
-        if value < 7.0 {
-            state = .actNowLow; disposition = .treatNow; blocks = true
+        if value < severeLowThreshold {
+            state = .actNowLow; disposition = .treatNow; blocks = true; severity = .severe
+        } else if value < 7.0 {
+            // 6.8–7.0: below the swim-safe range but not severe.
+            state = .actNowLow; disposition = .treatNow; blocks = true; severity = .moderate
         } else if value < 7.2 {
-            state = .recommendedLow; disposition = .treatNow; blocks = false
+            state = .recommendedLow; disposition = .treatNow; blocks = false; severity = .none
         } else if value <= 7.6 {
-            state = .ideal; disposition = .noAction; blocks = false
+            state = .ideal; disposition = .noAction; blocks = false; severity = .none
         } else if value <= 7.8 {
-            state = .recommendedHigh; disposition = .treatNow; blocks = false
+            state = .recommendedHigh; disposition = .treatNow; blocks = false; severity = .none
+        } else if value <= severeHighThreshold {
+            // 7.8–8.0: above the swim-safe range but not severe.
+            state = .actNowHigh; disposition = .treatNow; blocks = true; severity = .moderate
         } else {
-            state = .actNowHigh; disposition = .treatNow; blocks = true
+            state = .actNowHigh; disposition = .treatNow; blocks = true; severity = .severe
         }
 
         return ParameterClassification(
             parameter: .pH, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: blocks, correctionTarget: state == .ideal ? nil : correctionTarget,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: blocks, severity: severity, correctionTarget: state == .ideal ? nil : correctionTarget,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }
@@ -455,10 +517,13 @@ enum TotalAlkalinityPolicy {
             state = .actNowHigh; disposition = .treatWhenChemicallyAppropriate
         }
 
+        // Non-swim parameter: an out-of-band extreme can drive scaling/corrosion, so `actNow` is Act Now.
+        let severity: ChemistrySeverity = state.isActNow ? .severe : .none
+
         return ParameterClassification(
             parameter: .totalAlkalinity, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: false, correctionTarget: state == .ideal ? nil : target,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: false, severity: severity, correctionTarget: state == .ideal ? nil : target,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }
@@ -513,10 +578,12 @@ enum CalciumHardnessPolicy {
             state = .recommendedHigh; disposition = .treatWhenChemicallyAppropriate; target = nil
         }
 
+        let severity: ChemistrySeverity = state.isActNow ? .severe : .none
+
         return ParameterClassification(
             parameter: .calciumHardness, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: false, correctionTarget: target,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: false, severity: severity, correctionTarget: target,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }
@@ -554,10 +621,12 @@ enum CyanuricAcidPolicy {
             state = .actNowHigh; disposition = .dilute; target = nil
         }
 
+        let severity: ChemistrySeverity = state.isActNow ? .severe : .none
+
         return ParameterClassification(
             parameter: .cyanuricAcid, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: false, correctionTarget: target,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: false, severity: severity, correctionTarget: target,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }
@@ -585,10 +654,12 @@ enum SaltPolicy {
             state = .actNowHigh; disposition = .dilute; target = nil
         }
 
+        let severity: ChemistrySeverity = state.isActNow ? .severe : .none
+
         return ParameterClassification(
             parameter: .saltLevel, value: value, actionState: state, disposition: disposition,
-            blocksSwimming: false, correctionTarget: target,
-            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition)
+            blocksSwimming: false, severity: severity, correctionTarget: target,
+            derivedUrgency: TreatmentUrgency.derived(state: state, disposition: disposition, severity: severity)
         )
     }
 }

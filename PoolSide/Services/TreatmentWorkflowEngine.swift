@@ -334,7 +334,7 @@ extension TreatmentWorkflowEngine {
             !t.isWatchlistItem && !t.isFocusedCheckStep
                 && !t.isCompleted && !t.isSkipped
                 && t.amount > 0
-                && (t.urgency == .immediate || t.urgency == .recommended)
+                && t.urgency.isActionable
         }
         if hasPendingRequiredTreatment { return .treatmentNeeded }
 
@@ -604,7 +604,7 @@ struct FocusedCheckOutcomeEvaluator {
             !treatment.isCompleted && !treatment.isSkipped && !treatment.isFocusedCheckStep
                 && !treatment.isWatchlistItem
                 && parameterFamily(treatment.targetParameter) == family
-                && (treatment.urgency == .immediate || treatment.urgency == .recommended)
+                && treatment.urgency.isActionable
                 && treatment.amount > 0
         }
     }
