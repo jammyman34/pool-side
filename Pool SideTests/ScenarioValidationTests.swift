@@ -96,7 +96,8 @@ private enum ScenarioCatalog {
                 steps: [
                     .generate(expect: .init(
                         treatmentCount: 1,
-                        treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .recommended, badge: "Test before swimming", category: .swimBlocking, completionState: .plannedTreatment)],
+                        // FC below readiness but not severe is Needs Attention; only readiness-to-target top-off is Recommended.
+                        treatments: [.init(nameContains: "Liquid Chlorine 12.5%", amount: 0.75, unit: "gal", urgency: .needsAttention, badge: "Test before swimming", category: .swimBlocking, completionState: .plannedTreatment)],
                         v2State: .doNotSwim,
                         swimmingBlocked: true,
                         testingRequired: true,
@@ -258,8 +259,9 @@ private enum ScenarioCatalog {
 
     private static var dryChlorineScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "DC-calhypo-acute", name: "Cal-Hypo Preference Acute FC", area: "DRY CHLORINE", config: .init(chlorine: .calHypo), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .recommended, category: .swimBlocking, completionState: .plannedTreatment, expectedDeltaMinimum: 2.9)], absentTreatment: "Cal-Hypo", v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy, .treatmentCompletion]))]),
-            ScenarioDefinition(id: "DC-dichlor-acute", name: "Dichlor Preference Acute FC", area: "DRY CHLORINE", config: .init(chlorine: .dichlor), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .recommended, category: .swimBlocking, completionState: .plannedTreatment)], absentTreatment: "Dichlor", v2State: .doNotSwim, swimmingBlocked: true))]),
+            // FC below readiness but not severe is Needs Attention; only readiness-to-target top-off is Recommended.
+            ScenarioDefinition(id: "DC-calhypo-acute", name: "Cal-Hypo Preference Acute FC", area: "DRY CHLORINE", config: .init(chlorine: .calHypo), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .needsAttention, category: .swimBlocking, completionState: .plannedTreatment, expectedDeltaMinimum: 2.9)], absentTreatment: "Cal-Hypo", v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy, .treatmentCompletion]))]),
+            ScenarioDefinition(id: "DC-dichlor-acute", name: "Dichlor Preference Acute FC", area: "DRY CHLORINE", config: .init(chlorine: .dichlor), chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .needsAttention, category: .swimBlocking, completionState: .plannedTreatment)], absentTreatment: "Dichlor", v2State: .doNotSwim, swimmingBlocked: true))]),
             ScenarioDefinition(id: "DC-recovery-liquid-safe", name: "Recovery Avoids Stabilized Dry Chlorine", area: "DRY CHLORINE", config: .init(chlorine: .dichlor), chemistry: .init(freeChlorine: 1, combinedChlorine: 1, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), state: .normal(clarity: .cloudy, algae: .present, visualIndicators: [VisualIndicator.cloudyWater.rawValue, VisualIndicator.algaeSpots.rawValue]), steps: [.generate(expect: .init(treatmentCount: 2, treatments: [.init(nameContains: "Liquid Chlorine", unit: "gal", urgency: .immediate, category: .swimBlocking)], absentTreatment: "Dichlor", v2State: .doNotSwim, swimmingBlocked: true))])
         ]
     }
@@ -297,7 +299,7 @@ private enum ScenarioCatalog {
             ScenarioDefinition(id: "CON-high-ph-low-ta", name: "High pH Low TA Defers Baking Soda", area: "CONFLICTS", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 8.1, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Muriatic Acid")], absentTreatment: "Baking Soda", v2State: .doNotSwim, swimmingBlocked: true))]),
             ScenarioDefinition(id: "CON-low-ph-low-ta", name: "Low pH Low TA Allows Compatible Raises", area: "CONFLICTS", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 50, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Soda Ash"), .init(nameContains: "Baking Soda")], absentTreatment: "Muriatic Acid", v2State: .doNotSwim, swimmingBlocked: true))]),
             ScenarioDefinition(id: "CON-low-ph-high-ta", name: "Low pH High TA No Acid Fight", area: "CONFLICTS", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 6.9, totalAlkalinity: 160, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatments: [.init(nameContains: "Soda Ash")], absentTreatment: "Muriatic Acid", v2State: .doNotSwim, swimmingBlocked: true))]),
-            ScenarioDefinition(id: "CON-low-fc-high-ph", name: "Low FC High pH Sequenced Treatments", area: "CONFLICTS", chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 8.1, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Muriatic Acid", urgency: .immediate), .init(nameContains: "Liquid Chlorine", urgency: .recommended, badge: "Test before swimming")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy, .pH, .treatmentCompletion], nextTestPending: false))])
+            ScenarioDefinition(id: "CON-low-fc-high-ph", name: "Low FC High pH Sequenced Treatments", area: "CONFLICTS", chemistry: .init(freeChlorine: 4, combinedChlorine: 0, pH: 8.1, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCountMinimum: 2, treatments: [.init(nameContains: "Muriatic Acid", urgency: .immediate), .init(nameContains: "Liquid Chlorine", urgency: .needsAttention, badge: "Test before swimming")], v2State: .doNotSwim, swimmingBlocked: true, failedGates: [.sanitizerAdequacy, .pH, .treatmentCompletion], nextTestPending: false))])
         ]
     }
 
@@ -481,7 +483,7 @@ ScenarioDefinition(id: "MAG-calcium-tens", name: "Calcium Magnitude Guard", area
         freeChlorine: 4.5,
         combinedChlorine: 0,
         pH: 7.6,
-        totalAlkalinity: 160,
+        totalAlkalinity: 100,
         calciumHardness: 350,
         cyanuricAcid: 60
     )

@@ -714,13 +714,11 @@ struct ChemistryEngine {
         return test.pH - previousTest.pH >= 0.2
     }
 
-    private func shouldTreatHighAlkalinityWithAcid(_ alkalinity: Double, test: PoolTest, previousTest: PoolTest?) -> Bool {
+    private func shouldTreatHighAlkalinityWithAcid(_ alkalinity: Double, test: PoolTest) -> Bool {
         guard alkalinity > 140 else { return false }
         if hasScaling(test) { return true }
-        if test.pH <= 7.6 { return false }
-        if test.pH >= 7.8 { return false }
-        if isPHRising(current: test, previousTest: previousTest) { return true }
-        return alkalinity >= 200 && test.pH > 7.6
+        if test.pH > PHPolicy.operatingRange.upperBound { return false }
+        return test.pH >= PHPolicy.operatingRange.upperBound
     }
 
     // Note: whether an out-of-operating-range pH is treated is decided solely by ChemistryPolicy
@@ -1620,7 +1618,7 @@ struct ChemistryEngine {
                     calculatedDoseBeforeCap: lbs.rounded(toPlaces: 1),
                     calculatedDoseBeforeCapUnit: "lbs"
                 )
-            } else if shouldTreatHighAlkalinityWithAcid(reading.value, test: test, previousTest: previousTest) {
+            } else if shouldTreatHighAlkalinityWithAcid(reading.value, test: test) {
                 // Lower toward the sanitizer-aware operating target only when pH makes acid appropriate.
                 let alkalinityDecrease = reading.value - (taClassification.correctionTarget ?? 90)
                 let flOz = ChemicalDoseCalculator.muriaticAcid31FluidOuncesForAlkalinity(volumeGallons: volume, ppmDecrease: alkalinityDecrease)
@@ -1632,7 +1630,7 @@ struct ChemistryEngine {
                     unit: product.unit,
                     instructions: "\(Self.labelFirstApplicationGuidance) Use the acid/aeration approach so alkalinity comes down without over-lowering pH: after the acid circulates, aerate to bring pH back up without restoring TA. Retest pH in 4 hours and TA after circulation before adding more.",
                     targetParameter: "totalAlkalinity",
-                    urgency: .optional,
+                    urgency: taClassification.derivedUrgency ?? .recommended,
                     expectedEffectParameter: "totalAlkalinity",
                     expectedDelta: -alkalinityDecrease,
                     effectDelayHours: 6,
@@ -1976,27 +1974,11 @@ struct ChemistryEngine {
     }
 
     private func chlorineTreatmentUrgency(for test: PoolTest, target: Double, recentHistory: [PoolTest], config: PoolConfiguration) -> TreatmentUrgency {
-        let minimum = freeChlorineMinimum(cyanuricAcid: test.cyanuricAcid)
-        let targetLower = freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid).lowerBound
+        let classification = policyClassification(.freeChlorine, value: test.freeChlorine, test: test, config: config)
         if hasVisibleAlgae(test) || hasCloudyWater(test) || target >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
             return .immediate
         }
-        if hasRapidChlorineLoss(current: test, recentHistory: recentHistory) || hasRepeatedFailedChlorineCorrections(current: test, recentHistory: recentHistory) {
-            return .recommended
-        }
-        if test.freeChlorine < minimum * 0.5 {
-            return .immediate
-        }
-        if test.freeChlorine < minimum {
-            return .recommended
-        }
-        if test.freeChlorine < targetLower && chlorineDemandScore(for: test) >= 3 {
-            return .recommended
-        }
-        // ChemistryPolicy: FC at/above the CYA-adjusted readiness minimum but below the operating target
-        // is a Recommended maintenance top-off toward the operating target — no longer Optional merely
-        // because swimming remains allowed. (Swim-blocking is decided separately by ChemistryPolicy gates.)
-        return .recommended
+        return classification.derivedUrgency ?? .recommended
     }
 
     private func chlorineDemandScore(for test: PoolTest) -> Int {

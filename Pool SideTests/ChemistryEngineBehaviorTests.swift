@@ -1057,7 +1057,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let chlorineTemplate = try XCTUnwrap(templates.first { $0.targetParameter == "freeChlorine" && $0.amount > 0 })
         let chlorine = chlorineTemplate.toTreatment(linkedTo: test)
 
-        XCTAssertEqual(chlorineTemplate.urgency, .recommended)
+        XCTAssertEqual(chlorineTemplate.urgency, .needsAttention)
         XCTAssertFalse(chlorineTemplate.actionDescription.contains("Maintenance top-off"))
         XCTAssertTrue(chlorineTemplate.instructions.contains("Retest FC and CC in 60 minutes."))
         XCTAssertTrue(TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine))
@@ -1067,7 +1067,47 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         ), "Test before swimming")
     }
 
-    func testAtSwimReadinessMinimumChlorineTopOffStaysOptionalAndRoutineCopy() throws {
+    func testFreeChlorineTreatmentUrgencyFollowsPolicyBands() throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
+
+        let justBelowReadiness = try chlorineTreatment(
+            freeChlorine: 3.5,
+            totalChlorine: 3.5,
+            cyanuricAcid: 50,
+            config: config
+        )
+        XCTAssertEqual(justBelowReadiness.urgency, .needsAttention)
+
+        let severeLow = try chlorineTreatment(
+            freeChlorine: 1.5,
+            totalChlorine: 1.5,
+            cyanuricAcid: 50,
+            config: config
+        )
+        XCTAssertEqual(severeLow.urgency, .immediate)
+
+        let swimSafeBelowOperatingTarget = try chlorineTreatment(
+            freeChlorine: 4.0,
+            totalChlorine: 4.0,
+            cyanuricAcid: 50,
+            config: config
+        )
+        XCTAssertEqual(swimSafeBelowOperatingTarget.urgency, .recommended)
+        XCTAssertTrue(swimSafeBelowOperatingTarget.actionDescription.contains("Maintenance top-off"))
+
+        let operatingRangeTest = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: 5.5,
+            totalChlorine: 5.5,
+            totalAlkalinity: 90,
+            calciumHardness: 330,
+            cyanuricAcid: 50
+        )
+        let operatingRangeTreatments = engine.validatedTreatments(for: operatingRangeTest, config: config, recentHistory: [])
+        XCTAssertFalse(operatingRangeTreatments.contains { $0.targetParameter == "freeChlorine" && $0.amount > 0 })
+    }
+
+    func testAtSwimReadinessMinimumChlorineTopOffStaysRecommendedAndRoutineCopy() throws {
         let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.5,
@@ -1097,7 +1137,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         ), "Swim after ~1 hr")
     }
 
-    func testDogfoodWatchlistCopyStaysNonurgentAndProportional() {
+    func testDogfoodWatchlistCopyStaysNonurgentAndProportional() throws {
         let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.6,
@@ -1114,12 +1154,64 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
 
         let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
         XCTAssertFalse(treatments.contains { $0.chemicalName == "Monitor Elevated pH" })
-        XCTAssertTrue(treatments.contains { $0.chemicalName == "Monitor pH Trend" })
-        XCTAssertTrue(treatments.contains { $0.actionDescription.contains("pH is currently acceptable") })
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Monitor pH Trend" })
+        let alkalinityAction = try XCTUnwrap(treatments.first { $0.targetParameter == "totalAlkalinity" && $0.amount > 0 })
+        XCTAssertEqual(alkalinityAction.urgency, .recommended)
         XCTAssertFalse(treatments.contains { $0.chemicalName == "Manage Elevated CYA" })
         XCTAssertTrue(treatments.contains { $0.chemicalName == "Maintain Higher FC for Current CYA" })
         XCTAssertFalse(treatments.contains { $0.chemicalName == "Possible Dilution" })
         XCTAssertFalse(treatments.contains { $0.instructions.localizedCaseInsensitiveContains("salt") })
+    }
+
+    func testMaterialHighTAAtUpperSafePHGeneratesStagedRecommendedActionWithoutDuplicateWatchlist() throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5, pHDecreaser: .muriaticAcid)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 6.0,
+            totalChlorine: 6.0,
+            totalAlkalinity: 170,
+            calciumHardness: 380,
+            cyanuricAcid: 50
+        )
+
+        let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
+        let alkalinityAction = try XCTUnwrap(treatments.first { $0.targetParameter == "totalAlkalinity" && $0.amount > 0 })
+
+        XCTAssertEqual(alkalinityAction.urgency, .recommended)
+        XCTAssertTrue(alkalinityAction.isAcidTreatment)
+        XCTAssertTrue(alkalinityAction.wasDoseCapped)
+        XCTAssertTrue(alkalinityAction.instructions.contains("Follow the product label"))
+        XCTAssertTrue(alkalinityAction.instructions.localizedCaseInsensitiveContains("retest"))
+        XCTAssertFalse(treatments.contains { $0.chemicalName == "Monitor pH Trend" })
+        XCTAssertFalse(ChemistryPolicy.classify(
+            .totalAlkalinity,
+            value: test.totalAlkalinity,
+            context: .make(
+                config: config,
+                cyanuricAcid: test.cyanuricAcid,
+                pH: test.pH,
+                totalAlkalinity: test.totalAlkalinity,
+                hasScalingEvidence: false,
+                chlorineSampleSize: test.taylorSampleSize
+            )
+        ).blocksSwimming)
+    }
+
+    func testSevereHighTAUsesPolicyDerivedActNowUrgency() throws {
+        let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5, pHDecreaser: .muriaticAcid)
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.6,
+            freeChlorine: 6.0,
+            totalChlorine: 6.0,
+            totalAlkalinity: 190,
+            calciumHardness: 330,
+            cyanuricAcid: 50
+        )
+
+        let alkalinityAction = try XCTUnwrap(engine.validatedTreatments(for: test, config: config, recentHistory: []).first {
+            $0.targetParameter == "totalAlkalinity" && $0.amount > 0
+        })
+        XCTAssertEqual(alkalinityAction.urgency, .immediate)
     }
 
     func testGenuinelyLowChlorineStillRequiresSameDayVerification() {
@@ -1549,6 +1641,25 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             $0.targetParameter == target && $0.amount > 0
         })
         return template.toTreatment(linkedTo: test)
+    }
+
+    private func chlorineTreatment(
+        freeChlorine: Double,
+        totalChlorine: Double,
+        cyanuricAcid: Double,
+        config: PoolConfiguration
+    ) throws -> TreatmentTemplate {
+        let test = ChemistryTestFixtures.currentPool(
+            pH: 7.5,
+            freeChlorine: freeChlorine,
+            totalChlorine: totalChlorine,
+            totalAlkalinity: 90,
+            calciumHardness: 330,
+            cyanuricAcid: cyanuricAcid
+        )
+        return try XCTUnwrap(engine.validatedTreatments(for: test, config: config, recentHistory: []).first {
+            $0.targetParameter == "freeChlorine" && $0.amount > 0
+        })
     }
 
     private func timingTreatment(

@@ -895,7 +895,8 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
         let classification = try XCTUnwrap(assessment.treatmentAwareContext?.classifications.first { $0.treatmentID == chlorine.id })
 
-        XCTAssertEqual(chlorine.urgency, .recommended)
+        // FC below readiness but not severe is Needs Attention; only readiness-to-target top-off is Recommended.
+        XCTAssertEqual(chlorine.urgency, .needsAttention)
         XCTAssertEqual(TreatmentTimingGuidance.cardTip(
             for: chlorine,
             requiresVerificationBeforeSwimming: TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: chlorine)
