@@ -20,6 +20,9 @@ protocol PoolNotificationScheduling: AnyObject {
     func scheduleTreatmentStepReminder(treatmentID: UUID, nextTreatmentName: String, afterMinutes: Int) async -> String?
     @discardableResult
     func scheduleWaitCompleteReminder(treatmentID: UUID, treatmentName: String, afterMinutes: Int) async -> String?
+    /// Cancels orphaned workflow reminders: any pending Pool Side workflow notification whose identifier is
+    /// not in `validIdentifiers` (its owning treatment/Check was removed or regenerated with a new UUID).
+    func reconcileWorkflowNotifications(keeping validIdentifiers: Set<String>) async
     func cancel(identifier: String)
     func cancelNextPoolTestReminder()
     @discardableResult
@@ -39,6 +42,20 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
 
     static let shared = NotificationService()
     static let nextPoolTestIdentifier = "next-pool-test"
+
+    /// Identifier prefixes for the per-treatment / per-Check workflow reminders Pool Side schedules. The
+    /// routine next-full-test reminder uses a distinct identifier (`nextPoolTestIdentifier`) that matches
+    /// none of these, so reconciliation never cancels it.
+    static let workflowNotificationPrefixes = [
+        "treatment-wait-",
+        "treatment-step-",
+        "treatment-retest-",
+        "check-retest-"
+    ]
+
+    static func isWorkflowNotification(_ identifier: String) -> Bool {
+        workflowNotificationPrefixes.contains { identifier.hasPrefix($0) }
+    }
 
     @Published var isAuthorized: Bool = false
 
@@ -231,6 +248,21 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
         treatment.stepReminderNotificationIdentifier = nil
         treatment.retestReminderNotificationIdentifier = nil
         treatment.checkReminderNotificationIdentifier = nil
+    }
+
+    /// Cancels workflow reminders orphaned by plan regeneration or object removal. A pending workflow
+    /// notification (`treatment-wait-*`, `treatment-step-*`, `treatment-retest-*`, `check-retest-*`) is an
+    /// orphan when its identifier is not in `validIdentifiers` — i.e. no surviving treatment/Check still
+    /// owns it (its owner was deleted, skipped/completed and cleared, or regenerated with a new UUID).
+    /// Routine reminders are never in the workflow families, so they always survive. Idempotent: once the
+    /// orphans are gone a second call finds nothing to cancel.
+    func reconcileWorkflowNotifications(keeping validIdentifiers: Set<String>) async {
+        let requests = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let orphans = requests
+            .map(\.identifier)
+            .filter { Self.isWorkflowNotification($0) && !validIdentifiers.contains($0) }
+        guard !orphans.isEmpty else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: orphans)
     }
 
     func cancelAllPoolSideNotifications() {

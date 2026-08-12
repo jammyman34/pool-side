@@ -56,6 +56,11 @@ struct ContentView: View {
             // supersession (now removed). Idempotent and safe — never touches a user's own completions.
             viewModel.reopenAutoCompletedChecks(in: tests, modelContext: modelContext)
 
+            // Cancel workflow reminders orphaned by earlier plan regenerations / prior sessions (their
+            // owning treatment/Check no longer exists), so stale wait/retest notifications never pile up.
+            // Routine next-test reminders are preserved. Idempotent.
+            await viewModel.reconcileWorkflowNotifications(in: tests)
+
             try? await Task.sleep(for: .milliseconds(1000))
             withAnimation(.easeOut(duration: 0.2)) {
                 showingStartupSplash = false

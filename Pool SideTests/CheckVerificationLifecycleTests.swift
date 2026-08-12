@@ -45,6 +45,19 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
         return identifier
     }
 
+    func reconcileWorkflowNotifications(keeping validIdentifiers: Set<String>) async {
+        let orphans = activeIdentifiers.filter {
+            NotificationService.isWorkflowNotification($0) && !validIdentifiers.contains($0)
+        }
+        for identifier in orphans { cancel(identifier: identifier) }
+    }
+
+    /// Test-only: represent an already-pending notification (e.g. a routine reminder or a stale orphan)
+    /// so reconciliation behavior against real pending requests can be exercised deterministically.
+    func seedActiveIdentifier(_ identifier: String) {
+        activeIdentifiers.insert(identifier)
+    }
+
     func cancel(identifier: String) {
         cancelledIdentifiers.append(identifier)
         activeIdentifiers.remove(identifier)

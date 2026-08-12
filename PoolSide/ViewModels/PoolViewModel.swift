@@ -43,13 +43,18 @@ final class PoolViewModel {
     }
 
     func refreshConfigFromStorage(reconcilingWith tests: [PoolTest]) {
-        var latest = PoolConfiguration.current
-        let recovered = PoolConfiguration.recoveredFromTestHistory(latest, tests: tests)
-        if recovered != latest {
-            PoolConfiguration.current = recovered
-            latest = recovered
+        guard let stored = PoolConfiguration.persisted else {
+            // No valid persisted config yet (first use, or a load failure). Surface defaults in memory for
+            // display, but never persist them here — writing back would cement struct defaults over an
+            // absent/recoverable config. The intentional setup/Settings save paths own first persistence.
+            poolConfig = PoolConfiguration.current
+            return
         }
-        poolConfig = latest
+        let recovered = PoolConfiguration.recoveredFromTestHistory(stored, tests: tests)
+        if recovered != stored {
+            PoolConfiguration.current = recovered
+        }
+        poolConfig = recovered
     }
 
     func saveConfig(_ config: PoolConfiguration, marksEquipmentChoicesExplicit: Bool = false) {
@@ -80,7 +85,10 @@ final class PoolViewModel {
     }
 
     func updateConfig(_ update: (inout PoolConfiguration) -> Void) {
-        var latest = PoolConfiguration.current
+        // A partial read-modify-write (e.g. "save this test method / product as default") must never turn a
+        // missing/invalid persisted config into saved struct defaults. With no valid stored config there is
+        // nothing to amend, so leave storage untouched — intentional setup/Settings saves own creation.
+        guard var latest = PoolConfiguration.persisted else { return }
         update(&latest)
         saveConfig(latest)
     }
@@ -615,6 +623,7 @@ final class PoolViewModel {
         try? modelContext.save()
         let anchorTest = treatment.poolTest ?? latestTest(in: tests)
         await replaceNextPoolTestReminder(for: anchorTest, allTests: tests)
+        await reconcileWorkflowNotifications(in: mergedTests(tests, including: anchorTest))
         if let anchorTest {
             runSwimabilityV2ComparisonAfterTreatmentStateChange(
                 for: anchorTest,
@@ -645,6 +654,7 @@ final class PoolViewModel {
         try? modelContext.save()
         let anchorTest = treatment.poolTest ?? latestTest(in: tests)
         await replaceNextPoolTestReminder(for: anchorTest, allTests: tests)
+        await reconcileWorkflowNotifications(in: mergedTests(tests, including: anchorTest))
         return outcome
     }
 
@@ -698,6 +708,38 @@ final class PoolViewModel {
         return outcome
     }
 
+    // MARK: - Workflow notification reconciliation
+
+    /// Cancels workflow reminders orphaned by plan regeneration or object removal. The live set is every
+    /// notification identifier still stored on a surviving treatment/Check across `tests`; any pending
+    /// workflow notification outside that set belonged to an object that was replaced (new UUID), deleted,
+    /// skipped, or completed, and is cancelled. Routine next-test reminders are never in the workflow
+    /// families, so they always survive. Idempotent.
+    @MainActor
+    func reconcileWorkflowNotifications(in tests: [PoolTest]) async {
+        await notifications.reconcileWorkflowNotifications(
+            keeping: liveWorkflowNotificationIdentifiers(in: tests)
+        )
+    }
+
+    /// The identifiers currently owned by surviving treatments/Checks. A stored identifier is only ever
+    /// non-nil while its reminder is meant to be pending; completing/skipping/reverting a step clears it,
+    /// so this set is exactly the reminders that should still exist.
+    private func liveWorkflowNotificationIdentifiers(in tests: [PoolTest]) -> Set<String> {
+        var identifiers: Set<String> = []
+        for treatment in tests.flatMap(\.treatments) {
+            for identifier in [
+                treatment.reminderNotificationIdentifier,
+                treatment.stepReminderNotificationIdentifier,
+                treatment.retestReminderNotificationIdentifier,
+                treatment.checkReminderNotificationIdentifier
+            ] {
+                if let identifier { identifiers.insert(identifier) }
+            }
+        }
+        return identifiers
+    }
+
     @MainActor
     private func cancelCompletionNotifications(for treatment: Treatment) {
         notifications.cancel(identifier: treatment.reminderNotificationIdentifier)
@@ -735,6 +777,13 @@ final class PoolViewModel {
 
     private func latestTest(in tests: [PoolTest]) -> PoolTest? {
         tests.sorted { $0.date > $1.date }.first
+    }
+
+    /// `tests` with `extra` appended if it is not already present. Keeps notification reconciliation robust
+    /// when the anchor test (e.g. a treatment's own `poolTest`) is not part of the passed-in array.
+    private func mergedTests(_ tests: [PoolTest], including extra: PoolTest?) -> [PoolTest] {
+        guard let extra, !tests.contains(where: { $0.id == extra.id }) else { return tests }
+        return tests + [extra]
     }
 
     // NOTE: A focused Check is completed ONLY by the user entering its measured result (`saveFocusedCheck`).
@@ -967,6 +1016,9 @@ final class PoolViewModel {
         // reminder from the new effective state so a now-stale routine date is not silently retained.
         let mergedTests = allTests.contains(where: { $0.id == test.id }) ? allTests : ([test] + allTests)
         await replaceNextPoolTestReminder(for: latestTest(in: mergedTests) ?? test, allTests: mergedTests)
+        // The Check was completed and the plan regenerated with fresh treatment/Check UUIDs; cancel any
+        // reminder left behind by the superseded objects so no orphan retest/wait survives.
+        await reconcileWorkflowNotifications(in: mergedTests)
 
         // Derive the explicit closure outcome from the POST-check reassessment (ChemistryPolicy operating
         // state + the regenerated plan), consuming Swimability V2 for overall readiness.

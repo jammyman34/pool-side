@@ -109,14 +109,20 @@ struct PoolConfiguration: Codable, Equatable {
     static let hasCoverExplicitChoiceKey = "poolConfiguration.hasCover.explicitChoice"
     static let usesRoboticCleanerExplicitChoiceKey = "poolConfiguration.usesRoboticCleaner.explicitChoice"
 
+    /// The stored configuration when one is present AND decodable, otherwise `nil`. Callers that
+    /// read-modify-write MUST use this (not `current`) so a missing/invalid load is never silently
+    /// re-persisted as struct defaults (e.g. Cal-Hypo / Muriatic). `current` keeps its default-fallback
+    /// behavior for read-only display, but distinguishing "no valid config" is what makes writers safe.
+    static var persisted: PoolConfiguration? {
+        guard
+            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let decodedConfig = try? JSONDecoder().decode(PoolConfiguration.self, from: data)
+        else { return nil }
+        return recoveredEquipmentSettings(in: decodedConfig)
+    }
+
     static var current: PoolConfiguration {
-        get {
-            guard
-                let data = UserDefaults.standard.data(forKey: defaultsKey),
-                let decodedConfig = try? JSONDecoder().decode(PoolConfiguration.self, from: data)
-            else { return recoveredEquipmentSettings(in: PoolConfiguration()) }
-            return recoveredEquipmentSettings(in: decodedConfig)
-        }
+        get { persisted ?? recoveredEquipmentSettings(in: PoolConfiguration()) }
         set {
             let data = try? JSONEncoder().encode(newValue)
             UserDefaults.standard.set(data, forKey: defaultsKey)
