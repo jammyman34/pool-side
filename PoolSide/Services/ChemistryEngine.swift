@@ -151,14 +151,7 @@ struct ChemistryEngine {
     }
 
     func freeChlorineTargetRange(cyanuricAcid: Double?) -> ClosedRange<Double> {
-        guard let cya = cyanuricAcid, cya >= 20 else {
-            return 1.0...3.0
-        }
-
-        let minimum = freeChlorineMinimum(cyanuricAcid: cya)
-        let target = max(minimum + 1.5, cya * 0.10)
-        let upper = max(target + 2.0, cya * 0.12)
-        return target...upper
+        FreeChlorinePolicy.operatingRange(cyanuricAcid: cyanuricAcid)
     }
 
     func freeChlorineSwimReadinessMinimum(cyanuricAcid: Double?) -> Double {
@@ -186,11 +179,7 @@ struct ChemistryEngine {
     }
 
     private func freeChlorineMinimum(cyanuricAcid: Double?) -> Double {
-        guard let cya = cyanuricAcid, cya >= 20 else {
-            return 1.0
-        }
-
-        return max(1.0, (cya * 0.075).rounded(toPlaces: 1))
+        FreeChlorinePolicy.readinessMinimum(cyanuricAcid: cyanuricAcid)
     }
 
     private func freeChlorineTargetMidpoint(cyanuricAcid: Double?) -> Double {
@@ -199,11 +188,7 @@ struct ChemistryEngine {
     }
 
     private func freeChlorineShockLevel(cyanuricAcid: Double?) -> Double {
-        guard let cya = cyanuricAcid, cya >= 20 else {
-            return 10
-        }
-
-        return max(cya * 0.40, 10)
+        FreeChlorinePolicy.shockLevel(cyanuricAcid: cyanuricAcid)
     }
 
     func totalAlkalinityStatus(_ value: Double) -> ChemicalStatus {
@@ -1556,13 +1541,13 @@ struct ChemistryEngine {
                     calculatedDoseBeforeCapUnit: product.calculatedUnitBeforeCap,
                     wasDoseCapped: product.wasCapped
                 )
-            } else if reading.value >= freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
+            } else if reading.value > FreeChlorinePolicy.reentryCeiling(cyanuricAcid: test.cyanuricAcid) {
                 return TreatmentTemplate(
                     chemicalName: "Remove Chlorine Source",
-                    actionDescription: "Reduce free chlorine — it's elevated above the CYA-adjusted recovery level",
+                    actionDescription: "Free chlorine is above the swim re-entry ceiling",
                     amount: 0,
                     unit: "",
-                    instructions: "Allow levels to drop naturally by running pool in sunlight without adding chlorine. Retest in 24 hours. If urgent, use a chlorine neutralizer (sodium thiosulfate).",
+                    instructions: "Allow levels to drop naturally by running pool in sunlight without adding chlorine. Retest in 24 hours before swimming.",
                     targetParameter: "freeChlorine",
                     urgency: reading.status.treatmentUrgency ?? .optional,
                     expectedEffectParameter: "freeChlorine",
@@ -1846,6 +1831,10 @@ struct ChemistryEngine {
         if shouldUseUpperChlorineTarget(for: test, recentHistory: recentHistory) {
             return targetRange.upperBound
         }
+        let policyTarget = FreeChlorinePolicy.treatmentTarget
+        if targetRange.contains(policyTarget) || test.freeChlorine < policyTarget {
+            return policyTarget
+        }
         let midpoint = freeChlorineTargetMidpoint(cyanuricAcid: test.cyanuricAcid)
         let demandScore = chlorineDemandScore(for: test)
         if demandScore >= 6 {
@@ -1957,9 +1946,8 @@ struct ChemistryEngine {
         recentHistory: [PoolTest],
         config: PoolConfiguration
     ) -> String {
-        // Maintenance top-off is identified by ChemistryPolicy (FC at/above the CYA-adjusted readiness
-        // minimum but below the operating target), not by urgency — maintenance top-offs are now
-        // Recommended rather than Optional.
+        // Maintenance top-off is identified by ChemistryPolicy (FC at/above the readiness minimum but
+        // below the treatment target), not by urgency.
         let classification = policyClassification(.freeChlorine, value: test.freeChlorine, test: test, config: config)
         if classification.actionState == .recommendedLow, target < freeChlorineShockLevel(cyanuricAcid: test.cyanuricAcid) {
             return "Maintenance top-off toward \(formatRangeBound(target)) ppm"
@@ -2149,7 +2137,7 @@ struct ChemistryEngine {
                     actionDescription: "You're already airing the pool regularly, which helps release chloramines and CO₂.",
                     amount: 0,
                     unit: "",
-                    instructions: "Keep letting the pool breathe as you have been, and keep FC in the upper half of the CYA-adjusted range. No change needed.",
+                    instructions: "Keep letting the pool breathe as you have been, and keep FC in the normal operating range. No change needed.",
                     targetParameter: "cover",
                     urgency: .advisory
                 ))
@@ -2159,7 +2147,7 @@ struct ChemistryEngine {
                     actionDescription: "Covered pools can accumulate chloramines and organics when FC runs low.",
                     amount: 0,
                     unit: "",
-                    instructions: "Open the cover periodically, circulate the pool, and avoid letting FC sit near the minimum. Aim for the upper half of the CYA-adjusted FC range.",
+                    instructions: "Open the cover periodically, circulate the pool, and avoid letting FC sit near the minimum.",
                     targetParameter: "cover",
                     urgency: .advisory
                 ))
@@ -2168,11 +2156,11 @@ struct ChemistryEngine {
 
         if test.cyanuricAcid >= 50 && test.cyanuricAcid < 90 {
             templates.append(TreatmentTemplate(
-                chemicalName: "Maintain Higher FC for Current CYA",
-                actionDescription: "Current CYA is manageable, but it requires a higher ongoing FC target.",
+                chemicalName: "Monitor Cyanuric Acid",
+                actionDescription: "Current CYA is manageable but should be tracked independently.",
                 amount: 0,
                 unit: "",
-                instructions: "Maintain FC around \(freeChlorineIdealRangeLabel(cyanuricAcid: test.cyanuricAcid)). Avoid dichlor and trichlor, which add more CYA. Dilution is only needed if CYA keeps rising or the higher FC target is impractical.",
+                instructions: "Keep FC in the normal operating range and avoid unnecessary dichlor or trichlor, which add more CYA. Dilution is only needed if CYA keeps rising.",
                 targetParameter: "cyanuricAcid",
                 urgency: .advisory,
                 doNotRepeatHours: 72

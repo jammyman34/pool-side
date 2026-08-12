@@ -199,6 +199,7 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
     }
 
     private func schedule(identifier: String, content: UNMutableNotificationContent, date: Date) async {
+        cancel(identifier: identifier)
         let trigger = UNCalendarNotificationTrigger(
             dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date),
             repeats: false
@@ -243,6 +244,7 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
                     $0.hasPrefix("treatment-step-")
                         || $0.hasPrefix("treatment-retest-")
                         || $0.hasPrefix("treatment-")
+                        || $0.hasPrefix("check-retest-")
                 }
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
         }
@@ -258,6 +260,7 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
                     || $0.identifier.hasPrefix("treatment-step-")
                     || $0.identifier.hasPrefix("treatment-retest-")
                     || $0.identifier.hasPrefix("treatment-")
+                    || $0.identifier.hasPrefix("check-retest-")
             }
             .map { request in
                 "- \(request.identifier): \(request.content.title) — \(request.content.body)"

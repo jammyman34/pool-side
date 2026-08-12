@@ -135,6 +135,29 @@ final class FocusedCheckGatingTests: XCTestCase {
         guard case .waitCompleteScheduled = outcome else {
             return XCTFail("Expected a wait-complete outcome so the UI can confirm the reminder was set.")
         }
+
+        let acidSpy = NotificationSchedulingSpy()
+        let acidViewModel = vm(acidSpy)
+        let acidTest = poolTest(mc, pH: 7.7, fc: 3.5)
+        let acid = treatment(param: "pH", name: "Muriatic Acid (31.45%)", on: acidTest)
+        acid.unit = "qt"
+        acidTest.treatments.append(acid)
+
+        _ = await acidViewModel.completeTreatment(acid, in: [acidTest], modelContext: mc)
+
+        XCTAssertTrue(acidSpy.scheduledCheckIDs.isEmpty, "No purple Check means no pH retest notification is scheduled.")
+        XCTAssertEqual(acidSpy.scheduledWaitCompleteTreatmentIDs, [acid.id])
+        XCTAssertEqual(acidSpy.scheduledWaitCompleteNames, ["Muriatic Acid (31.45%)"])
+
+        let oldIdentifier = acid.stepReminderNotificationIdentifier
+        acid.chemicalName = "Dry Acid (Sodium Bisulfate)"
+        acid.productIdentifier = ChemicalProductID.dryAcid.rawValue
+        _ = await acidViewModel.refreshTreatmentNotificationsAfterProductChange(acid, in: [acidTest], modelContext: mc)
+
+        XCTAssertTrue(acidSpy.didCancel(oldIdentifier), "Changing the product cancels the previous chemical's wait reminder.")
+        XCTAssertEqual(acidSpy.scheduledWaitCompleteNames, ["Muriatic Acid (31.45%)", "Dry Acid (Sodium Bisulfate)"])
+        XCTAssertEqual(acidSpy.activeIdentifiers, Set(["treatment-wait-\(acid.id.uuidString)"]))
+        XCTAssertTrue(acidSpy.scheduledCheckIDs.isEmpty)
     }
 
     func testSkippingSafeChlorineSchedulesNoReminder() async throws {

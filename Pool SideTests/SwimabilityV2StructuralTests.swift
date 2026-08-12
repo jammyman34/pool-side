@@ -53,15 +53,15 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .pass)
     }
 
-    func testFCBelowCYAAdjustedMinimumFailsSanitizerGate() {
-        let assessment = assess(test: makeReadyTest(freeChlorine: 4.0, totalChlorine: 4.0, cyanuricAcid: 60))
+    func testFCBelowReadinessMinimumFailsSanitizerGate() {
+        let assessment = assess(test: makeReadyTest(freeChlorine: 1.5, totalChlorine: 1.5, cyanuricAcid: 60))
 
         XCTAssertEqual(assessment.state, .doNotSwim)
         XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .fail)
     }
 
-    func testFCBelowPreferredTargetButAboveMinimumDoesNotFailSwimability() {
-        let assessment = assess(test: makeReadyTest(freeChlorine: 4.6, totalChlorine: 4.6, cyanuricAcid: 60))
+    func testFCBelowTargetButAboveMinimumDoesNotFailSwimability() {
+        let assessment = assess(test: makeReadyTest(freeChlorine: 2.5, totalChlorine: 2.5, cyanuricAcid: 60))
 
         XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .pass)
         XCTAssertEqual(assessment.state, .readyToSwim)
@@ -821,6 +821,8 @@ final class SwimabilityV2StructuralTests: XCTestCase {
 
     func testCleanTC1GeneratedRoutineChlorineIsVisibleToTreatmentAwareV2() async throws {
         let test = makeCleanTC1Test()
+        test.freeChlorine = 2.5
+        test.totalChlorine = 2.5
         let config = makeTC1Config()
         let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
         let response = try await RuleBasedService().generateRecommendations(for: request)
@@ -839,9 +841,9 @@ final class SwimabilityV2StructuralTests: XCTestCase {
 
         XCTAssertEqual(chlorineTreatments.count, 1)
         XCTAssertEqual(chlorine.chemicalName, "Liquid Chlorine 12.5%")
-        XCTAssertEqual(chlorine.amount, 0.75, accuracy: 0.001)
-        // Superseded by approved policy §3/§4: a maintenance top-off toward the operating target is now
-        // Recommended (not Optional); it remains non-swim-blocking with a swim-after-circulation badge.
+        XCTAssertEqual(chlorine.amount, 0.1, accuracy: 0.001)
+        // The corrected FC urgency model treats 2-<3 ppm as a safe Recommended top-off
+        // toward the 3 ppm target; it remains non-swim-blocking with a swim-after-circulation badge.
         XCTAssertEqual(chlorine.urgency, .recommended)
         XCTAssertEqual(chlorine.minutesBeforeNext, 60)
         XCTAssertEqual(TreatmentTimingGuidance.cardTip(for: chlorine), "Swim after ~1 hr")
@@ -861,6 +863,8 @@ final class SwimabilityV2StructuralTests: XCTestCase {
 
     func testCleanTC1SkippedOptionalMaintenanceChlorineRemainsReadyToSwim() async throws {
         let test = makeCleanTC1Test()
+        test.freeChlorine = 2.5
+        test.totalChlorine = 2.5
         let config = makeTC1Config()
         let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
         let response = try await RuleBasedService().generateRecommendations(for: request)
@@ -883,8 +887,8 @@ final class SwimabilityV2StructuralTests: XCTestCase {
 
     func testBelowReadinessMinimumChlorineTreatmentRemainsSwimBlocking() async throws {
         let test = makeCleanTC1Test()
-        test.freeChlorine = 4.0
-        test.totalChlorine = 4.0
+        test.freeChlorine = 1.5
+        test.totalChlorine = 1.5
         let config = makeTC1Config()
         let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
         let response = try await RuleBasedService().generateRecommendations(for: request)
@@ -936,6 +940,80 @@ final class SwimabilityV2StructuralTests: XCTestCase {
         XCTAssertTrue(assessment.swimmingBlocked)
     }
 
+    @MainActor
+    func testRecalculateRemovesStaleFCCheckWhenCorrectedPolicyMakesFCIdeal() async throws {
+        let test = makeCleanTC1Test()
+        test.freeChlorine = 3.5
+        test.totalChlorine = 3.5
+        let config = makeTC1Config()
+        let viewModel = PoolViewModel()
+        viewModel.saveConfig(config)
+        let context = try inMemoryContext()
+
+        let staleChlorine = staleFCChlorine(on: test, urgency: .needsAttention, expectedDelta: 2.5)
+        let staleCheck = try XCTUnwrap(TreatmentWorkflowEngine().makeCheckStep(after: staleChlorine, sortOrder: 2))
+        test.treatments = [staleChlorine, staleCheck]
+        context.insert(test)
+
+        try await viewModel.recalculateRecommendations(for: test, recentTests: [], modelContext: context)
+
+        XCTAssertFalse(test.treatments.contains { $0.targetParameter == "freeChlorine" && !$0.isFocusedCheckStep && !$0.isWatchlistItem })
+        XCTAssertFalse(test.treatments.contains { $0.isFocusedCheckStep && $0.checkParameters.contains("freeChlorine") })
+        let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .pass)
+        XCTAssertFalse(assessment.swimmingBlocked)
+        XCTAssertFalse(viewModel.scoreAssessment(for: test, in: []).drivers.contains { $0.localizedCaseInsensitiveContains("FC") })
+    }
+
+    @MainActor
+    func testRecalculateMakesFC25RecommendedTopOffWithoutRequiredCheck() async throws {
+        let test = makeCleanTC1Test()
+        test.freeChlorine = 2.5
+        test.totalChlorine = 2.5
+        let config = makeTC1Config()
+        let viewModel = PoolViewModel()
+        viewModel.saveConfig(config)
+        let context = try inMemoryContext()
+        context.insert(test)
+
+        try await viewModel.recalculateRecommendations(for: test, recentTests: [], modelContext: context)
+
+        let chlorine = try XCTUnwrap(test.treatments.first { $0.targetParameter == "freeChlorine" && !$0.isFocusedCheckStep && !$0.isWatchlistItem })
+        XCTAssertEqual(chlorine.urgency, .recommended)
+        XCTAssertEqual(chlorine.expectedDelta, 0.5, accuracy: 0.001)
+        XCTAssertFalse(test.treatments.contains { $0.isFocusedCheckStep && $0.checkParameters.contains("freeChlorine") })
+        let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .pass)
+        XCTAssertFalse(assessment.swimmingBlocked)
+        XCTAssertFalse(assessment.treatmentAwareContext?.verificationRequired ?? true)
+    }
+
+    @MainActor
+    func testRecalculateKeepsFC15CorrectiveTreatmentAndRequiredCheck() async throws {
+        let test = makeCleanTC1Test()
+        test.freeChlorine = 1.5
+        test.totalChlorine = 1.5
+        let config = makeTC1Config()
+        let viewModel = PoolViewModel()
+        viewModel.saveConfig(config)
+        let context = try inMemoryContext()
+        context.insert(test)
+
+        try await viewModel.recalculateRecommendations(for: test, recentTests: [], modelContext: context)
+
+        let chlorine = try XCTUnwrap(test.treatments.first { $0.targetParameter == "freeChlorine" && !$0.isFocusedCheckStep && !$0.isWatchlistItem })
+        XCTAssertEqual(chlorine.urgency, .needsAttention)
+        XCTAssertEqual(chlorine.expectedDelta, 1.5, accuracy: 0.001)
+        XCTAssertTrue(test.treatments.contains { $0.isFocusedCheckStep && $0.checkParameters.contains("freeChlorine") && $0.checkParameters.contains("combinedChlorine") })
+        let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: evaluationDate)
+        XCTAssertEqual(gateState(.sanitizerAdequacy, in: assessment), .fail)
+        XCTAssertTrue(assessment.swimmingBlocked)
+        XCTAssertTrue(assessment.treatmentAwareContext?.verificationRequired ?? false)
+    }
+
     func testPreferredTargetChlorineDoesNotGenerateMaintenanceTopOff() async throws {
         let test = makeCleanTC1Test()
         test.freeChlorine = 6.5
@@ -956,6 +1034,8 @@ final class SwimabilityV2StructuralTests: XCTestCase {
 
     func testCleanTC1FinalComparisonReflectsGeneratedTreatmentsOnce() async throws {
         let test = makeCleanTC1Test()
+        test.freeChlorine = 2.5
+        test.totalChlorine = 2.5
         let config = makeTC1Config()
         let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
         let response = try await RuleBasedService().generateRecommendations(for: request)
@@ -991,6 +1071,8 @@ final class SwimabilityV2StructuralTests: XCTestCase {
     @MainActor
     func testTC1RoutineChlorineCompletionHookReportsCompletedWaitingPrediction() async throws {
         let test = makeCleanTC1Test()
+        test.freeChlorine = 2.5
+        test.totalChlorine = 2.5
         let config = makeTC1Config()
         let request = AIRecommendationRequest(currentTest: test, recentHistory: [], poolConfig: config)
         let response = try await RuleBasedService().generateRecommendations(for: request)
@@ -1275,11 +1357,11 @@ final class SwimabilityV2StructuralTests: XCTestCase {
     }
 
     func testFCReadinessMinimumGatesSwimmingNotOperatingTarget() {
-        // CYA 60 → readinessMin 4.5, operating-target lower bound 6.0. The swim gate uses the minimum.
-        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 4.4, totalChlorine: 4.4, cyanuricAcid: 60)).state, .doNotSwim)
-        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 4.5, totalChlorine: 4.5, cyanuricAcid: 60)).state, .readyToSwim)
-        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 5.0, totalChlorine: 5.0, cyanuricAcid: 60)).state, .readyToSwim)
-        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 6.0, totalChlorine: 6.0, cyanuricAcid: 60)).state, .readyToSwim)
+        // CYA 60 → readiness minimum 2.0, target 3.0, ideal 3.0–4.0. The swim gate uses the minimum.
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 1.9, totalChlorine: 1.9, cyanuricAcid: 60)).state, .doNotSwim)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 2.0, totalChlorine: 2.0, cyanuricAcid: 60)).state, .readyToSwim)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 2.5, totalChlorine: 2.5, cyanuricAcid: 60)).state, .readyToSwim)
+        XCTAssertEqual(assess(test: makeReadyTest(freeChlorine: 3.5, totalChlorine: 3.5, cyanuricAcid: 60)).state, .readyToSwim)
     }
 
     func testHighFCUsesCanonicalReentryCeilingResolverNotAHardcodedMax() {
@@ -1440,6 +1522,34 @@ final class SwimabilityV2StructuralTests: XCTestCase {
             targetParameter: targetParameter,
             minutesBeforeNext: minutesBeforeNext,
             expectedDelta: expectedDelta
+        )
+    }
+
+    private func inMemoryContext() throws -> ModelContext {
+        let container = try ModelContainer(
+            for: PoolTest.self, Treatment.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        return ModelContext(container)
+    }
+
+    private func staleFCChlorine(on test: PoolTest, urgency: TreatmentUrgency, expectedDelta: Double) -> Treatment {
+        Treatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            actionDescription: "Stale CYA-adjusted chlorine plan",
+            amount: 0.75,
+            unit: "gal",
+            productIdentifier: ChemicalProductID.liquidChlorine12_5.rawValue,
+            globalPreferenceIdentifier: ChemicalProductID.liquidChlorine12_5.rawValue,
+            instructions: "Stale instructions.",
+            urgency: urgency,
+            targetParameter: "freeChlorine",
+            minutesBeforeNext: 60,
+            sortOrder: 1,
+            expectedEffectParameter: "freeChlorine",
+            expectedDelta: expectedDelta,
+            effectDelayHours: 1,
+            poolTest: test
         )
     }
 }

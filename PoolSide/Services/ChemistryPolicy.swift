@@ -15,10 +15,10 @@ import Foundation
 //   - CorrectionDisposition       (what to do about it)
 //   - swim gate                   (does it block swimming, per side)
 //
-// All bands/targets are RESOLVERS (functions of CYA / sanitizer / surface / salt config /
-// test method), never universal global constants. Downstream systems (treatment generation,
-// urgency, explanations, focused verification, Swimability V2 gates, views) are intended to
-// CONSUME this policy rather than re-deriving thresholds.
+// Bands/targets live here. Some are RESOLVERS (sanitizer / surface / salt config / test method);
+// others are approved constants. Downstream systems (treatment generation, urgency, explanations,
+// focused verification, Swimability V2 gates, views) are intended to CONSUME this policy rather
+// than re-deriving thresholds.
 //
 // This file is additive. Wiring existing services to consume it is a subsequent, test-verified
 // step; nothing here changes current behavior on its own.
@@ -316,28 +316,29 @@ enum ChemistryPolicy {
     }
 }
 
-// MARK: - Free Chlorine (CYA-aware; direct swim gate). Coefficients kept at parity with ChemistryEngine.
+// MARK: - Free Chlorine (direct swim gate). Constants kept at parity with ChemistryEngine.
 
 enum FreeChlorinePolicy {
-    /// CYA-adjusted swim-readiness minimum. Parity with ChemistryEngine.freeChlorineMinimum.
+    static let cyaPresentReadinessMinimum = 2.0
+    static let noCYAReadinessMinimum = 1.0
+    static let treatmentTarget = 3.0
+
+    /// Swim-readiness minimum. With CYA present, conventional residential guidance uses 2 ppm.
+    /// Without CYA, preserve the established lower 1 ppm minimum.
     static func readinessMinimum(cyanuricAcid: Double?) -> Double {
-        guard let cya = cyanuricAcid, cya >= 20 else { return 1.0 }
-        return max(1.0, (cya * 0.075).rounded(toPlaces: 1))
+        guard let cya = cyanuricAcid, cya >= 20 else { return noCYAReadinessMinimum }
+        return cyaPresentReadinessMinimum
     }
 
-    /// Desired operating range. Parity with ChemistryEngine.freeChlorineTargetRange.
+    /// Ideal no-action range. CYA no longer dynamically raises FC targets; CYA is managed separately.
     static func operatingRange(cyanuricAcid: Double?) -> ClosedRange<Double> {
-        guard let cya = cyanuricAcid, cya >= 20 else { return 1.0...3.0 }
-        let minimum = readinessMinimum(cyanuricAcid: cya)
-        let target = max(minimum + 1.5, cya * 0.10)
-        let upper = max(target + 2.0, cya * 0.12)
-        return target...upper
+        guard let cya = cyanuricAcid, cya >= 20 else { return noCYAReadinessMinimum...treatmentTarget }
+        return treatmentTarget...4.0
     }
 
-    /// Recovery/shock target. Parity with ChemistryEngine.freeChlorineShockLevel. NOT a re-entry ceiling.
+    /// Recovery/shock target. NOT a re-entry ceiling.
     static func shockLevel(cyanuricAcid: Double?) -> Double {
-        guard let cya = cyanuricAcid, cya >= 20 else { return 10 }
-        return max(cya * 0.40, 10)
+        10
     }
 
     /// High-FC re-entry ceiling. Deliberately a policy HOOK, not a universal 10 ppm rule.
@@ -366,15 +367,15 @@ enum FreeChlorinePolicy {
         let target: Double?
         let severity: ChemistrySeverity
 
-        if value < 0.5 * minimum {
+        if value < 1.0 {
             // Severely low: significant sanitizer risk.
-            state = .actNowLow; disposition = .treatNow; blocks = true; target = range.lowerBound; severity = .severe
+            state = .actNowLow; disposition = .treatNow; blocks = true; target = treatmentTarget; severity = .severe
         } else if value < minimum {
             // Below the swim-readiness minimum but not severe: correct before swimming, not an emergency.
-            state = .actNowLow; disposition = .treatNow; blocks = true; target = range.lowerBound; severity = .moderate
-        } else if value < range.lowerBound {
-            // >= readiness minimum but below operating target: Recommended optimization (pool is swim-safe).
-            state = .recommendedLow; disposition = .treatNow; blocks = false; target = range.lowerBound; severity = .none
+            state = .actNowLow; disposition = .treatNow; blocks = true; target = treatmentTarget; severity = .moderate
+        } else if value < treatmentTarget {
+            // >= readiness minimum but below target: Recommended optimization (pool is swim-safe).
+            state = .recommendedLow; disposition = .treatNow; blocks = false; target = treatmentTarget; severity = .none
         } else if value <= range.upperBound {
             state = .ideal; disposition = .noAction; blocks = false; target = nil; severity = .none
         } else if value < ceiling {
@@ -615,7 +616,7 @@ enum CyanuricAcidPolicy {
         } else if value <= ideal.upperBound {
             state = .ideal; disposition = .noAction; target = nil
         } else if value < diluteBoundary {
-            // Manageable elevated CYA: maintain higher CYA-adjusted FC, avoid stabilized chlorine.
+            // Manageable elevated CYA: track CYA independently and avoid unnecessary stabilized chlorine.
             state = .recommendedHigh; disposition = .monitorOnly; target = nil
         } else {
             state = .actNowHigh; disposition = .dilute; target = nil

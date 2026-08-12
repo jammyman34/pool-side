@@ -11,7 +11,8 @@ final class ExternalReviewExportFidelityTests: XCTestCase {
 
     private func test(pH: Double = 7.8, fc: Double = 3.0, cc: Double = 0.0, cya: Double = 60) -> PoolTest {
         PoolTest(date: Date(), pH: pH, freeChlorine: fc, totalChlorine: fc + cc,
-                 totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: cya, testMethod: .liquidDropKit)
+                 totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: cya, testMethod: .liquidDropKit,
+                 waterClarityAssessment: .clear, visibleAlgaeAssessment: .absent)
     }
 
     private func acid(on t: PoolTest, capped: Bool = false) -> Treatment {
@@ -85,17 +86,17 @@ final class ExternalReviewExportFidelityTests: XCTestCase {
 
     // E. Low FC below readiness minimum → Required verification.
     func testLowFCBelowReadinessRequiresVerification() {
-        let t = test(fc: 3.0, cya: 60) // readiness minimum ≈ 4.5 → below → swim-blocking
+        let t = test(fc: 1.5, cya: 60) // readiness minimum 2.0 → below → swim-blocking
         let cl = chlorine(on: t); t.treatments = [cl]
         XCTAssertEqual(ExportVerificationRequirement.resolve(for: cl, test: t, config: config), .required)
         let actions = ExternalReviewExportBuilder.treatmentActionsSection(chemicalActions: [cl], test: t, config: config)
         XCTAssertTrue(actions.contains("Verification requirement: Required"))
     }
 
-    // F. FC maintenance top-off (above readiness, below target) → discretionary.
+    // F. FC maintenance top-off (above readiness, below 3 ppm target) → discretionary.
     func testFCMaintenanceIsDiscretionary() {
-        let t = test(fc: 5.0, cya: 60) // ≥ readiness 4.5, < target 6.0 → not swim-blocking
-        let cl = chlorine(on: t, delta: 1.0); t.treatments = [cl]
+        let t = test(fc: 2.5, cya: 60) // ≥ readiness 2.0, < target 3.0 → not swim-blocking
+        let cl = chlorine(on: t, delta: 0.5); t.treatments = [cl]
         XCTAssertEqual(ExportVerificationRequirement.resolve(for: cl, test: t, config: config), .discretionary)
     }
 
@@ -194,6 +195,48 @@ final class ExternalReviewExportFidelityTests: XCTestCase {
         }
     }
 
+    func testFC15ExportUsesCorrectedSafetyFloorTargetAndRequiredCheck() {
+        let t = test(pH: 7.5, fc: 1.5, cya: 50)
+        let export = generatedFCExport(for: t)
+
+        XCTAssertTrue(export.contains("V2 state: doNotSwim"))
+        XCTAssertTrue(export.contains("sanitizerAdequacy: fail"))
+        XCTAssertTrue(export.contains("swim-readiness minimum of 2 ppm"))
+        XCTAssertTrue(export.contains("Urgency: Needs Attention"))
+        XCTAssertTrue(export.contains("Expected response: Approximately FC +1.5"))
+        XCTAssertTrue(export.contains("Verification requirement: Required"))
+        XCTAssertTrue(export.contains("Check FC & CC"))
+        XCTAssertFalse(export.contains("CYA-adjusted"))
+        XCTAssertFalse(export.contains("toward 7"))
+    }
+
+    func testFC25ExportUsesRecommendedTopOffWithoutRequiredCheck() {
+        let t = test(pH: 7.5, fc: 2.5, cya: 50)
+        let export = generatedFCExport(for: t)
+
+        XCTAssertTrue(export.contains("V2 state: readyToSwim"))
+        XCTAssertTrue(export.contains("Failed gates: none"))
+        XCTAssertTrue(export.contains("Urgency: Recommended"))
+        XCTAssertTrue(export.contains("Maintenance top-off toward 3 ppm"))
+        XCTAssertTrue(export.contains("Expected response: Approximately FC +0.5"))
+        XCTAssertTrue(export.contains("Verification requirement: Discretionary"))
+        XCTAssertTrue(export.contains("No focused Checks in the active workflow."))
+        XCTAssertFalse(export.contains("CYA-adjusted"))
+        XCTAssertFalse(export.contains("toward 7"))
+    }
+
+    func testFC35ExportHasNoChlorineTreatmentOrCheck() {
+        let t = test(pH: 7.5, fc: 3.5, cya: 50)
+        let export = generatedFCExport(for: t)
+
+        XCTAssertTrue(export.contains("V2 state: readyToSwim"))
+        XCTAssertTrue(export.contains("Failed gates: none"))
+        XCTAssertTrue(export.contains("No actionable treatment steps."))
+        XCTAssertTrue(export.contains("No focused Checks in the active workflow."))
+        XCTAssertFalse(export.contains("Title: Liquid Chlorine"))
+        XCTAssertFalse(export.contains("CYA-adjusted"))
+    }
+
     // MARK: - Preference repricing (§9) — production
 
     @MainActor
@@ -252,5 +295,25 @@ final class ExternalReviewExportFidelityTests: XCTestCase {
         let didChange = vm.repriceUnfinishedTreatmentsForPreferenceChange(in: [t], modelContext: ctx)
         XCTAssertFalse(didChange)
         XCTAssertTrue(t.treatments.isEmpty)
+    }
+
+    private func generatedFCExport(for t: PoolTest) -> String {
+        let templates = ChemistryEngine().validatedTreatments(for: t, config: config, recentHistory: [])
+        let treatments = templates.map { $0.toTreatment(linkedTo: t) }
+        t.treatments = treatments
+        let workflowEngine = TreatmentWorkflowEngine()
+        for treatment in treatments where workflowEngine.requiresFocusedCheck(for: treatment, config: config) {
+            if let check = workflowEngine.makeCheckStep(after: treatment, sortOrder: treatment.sortOrder + 1) {
+                t.treatments.append(check)
+            }
+        }
+        let request = AIRecommendationRequest(currentTest: t, recentHistory: [], poolConfig: config)
+        let assessment = SwimabilityV2Engine().assess(request: request, evaluationDate: Date())
+        return [
+            ExternalReviewExportBuilder.swimReadinessSection(assessment),
+            ExternalReviewExportBuilder.treatmentActionsSection(chemicalActions: t.treatments, test: t, config: config),
+            ExternalReviewExportBuilder.focusedChecksSection(allTreatments: t.treatments, test: t, recentHistory: [], config: config),
+            ExternalReviewExportBuilder.treatmentAuditSection(config: config, test: t, treatments: t.treatments, recentHistory: [], routineNextTestTiming: "Tomorrow")
+        ].joined(separator: "\n")
     }
 }

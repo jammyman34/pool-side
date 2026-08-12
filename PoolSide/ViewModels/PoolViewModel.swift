@@ -604,11 +604,54 @@ final class PoolViewModel {
         // generic completion path. This guard makes it impossible to complete a Check via any treatment caller.
         guard !treatment.isFocusedCheckStep else { return .completed }
 
+        cancelCompletionNotifications(for: treatment)
         treatment.isCompleted = true
         treatment.completedAt = Date()
         treatment.isSkipped = false
         treatment.skippedAt = nil
 
+        let outcome = await scheduleCompletionFollowUp(for: treatment)
+
+        try? modelContext.save()
+        let anchorTest = treatment.poolTest ?? latestTest(in: tests)
+        await replaceNextPoolTestReminder(for: anchorTest, allTests: tests)
+        if let anchorTest {
+            runSwimabilityV2ComparisonAfterTreatmentStateChange(
+                for: anchorTest,
+                recentTests: recentHistory(before: anchorTest, in: tests),
+                context: "Treatment Completed"
+            )
+        }
+        return outcome
+    }
+
+    /// Product substitutions can happen after a reminder was already scheduled. Cancel the old product's
+    /// workflow reminders and, if the treatment is already completed, schedule the current product's one
+    /// applicable follow-up without changing the historical completion timestamp.
+    @MainActor
+    @discardableResult
+    func refreshTreatmentNotificationsAfterProductChange(
+        _ treatment: Treatment,
+        in tests: [PoolTest],
+        modelContext: ModelContext
+    ) async -> TreatmentCompletionOutcome? {
+        cancelCompletionNotifications(for: treatment)
+        guard treatment.isCompleted, !treatment.isSkipped else {
+            try? modelContext.save()
+            return nil
+        }
+
+        let outcome = await scheduleCompletionFollowUp(for: treatment)
+        try? modelContext.save()
+        let anchorTest = treatment.poolTest ?? latestTest(in: tests)
+        await replaceNextPoolTestReminder(for: anchorTest, allTests: tests)
+        return outcome
+    }
+
+    @MainActor
+    private func scheduleCompletionFollowUp(
+        for treatment: Treatment
+    ) async -> TreatmentCompletionOutcome {
         await notifications.checkAuthorizationStatus()
         let remindersEnabled = poolConfig.enableTreatmentStepReminders && notifications.isAuthorized
 
@@ -652,17 +695,25 @@ final class PoolViewModel {
             if identifier != nil { outcome = .waitCompleteScheduled(fireDate: fireDate) }
         }
 
-        try? modelContext.save()
-        let anchorTest = treatment.poolTest ?? latestTest(in: tests)
-        await replaceNextPoolTestReminder(for: anchorTest, allTests: tests)
-        if let anchorTest {
-            runSwimabilityV2ComparisonAfterTreatmentStateChange(
-                for: anchorTest,
-                recentTests: recentHistory(before: anchorTest, in: tests),
-                context: "Treatment Completed"
-            )
-        }
         return outcome
+    }
+
+    @MainActor
+    private func cancelCompletionNotifications(for treatment: Treatment) {
+        notifications.cancel(identifier: treatment.reminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.stepReminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.retestReminderNotificationIdentifier)
+        notifications.cancel(identifier: treatment.checkReminderNotificationIdentifier)
+        treatment.reminderNotificationIdentifier = nil
+        treatment.stepReminderNotificationIdentifier = nil
+        treatment.retestReminderNotificationIdentifier = nil
+        treatment.checkReminderNotificationIdentifier = nil
+
+        guard !treatment.isFocusedCheckStep else { return }
+        for check in treatment.poolTest?.treatments ?? [] where check.isFocusedCheckStep && check.parentTreatmentID == treatment.id {
+            notifications.cancel(identifier: check.checkReminderNotificationIdentifier)
+            check.checkReminderNotificationIdentifier = nil
+        }
     }
 
     /// The uncompleted focused Check that verifies this treatment, if one exists and is still actionable.

@@ -7,8 +7,8 @@ final class TreatmentWorkflowEngineTests: XCTestCase {
         let test = PoolTest(
             date: testDate,
             pH: 7.6,
-            freeChlorine: 4.5,
-            totalChlorine: 4.5,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             totalAlkalinity: 160,
             calciumHardness: 350,
             cyanuricAcid: 60,
@@ -17,8 +17,8 @@ final class TreatmentWorkflowEngineTests: XCTestCase {
         )
         let treatment = Treatment(
             chemicalName: "Liquid Chlorine 12.5%",
-            actionDescription: "Maintenance top-off toward 7 ppm",
-            amount: 0.75,
+            actionDescription: "Maintenance top-off toward 3 ppm",
+            amount: 0.1,
             unit: "gal",
             instructions: "Add chlorine.",
             urgency: .optional,
@@ -49,14 +49,14 @@ final class TreatmentWorkflowEngineTests: XCTestCase {
 
     func testLowFCCheckWaitActivatesFromTreatmentCompletionTime() {
         let completedAt = Date(timeIntervalSince1970: 1_800_100_000)
-        let test = PoolTest(date: completedAt.addingTimeInterval(-600), freeChlorine: 4.0, totalChlorine: 4.0, cyanuricAcid: 60)
+        let test = PoolTest(date: completedAt.addingTimeInterval(-600), freeChlorine: 1.5, totalChlorine: 1.5, cyanuricAcid: 60)
         let treatment = Treatment(
             chemicalName: "Liquid Chlorine 12.5%",
-            actionDescription: "Raise free chlorine toward 7 ppm",
-            amount: 0.75,
+            actionDescription: "Raise free chlorine toward 3 ppm",
+            amount: 0.5,
             unit: "gal",
             instructions: "Add chlorine.",
-            urgency: .recommended,
+            urgency: .needsAttention,
             isCompleted: true,
             completedAt: completedAt,
             targetParameter: "freeChlorine",

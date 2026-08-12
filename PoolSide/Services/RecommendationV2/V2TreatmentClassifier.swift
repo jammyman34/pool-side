@@ -72,7 +72,7 @@ struct V2TreatmentClassifier {
             if isRecoveryChlorine(treatment) || !pendingVerificationGateIdentifiers(for: treatment).isEmpty {
                 return .swimBlocking
             }
-            // ChemistryPolicy authority: a maintenance top-off at/above the CYA-adjusted readiness minimum
+            // ChemistryPolicy authority: a maintenance top-off at/above the readiness minimum
             // does not block swimming, regardless of whether its urgency is Recommended or Optional. The
             // swim-blocking FC cases (below-minimum corrective, recovery) are handled above.
             return .poolCare

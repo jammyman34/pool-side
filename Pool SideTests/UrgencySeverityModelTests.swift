@@ -38,11 +38,11 @@ final class UrgencySeverityModelTests: XCTestCase {
     // MARK: - FC severity (severe / below-readiness / recommended / ideal / above-ceiling / severe-high)
 
     func testFreeChlorineSeverityBands() {
-        let c = ctx(cya: 40)   // readiness 3.0, operating ~4.5–6.5, ceiling 10, severe-high 15
-        XCTAssertEqual(statusUrgency(.freeChlorine, 1.0, c), .immediate,      "below half the readiness minimum")
-        XCTAssertEqual(statusUrgency(.freeChlorine, 2.0, c), .needsAttention, "below readiness, not severe")
-        XCTAssertEqual(statusUrgency(.freeChlorine, 3.5, c), .recommended,    "readiness–operating target")
-        XCTAssertNil(statusUrgency(.freeChlorine, 5.0, c),                    "operating range = ideal")
+        let c = ctx(cya: 40)   // readiness 2.0, target 3.0, ideal 3.0–4.0, ceiling 10, severe-high 15
+        XCTAssertEqual(statusUrgency(.freeChlorine, 0.5, c), .immediate,      "<1 ppm is Act Now")
+        XCTAssertEqual(statusUrgency(.freeChlorine, 1.5, c), .needsAttention, "below readiness, not severe")
+        XCTAssertEqual(statusUrgency(.freeChlorine, 2.5, c), .recommended,    "safe top-off toward target")
+        XCTAssertNil(statusUrgency(.freeChlorine, 3.5, c),                    "ideal range")
         XCTAssertEqual(statusUrgency(.freeChlorine, 8.0, c), .recommended,    "above target below ceiling = informational")
         XCTAssertEqual(statusUrgency(.freeChlorine, 12.0, c), .needsAttention, "above re-entry ceiling, not severe")
         XCTAssertEqual(statusUrgency(.freeChlorine, 16.0, c), .immediate,      "above severe-high threshold (15)")
@@ -86,7 +86,7 @@ final class UrgencySeverityModelTests: XCTestCase {
         let engine = ChemistryEngine()
 
         // FC below readiness (moderate) → "below swim-readiness minimum", never "critically low".
-        let moderate = PoolTest(date: Date(), pH: 7.4, freeChlorine: 2.0, totalChlorine: 2.0,
+        let moderate = PoolTest(date: Date(), pH: 7.4, freeChlorine: 1.5, totalChlorine: 1.5,
                                 totalAlkalinity: 90, calciumHardness: 300, cyanuricAcid: 40, testMethod: .liquidDropKit)
         let moderateDrivers = engine.scoreAssessment(for: moderate, config: config).drivers
         XCTAssertTrue(moderateDrivers.contains { $0.contains("FC") && $0.contains("below swim-readiness minimum") },
@@ -95,7 +95,7 @@ final class UrgencySeverityModelTests: XCTestCase {
                        "Moderate low FC must not read 'critically low'.")
 
         // FC severely low → "critically low".
-        let severe = PoolTest(date: Date(), pH: 7.4, freeChlorine: 1.0, totalChlorine: 1.0,
+        let severe = PoolTest(date: Date(), pH: 7.4, freeChlorine: 0.5, totalChlorine: 0.5,
                               totalAlkalinity: 90, calciumHardness: 300, cyanuricAcid: 40, testMethod: .liquidDropKit)
         let severeDrivers = engine.scoreAssessment(for: severe, config: config).drivers
         XCTAssertTrue(severeDrivers.contains { $0.contains("FC") && $0.contains("critically low") },

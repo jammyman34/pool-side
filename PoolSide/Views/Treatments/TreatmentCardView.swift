@@ -134,6 +134,8 @@ struct TreatmentCardView: View {
         )
         guard let newTemplate = repricedTemplate ?? proposedTemplate else { return }
 
+        let previousProductIdentifier = treatment.productIdentifier
+        let previousChemicalName = treatment.chemicalName
         treatment.chemicalName = newTemplate.chemicalName
         treatment.amount = newTemplate.amount
         treatment.unit = newTemplate.unit
@@ -150,6 +152,16 @@ struct TreatmentCardView: View {
         treatment.wasDoseCapped = newTemplate.wasDoseCapped
 
         try? modelContext.save()
+
+        if previousProductIdentifier != treatment.productIdentifier || previousChemicalName != treatment.chemicalName {
+            Task { @MainActor in
+                _ = await viewModel.refreshTreatmentNotificationsAfterProductChange(
+                    treatment,
+                    in: [test],
+                    modelContext: modelContext
+                )
+            }
+        }
 
         if saveAsDefault {
             viewModel.updateConfig { config in

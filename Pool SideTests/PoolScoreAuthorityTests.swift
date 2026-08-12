@@ -74,12 +74,11 @@ final class PoolScoreAuthorityTests: XCTestCase {
         XCTAssertNotEqual(vm.swimReadinessAssessment(for: t77, in: [t77]).state, .doNotSwim, "pH 7.7 is within the swim range.")
     }
 
-    // F. FC at readiness minimum but below operating target: maintenance penalty, V2 does not block.
+    // F. FC above readiness minimum but below treatment target: maintenance penalty, V2 does not block.
     @MainActor func testFCAtReadinessMaintenanceButV2NotBlocking() {
         let vm = PoolViewModel(); vm.saveConfig(hypochlorite)
-        // CYA 40 → readiness ≈ 3.0, operating target lower ≈ 4.5. FC 3.5 is ≥ readiness, < target.
-        let atReadiness = test(fc: 3.5, cya: 40)
-        XCTAssertEqual(ChemistryPolicy.classify(.freeChlorine, value: 3.5, context: ctx(hypochlorite, atReadiness)).actionState, .recommendedLow)
+        let atReadiness = test(fc: 2.5, cya: 40)
+        XCTAssertEqual(ChemistryPolicy.classify(.freeChlorine, value: 2.5, context: ctx(hypochlorite, atReadiness)).actionState, .recommendedLow)
         XCTAssertLessThan(engine.overallScore(for: atReadiness, config: hypochlorite), engine.overallScore(for: test(fc: 5), config: hypochlorite))
         XCTAssertNotEqual(vm.swimReadinessAssessment(for: atReadiness, in: [atReadiness]).state, .doNotSwim)
     }
@@ -88,7 +87,7 @@ final class PoolScoreAuthorityTests: XCTestCase {
     @MainActor func testFCBelowReadinessStrongerPenaltyAndV2Blocks() {
         let vm = PoolViewModel(); vm.saveConfig(hypochlorite)
         let below = test(fc: 1.0, cya: 40)
-        let atReadiness = test(fc: 3.5, cya: 40)
+        let atReadiness = test(fc: 2.5, cya: 40)
         XCTAssertTrue(ChemistryPolicy.classify(.freeChlorine, value: 1.0, context: ctx(hypochlorite, below)).blocksSwimming)
         XCTAssertLessThan(engine.overallScore(for: below, config: hypochlorite), engine.overallScore(for: atReadiness, config: hypochlorite))
         XCTAssertTrue(vm.swimReadinessAssessment(for: below, in: [below]).swimmingBlocked)

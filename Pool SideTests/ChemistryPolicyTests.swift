@@ -41,50 +41,52 @@ final class ChemistryPolicyTests: XCTestCase {
     // MARK: - FC resolver parity with ChemistryEngine
 
     func testFreeChlorineResolversMatchEngineCoefficients() {
-        XCTAssertEqual(FreeChlorinePolicy.readinessMinimum(cyanuricAcid: 60), 4.5, accuracy: 0.0001)
+        XCTAssertEqual(FreeChlorinePolicy.readinessMinimum(cyanuricAcid: 60), 2.0, accuracy: 0.0001)
         XCTAssertEqual(FreeChlorinePolicy.readinessMinimum(cyanuricAcid: nil), 1.0, accuracy: 0.0001)
         let range = FreeChlorinePolicy.operatingRange(cyanuricAcid: 60)
-        XCTAssertEqual(range.lowerBound, 6.0, accuracy: 0.0001)
-        XCTAssertEqual(range.upperBound, 8.0, accuracy: 0.0001)
-        XCTAssertEqual(FreeChlorinePolicy.shockLevel(cyanuricAcid: 60), 24, accuracy: 0.0001)
-        // Re-entry ceiling is a conservative hook, NOT the shock level.
+        XCTAssertEqual(range.lowerBound, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(range.upperBound, 4.0, accuracy: 0.0001)
+        XCTAssertEqual(FreeChlorinePolicy.shockLevel(cyanuricAcid: 60), 10, accuracy: 0.0001)
+        // Re-entry ceiling remains a separate high-FC policy hook even when its current value matches
+        // the fixed recovery target.
         XCTAssertEqual(FreeChlorinePolicy.reentryCeiling(cyanuricAcid: 60), 10, accuracy: 0.0001)
-        XCTAssertNotEqual(FreeChlorinePolicy.reentryCeiling(cyanuricAcid: 60), FreeChlorinePolicy.shockLevel(cyanuricAcid: 60))
+        XCTAssertEqual(FreeChlorinePolicy.severeHighThreshold(cyanuricAcid: 60), 15, accuracy: 0.0001)
     }
 
     func testFreeChlorineClassificationBands() {
         let ctx = context()
-        // Below readiness minimum but not severe -> Needs Attention, blocks, targets the operating range.
-        let low = ChemistryPolicy.classify(.freeChlorine, value: 4.0, context: ctx)
+        // Below readiness minimum but not severe -> Needs Attention, blocks, targets 3 ppm.
+        let low = ChemistryPolicy.classify(.freeChlorine, value: 1.5, context: ctx)
         XCTAssertEqual(low.actionState, .actNowLow)
         XCTAssertEqual(low.severity, .moderate)
         XCTAssertTrue(low.blocksSwimming)
-        XCTAssertEqual(low.correctionTarget, 6.0)
+        XCTAssertEqual(low.correctionTarget, 3.0)
         XCTAssertEqual(low.derivedUrgency, .needsAttention)
 
-        // Severely low FC (below half the readiness minimum) -> Act Now.
-        let severeLow = ChemistryPolicy.classify(.freeChlorine, value: 1.0, context: ctx)
+        // Severely low FC (<1 ppm) -> Act Now.
+        let severeLow = ChemistryPolicy.classify(.freeChlorine, value: 0.5, context: ctx)
         XCTAssertEqual(severeLow.actionState, .actNowLow)
         XCTAssertEqual(severeLow.severity, .severe)
         XCTAssertEqual(severeLow.derivedUrgency, .immediate)
 
-        // At/above readiness minimum but below operating target -> Recommended (NOT Optional), does not block.
-        for fc in [4.5, 5.0] {
+        // At/above readiness minimum but below 3 ppm target -> Recommended, does not block.
+        for fc in [2.0, 2.5] {
             let rec = ChemistryPolicy.classify(.freeChlorine, value: fc, context: ctx)
             XCTAssertEqual(rec.actionState, .recommendedLow, "FC \(fc)")
             XCTAssertFalse(rec.blocksSwimming, "FC \(fc)")
             XCTAssertEqual(rec.derivedUrgency, .recommended, "FC \(fc) must be Recommended, not Optional")
             XCTAssertEqual(rec.disposition, .treatNow, "FC \(fc)")
+            XCTAssertEqual(rec.correctionTarget, 3.0, "FC \(fc)")
         }
 
         // Within operating range -> ideal.
-        let ideal = ChemistryPolicy.classify(.freeChlorine, value: 7.0, context: ctx)
+        let ideal = ChemistryPolicy.classify(.freeChlorine, value: 3.5, context: ctx)
         XCTAssertEqual(ideal.actionState, .ideal)
         XCTAssertNil(ideal.derivedUrgency)
         XCTAssertFalse(ideal.blocksSwimming)
 
         // Above operating range but below re-entry ceiling -> allow natural decay, no chemical, no block.
-        let high = ChemistryPolicy.classify(.freeChlorine, value: 9.0, context: ctx)
+        let high = ChemistryPolicy.classify(.freeChlorine, value: 4.5, context: ctx)
         XCTAssertEqual(high.actionState, .recommendedHigh)
         XCTAssertEqual(high.disposition, .allowNaturalCorrection)
         XCTAssertFalse(high.blocksSwimming)

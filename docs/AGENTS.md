@@ -136,7 +136,7 @@ Do not change these without explicit product/domain approval and corresponding t
 - pH operating range: 7.2–7.6.
 - pH swim-readiness range: 7.0–7.8 inclusive.
 - pH urgency bands: <6.8 Act Now; 6.8–<7.0 Needs Attention; >7.8–8.0 Needs Attention; >8.0 Act Now.
-- FC thresholds are CYA-aware resolvers. Below readiness but not severe is Needs Attention; severe low is Act Now; readiness-to-operating-target is Recommended.
+- FC with CYA present uses a 2 ppm swim-readiness floor, 2–4 ppm operating band, 3 ppm treatment target, and 3–4 ppm no-action range. FC <1 ppm is Act Now; 1–<2 is Needs Attention; 2–<3 is Recommended; CYA is managed independently.
 - FC high severity uses an explicit severe-high resolver, not `shockLevel`; current severe-high policy is `max(15 ppm, reentryCeiling)`.
 - CC ≤0.5 is readiness-acceptable; >0.5–1.0 Needs Attention; >1.0 Act Now, subject to measurement resolution and visual/odor escalation.
 - TA, CH, CYA, and salt do not directly block swimming; they may still become urgent for pool/surface/equipment protection.

@@ -291,7 +291,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let removal = try XCTUnwrap(treatments.first { $0.chemicalName == "Remove Chlorine Source" })
 
         XCTAssertEqual(removal.amount, 0)
-        XCTAssertTrue(removal.actionDescription.contains("CYA-adjusted recovery level"))
+        XCTAssertTrue(removal.actionDescription.contains("swim re-entry ceiling"))
     }
 
     func testPoolCareBakingSodaTimingDoesNotBlockSwimming() throws {
@@ -405,8 +405,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
 
         let modest = ChemistryTestFixtures.currentPool(
             pH: 7.6,
-            freeChlorine: 3.7,
-            totalChlorine: 3.7,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             totalAlkalinity: 100,
             cyanuricAcid: 40
         )
@@ -611,8 +611,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config(volume: 10_000, chlorine: .liquidChlorine12_5)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.5,
-            freeChlorine: 3.5,
-            totalChlorine: 3.5,
+            freeChlorine: 1.5,
+            totalChlorine: 1.5,
             totalAlkalinity: 100,
             calciumHardness: 330,
             cyanuricAcid: 60
@@ -621,10 +621,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let calHypo = try XCTUnwrap(engine.repricedTreatmentTemplate(from: chlorine, test: test, productID: .calHypoGranules, config: config))
         let dichlor = try XCTUnwrap(engine.repricedTreatmentTemplate(from: chlorine, test: test, productID: .dichlorGranules, config: config))
 
-        XCTAssertEqual(chlorine.expectedDelta, 3.5, accuracy: 0.001)
-        XCTAssertEqual(calHypo.amount, 0.44, accuracy: 0.001)
+        XCTAssertEqual(chlorine.expectedDelta, 1.5, accuracy: 0.001)
+        XCTAssertEqual(calHypo.amount, 0.19, accuracy: 0.001)
         XCTAssertEqual(calHypo.unit, "lbs")
-        XCTAssertEqual(dichlor.amount, 0.55, accuracy: 0.001)
+        XCTAssertEqual(dichlor.amount, 0.23, accuracy: 0.001)
         XCTAssertEqual(dichlor.unit, "lbs")
     }
 
@@ -632,8 +632,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config(volume: 10_000, chlorine: .tablets)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.5,
-            freeChlorine: 3.5,
-            totalChlorine: 3.5,
+            freeChlorine: 0.5,
+            totalChlorine: 0.5,
             totalAlkalinity: 100,
             calciumHardness: 330,
             cyanuricAcid: 30
@@ -838,7 +838,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
 
         XCTAssertEqual(chlorineTreatments.count, 1)
         XCTAssertEqual(recovery.productIdentifier, ChemicalProductID.liquidChlorine12_5.rawValue)
-        XCTAssertEqual(recovery.amount, 6)
+        XCTAssertEqual(recovery.amount, 2.5)
         XCTAssertTrue(recovery.actionDescription.contains("low sanitizer"))
         XCTAssertTrue(recovery.actionDescription.contains("algae recovery"))
         XCTAssertTrue(recovery.actionDescription.contains("elevated combined chlorine"))
@@ -900,7 +900,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let cloudyActions = response.treatments.filter { $0.chemicalName == "Keep Filtering Cloudy Water" }
 
         XCTAssertEqual(chlorineTreatments.count, 1, "Overlapping low-FC, CC, algae, and cloudy-water signals should reconcile to one current chlorine dose.")
-        XCTAssertEqual(chlorineTreatments.first?.amount, 6)
+        XCTAssertEqual(chlorineTreatments.first?.amount, 2.5)
         XCTAssertEqual(chlorineTreatments.first?.productID, .liquidChlorine12_5)
         XCTAssertTrue(chlorineTreatments.first?.actionDescription.contains("low sanitizer") ?? false)
         XCTAssertTrue(chlorineTreatments.first?.actionDescription.contains("algae recovery") ?? false)
@@ -933,8 +933,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config()
         let routineTest = ChemistryTestFixtures.currentPool(
             pH: 7.5,
-            freeChlorine: 4.5,
-            totalChlorine: 5.0,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             totalAlkalinity: 100,
             calciumHardness: 330,
             cyanuricAcid: 60
@@ -1003,8 +1003,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.6,
-            freeChlorine: 4.5,
-            totalChlorine: 4.5,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             totalAlkalinity: 170,
             calciumHardness: 330,
             cyanuricAcid: 60
@@ -1044,8 +1044,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.5,
-            freeChlorine: 4.0,
-            totalChlorine: 4.0,
+            freeChlorine: 1.5,
+            totalChlorine: 1.5,
             totalAlkalinity: 100,
             calciumHardness: 330,
             cyanuricAcid: 60
@@ -1071,24 +1071,24 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
 
         let justBelowReadiness = try chlorineTreatment(
-            freeChlorine: 3.5,
-            totalChlorine: 3.5,
+            freeChlorine: 1.5,
+            totalChlorine: 1.5,
             cyanuricAcid: 50,
             config: config
         )
         XCTAssertEqual(justBelowReadiness.urgency, .needsAttention)
 
         let severeLow = try chlorineTreatment(
-            freeChlorine: 1.5,
-            totalChlorine: 1.5,
+            freeChlorine: 0.5,
+            totalChlorine: 0.5,
             cyanuricAcid: 50,
             config: config
         )
         XCTAssertEqual(severeLow.urgency, .immediate)
 
         let swimSafeBelowOperatingTarget = try chlorineTreatment(
-            freeChlorine: 4.0,
-            totalChlorine: 4.0,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             cyanuricAcid: 50,
             config: config
         )
@@ -1097,8 +1097,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
 
         let operatingRangeTest = ChemistryTestFixtures.currentPool(
             pH: 7.5,
-            freeChlorine: 5.5,
-            totalChlorine: 5.5,
+            freeChlorine: 3.5,
+            totalChlorine: 3.5,
             totalAlkalinity: 90,
             calciumHardness: 330,
             cyanuricAcid: 50
@@ -1111,8 +1111,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let config = ChemistryTestFixtures.config(chlorine: .liquidChlorine12_5)
         let test = ChemistryTestFixtures.currentPool(
             pH: 7.5,
-            freeChlorine: 4.5,
-            totalChlorine: 4.5,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             totalAlkalinity: 100,
             calciumHardness: 330,
             cyanuricAcid: 60
@@ -1158,7 +1158,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let alkalinityAction = try XCTUnwrap(treatments.first { $0.targetParameter == "totalAlkalinity" && $0.amount > 0 })
         XCTAssertEqual(alkalinityAction.urgency, .recommended)
         XCTAssertFalse(treatments.contains { $0.chemicalName == "Manage Elevated CYA" })
-        XCTAssertTrue(treatments.contains { $0.chemicalName == "Maintain Higher FC for Current CYA" })
+        XCTAssertTrue(treatments.contains { $0.chemicalName == "Monitor Cyanuric Acid" })
         XCTAssertFalse(treatments.contains { $0.chemicalName == "Possible Dilution" })
         XCTAssertFalse(treatments.contains { $0.instructions.localizedCaseInsensitiveContains("salt") })
     }
@@ -1245,8 +1245,8 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let completedAt = Date().addingTimeInterval(-1_800)
         let current = ChemistryTestFixtures.currentPool(
             pH: 7.6,
-            freeChlorine: 4,
-            totalChlorine: 4,
+            freeChlorine: 2.5,
+            totalChlorine: 2.5,
             totalAlkalinity: 100,
             cyanuricAcid: 60
         )

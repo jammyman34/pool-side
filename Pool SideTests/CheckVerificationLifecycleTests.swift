@@ -9,7 +9,9 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
     var isAuthorized: Bool
     private(set) var scheduledCheckIDs: [UUID] = []
     private(set) var scheduledStepTreatmentIDs: [UUID] = []
+    private(set) var scheduledWaitCompleteNames: [String] = []
     private(set) var cancelledIdentifiers: [String] = []
+    private(set) var activeIdentifiers: Set<String> = []
 
     init(isAuthorized: Bool = true) {
         self.isAuthorized = isAuthorized
@@ -19,25 +21,33 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
 
     func scheduleCheckReminder(checkID: UUID, parameters: [String], at date: Date) async -> String? {
         guard isAuthorized else { return nil }
+        let identifier = NotificationService.checkReminderIdentifier(for: checkID)
         scheduledCheckIDs.append(checkID)
-        return NotificationService.checkReminderIdentifier(for: checkID)
+        activeIdentifiers.insert(identifier)
+        return identifier
     }
 
     func scheduleTreatmentStepReminder(treatmentID: UUID, nextTreatmentName: String, afterMinutes: Int) async -> String? {
         guard isAuthorized else { return nil }
+        let identifier = "treatment-step-\(treatmentID.uuidString)"
         scheduledStepTreatmentIDs.append(treatmentID)
-        return "treatment-step-\(treatmentID.uuidString)"
+        activeIdentifiers.insert(identifier)
+        return identifier
     }
 
     private(set) var scheduledWaitCompleteTreatmentIDs: [UUID] = []
     func scheduleWaitCompleteReminder(treatmentID: UUID, treatmentName: String, afterMinutes: Int) async -> String? {
         guard isAuthorized else { return nil }
+        let identifier = "treatment-wait-\(treatmentID.uuidString)"
         scheduledWaitCompleteTreatmentIDs.append(treatmentID)
-        return "treatment-wait-\(treatmentID.uuidString)"
+        scheduledWaitCompleteNames.append(treatmentName)
+        activeIdentifiers.insert(identifier)
+        return identifier
     }
 
     func cancel(identifier: String) {
         cancelledIdentifiers.append(identifier)
+        activeIdentifiers.remove(identifier)
     }
 
     private(set) var didCancelNextPoolTest = false
@@ -64,7 +74,10 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
             treatment.checkReminderNotificationIdentifier
         ]
         .compactMap { $0 }
-        .forEach { cancelledIdentifiers.append($0) }
+        .forEach {
+            cancelledIdentifiers.append($0)
+            activeIdentifiers.remove($0)
+        }
         treatment.reminderNotificationIdentifier = nil
         treatment.stepReminderNotificationIdentifier = nil
         treatment.retestReminderNotificationIdentifier = nil
@@ -103,11 +116,11 @@ final class CheckVerificationLifecycleTests: XCTestCase {
         )
         let treatment = Treatment(
             chemicalName: "Liquid Chlorine 12.5%",
-            actionDescription: "Raise free chlorine toward 7 ppm",
-            amount: 0.75,
+            actionDescription: "Raise free chlorine toward 3 ppm",
+            amount: 0.5,
             unit: "gal",
             instructions: "Add chlorine.",
-            urgency: .recommended,
+            urgency: .needsAttention,
             targetParameter: "freeChlorine",
             sortOrder: 1,
             effectDelayHours: 1,
@@ -141,6 +154,13 @@ final class CheckVerificationLifecycleTests: XCTestCase {
         XCTAssertNil(treatment.retestReminderNotificationIdentifier, "Treatment-owned retest notifications are removed.")
         XCTAssertNil(treatment.stepReminderNotificationIdentifier, "No next-step reminder when the only successor is the Check.")
         XCTAssertTrue(spy.scheduledStepTreatmentIDs.isEmpty)
+        let firstIdentifier = check.checkReminderNotificationIdentifier
+        await viewModel.completeTreatment(treatment, in: [test], modelContext: context)
+
+        XCTAssertEqual(spy.scheduledCheckIDs, [check.id, check.id])
+        XCTAssertTrue(spy.didCancel(firstIdentifier), "Re-completing cancels the prior Check reminder before scheduling the current one.")
+        XCTAssertEqual(spy.activeIdentifiers, Set([NotificationService.checkReminderIdentifier(for: check.id)]))
+        XCTAssertTrue(spy.scheduledWaitCompleteTreatmentIDs.isEmpty)
     }
 
     // §4 / §22 — Completing the focused Check cancels its own verification notification.
@@ -304,11 +324,11 @@ final class CheckVerificationLifecycleTests: XCTestCase {
         )
         let parent = Treatment(
             chemicalName: "Liquid Chlorine 12.5%",
-            actionDescription: "Raise free chlorine toward 7 ppm",
-            amount: 0.75,
+            actionDescription: "Raise free chlorine toward 3 ppm",
+            amount: 0.5,
             unit: "gal",
             instructions: "Add chlorine.",
-            urgency: .recommended,
+            urgency: .needsAttention,
             isCompleted: true,
             completedAt: parentCompletedAt,
             targetParameter: "freeChlorine",

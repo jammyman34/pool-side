@@ -1048,10 +1048,10 @@ struct TreatmentPlanSheet: View {
         let fcRange = engine.freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
 
         if test.freeChlorine < fcRange.lowerBound {
-            factors.append("FC is below the CYA-adjusted target.")
+            factors.append("FC is below the operating target.")
         }
         if test.cyanuricAcid > 50 && test.cyanuricAcid < 90 {
-            factors.append("CYA is elevated but manageable, so FC must run higher.")
+            factors.append("CYA is elevated but manageable and should be tracked independently.")
         }
         let hasAcidTreatment = treatmentActions.contains(where: { $0.isAcidTreatment })
         if test.totalAlkalinity > 140 && (7.2...7.8).contains(test.pH) && !hasAcidTreatment {
@@ -1401,7 +1401,7 @@ struct TreatmentPlanSheet: View {
         let fcRange = engine.freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
 
         if test.freeChlorine < fcRange.lowerBound {
-            drivers.append("FC below CYA-adjusted target")
+            drivers.append("FC below operating target")
         }
         if !(7.2...7.8).contains(test.pH) {
             drivers.append("pH outside safe range")
@@ -1506,7 +1506,7 @@ struct TreatmentPlanSheet: View {
             return "pH drift, scaling signs, and whether TA remains elevated on future tests"
         }
         if treatment.targetParameter == "cyanuricAcid" {
-            return "CYA trend and whether FC is being maintained at the higher CYA-adjusted target"
+            return "CYA trend and whether stabilizer is still in the manageable range"
         }
         if treatment.targetParameter == "freeChlorine" {
             return "FC holding behavior and signs of increased chlorine demand"
@@ -2566,7 +2566,7 @@ enum WhyThisPlanNarrative {
                 lines.append("Based on the data logged, your pool does not need an added treatment step right now.")
             }
         } else if test.freeChlorine < fcRange.lowerBound {
-            lines.append("Your pool is mostly stable, but free chlorine is below the target for your current CYA.")
+            lines.append("Your pool is mostly stable, but free chlorine is below the operating target.")
         } else {
             lines.append("Based on the data logged, this plan prioritizes the items most likely to affect pool safety and comfort.")
         }

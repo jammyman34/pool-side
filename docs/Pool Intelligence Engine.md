@@ -306,17 +306,18 @@ Core gates include:
 
 ## Sanitizer Adequacy
 
-FC is evaluated relative to CYA rather than against a single universal FC number.
+FC uses Pool Side's canonical residential chlorine policy rather than a CYA-percentage target.
 
-The engine distinguishes between:
+For conventional chlorine pools with CYA present:
 
-- minimum observed-readiness sanitizer
-- preferred operating target
-- maintenance target
+- FC below 1 ppm is Act Now and not swim-ready.
+- FC from 1 to below 2 ppm is Needs Attention and not swim-ready.
+- FC from 2 to below 3 ppm is swim-ready, but a Recommended maintenance top-off may be generated.
+- FC from 3 to 4 ppm is in the no-action range.
 
-Being below the preferred target does not automatically mean the pool is unsafe.
+Pool Side's FC operating band is 2-4 ppm, with a 3 ppm treatment target and 3-4 ppm no-action range. CYA remains important chemistry, but it no longer dynamically raises FC swim-readiness, operating, or treatment targets.
 
-Being below the readiness minimum does.
+Being below the 2 ppm readiness minimum blocks swimming. Being below the 3 ppm treatment target does not automatically mean the pool is unsafe.
 
 ---
 
@@ -409,30 +410,29 @@ The engine should recommend only actions that are justified by current evidence.
 
 # Chlorine and CYA
 
-FC requirements are interpreted in relation to CYA.
+CYA is managed as its own chemistry condition.
 
-Higher CYA requires higher operating FC.
+FC targets are not raised dynamically from a CYA percentage. For conventional chlorine pools with CYA present, Pool Side uses:
 
-The engine distinguishes between:
+- 2 ppm swim-readiness floor
+- 2-4 ppm operating band
+- 3 ppm treatment target
+- 3–4 ppm no-action range
 
-- unsafe sanitizer deficiency
-- maintenance-level deficiency
-- acceptable FC
-- recovery conditions
+The engine still distinguishes between unsafe sanitizer deficiency, maintenance-level deficiency, acceptable FC, and recovery conditions.
 
-A maintenance top-off can therefore be optional while a lower FC value at the same CYA may require corrective treatment and post-treatment verification.
+A Recommended maintenance top-off can exist while the pool is already swim-ready. Lower FC below the safety floor requires corrective treatment and post-treatment verification.
 
 ---
 
-# Optional Chlorine Maintenance
+# Recommended Chlorine Maintenance
 
-When FC is above the readiness minimum but below the preferred operating target, the engine may generate an optional chlorine top-off.
+When FC is at or above the 2 ppm readiness minimum but below the 3 ppm treatment target, the engine may generate a Recommended chlorine top-off.
 
-An optional top-off:
+A Recommended top-off:
 
 - does not itself block swimming
 - does not create mandatory verification
-- may offer an optional FC/CC Check
 - should not transform a healthy pool into a mandatory treatment workflow
 
 Completing optional maintenance must not incorrectly extend the next routine testing interval.
@@ -545,7 +545,7 @@ The engine should solve the highest-priority chemistry problem without creating 
 
 # Cyanuric Acid
 
-CYA affects both sanitizer requirements and treatment selection.
+CYA affects stabilizer management and treatment selection.
 
 Low CYA may justify stabilizer.
 
@@ -553,7 +553,7 @@ High CYA should suppress additional stabilizer.
 
 Very high CYA may justify partial water replacement.
 
-High CYA plus low FC still requires sanitizer readiness to be addressed.
+High CYA plus FC below 2 ppm still requires sanitizer readiness to be addressed, but CYA no longer raises the FC readiness or treatment target.
 
 Stabilizer treatment should be verified after the appropriate delay before additional stabilizer is recommended.
 
@@ -822,7 +822,7 @@ The Pool Intelligence Engine is protected by a production-oriented scenario cata
 
 Validation covers combinations and boundaries including:
 
-- FC/CYA readiness
+- FC readiness and CYA management
 - combined chlorine
 - pH
 - acid products

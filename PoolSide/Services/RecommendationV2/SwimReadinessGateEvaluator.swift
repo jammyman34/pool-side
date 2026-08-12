@@ -3,7 +3,7 @@ import Foundation
 struct SwimReadinessGateEvaluator {
     /// Chemistry swim gates consume ChemistryPolicy so there is one authority for chemistry thresholds:
     /// - pH swim range: ChemistryPolicy.PHPolicy (7.0–7.8 inclusive; operating range 7.2–7.6 is separate).
-    /// - FC low: ChemistryPolicy.FreeChlorinePolicy.readinessMinimum(CYA); FC high: reentryCeiling(CYA).
+    /// - FC low: ChemistryPolicy.FreeChlorinePolicy.readinessMinimum(CYA); FC high: reentryCeiling.
     /// - CC: ChemistryPolicy.CombinedChlorinePolicy.readinessThreshold.
     private let combinedChlorineReadinessMaximum = CombinedChlorinePolicy.readinessThreshold
 
@@ -41,7 +41,7 @@ struct SwimReadinessGateEvaluator {
             return result(
                 .sanitizerAdequacy,
                 .unknown,
-                "CYA was not recorded, so the FC minimum cannot be interpreted for this pool.",
+                "CYA was not recorded, so the FC safety floor cannot be interpreted for this pool.",
                 blocksSwimming: true,
                 requiresTesting: true
             )
@@ -52,20 +52,20 @@ struct SwimReadinessGateEvaluator {
             return result(
                 .sanitizerAdequacy,
                 .fail,
-                "FC \(format(freeChlorine)) ppm is below the CYA-adjusted observed-readiness minimum of \(format(minimum)) ppm.",
+                "FC \(format(freeChlorine)) ppm is below the swim-readiness minimum of \(format(minimum)) ppm.",
                 blocksSwimming: true,
                 requiresTesting: true
             )
         }
 
-        // High-FC re-entry: above the CYA-resolved re-entry ceiling, hold swimming until FC decays.
+        // High-FC re-entry: above the policy re-entry ceiling, hold swimming until FC decays.
         // Uses the ChemistryPolicy resolver rather than a hard-coded number.
         let ceiling = FreeChlorinePolicy.reentryCeiling(cyanuricAcid: cyanuricAcid)
         if freeChlorine > ceiling {
             return result(
                 .sanitizerAdequacy,
                 .fail,
-                "FC \(format(freeChlorine)) ppm is above the CYA-adjusted re-entry ceiling of \(format(ceiling)) ppm; let it decay before swimming.",
+                "FC \(format(freeChlorine)) ppm is above the re-entry ceiling of \(format(ceiling)) ppm; let it decay before swimming.",
                 blocksSwimming: true,
                 requiresTesting: false
             )
@@ -74,7 +74,7 @@ struct SwimReadinessGateEvaluator {
         return result(
             .sanitizerAdequacy,
             .pass,
-            "FC \(format(freeChlorine)) ppm meets the CYA-adjusted observed-readiness minimum of \(format(minimum)) ppm.",
+            "FC \(format(freeChlorine)) ppm meets the swim-readiness minimum of \(format(minimum)) ppm.",
             blocksSwimming: false,
             requiresTesting: false
         )

@@ -403,7 +403,7 @@ struct InsightsView: View {
 
         return PersonalityInsight(
             title: "Low Chlorine Demand",
-            message: "Recent logs suggest sanitizer demand is predictable when FC is kept near the CYA-adjusted target.",
+            message: "Recent logs suggest sanitizer demand is predictable when FC is kept in the operating range.",
             icon: "checkmark.seal.fill",
             color: PoolColor.statusIdeal
         )
@@ -480,7 +480,7 @@ struct InsightsView: View {
         if latest.cyanuricAcid > 50 {
             return PersonalityInsight(
                 title: "CYA Elevated but Managed",
-                message: "CYA is elevated, so FC targets remain higher. This is a watch item unless FC is not being maintained.",
+                message: "CYA is elevated and should be tracked independently. This is a watch item unless stabilizer continues rising.",
                 icon: "shield.lefthalf.filled",
                 color: PoolColor.statusSlight
             )
@@ -551,7 +551,7 @@ struct InsightsView: View {
         }
 
         if latest.cyanuricAcid > 50 {
-            messages.append("CYA is elevated, so FC targets remain higher.")
+            messages.append("CYA is elevated and should be tracked independently.")
         }
 
         if conditions.chlorineDemandContribution >= 3 {
@@ -611,7 +611,7 @@ struct InsightsView: View {
         let delta = latest.score - previous.score
         if delta <= -8 {
             if isFreeChlorineLow(latestTest) {
-                return "Score dropped mostly because FC fell below the CYA-adjusted target."
+                return "Score dropped mostly because FC fell below the operating target."
             }
             if latestTest.pH < 7.2 || latestTest.pH > 7.8 {
                 return "Score dropped mostly because pH moved outside the safe operating range."
@@ -817,9 +817,9 @@ struct InsightsView: View {
             if test.resolvedPoolConditions.chlorineDemandContribution >= 3 {
                 return "Low, with recent conditions that may increase demand."
             }
-            return "Below the CYA-adjusted target."
+            return "Below the operating target."
         }
-        return "Maintained near the CYA-adjusted target."
+        return "Maintained near the operating target."
     }
 
     private func pHInterpretation(_ test: PoolTest) -> String {

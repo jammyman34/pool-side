@@ -87,11 +87,12 @@ final class FocusedCheckOutcomeTests: XCTestCase {
         XCTAssertTrue(result.nextAction.localizedCaseInsensitiveContains("ready for swimming"))
     }
 
-    // G. FC/CC multi-parameter Check: FC resolved, CC still high → mixed result, not "all in range".
+    // G. FC/CC multi-parameter Check: FC resolved under the corrected 3-4 ppm no-action range,
+    // CC still high -> mixed result, not "all in range".
     func testMultiParameterCheckMixedResult() {
-        let post = test(fc: 7.0, cc: 1.0)
+        let post = test(fc: 3.5, cc: 1.0)
         let chlorine = followUp(target: "freeChlorine", on: post)
-        let fcOutcome = evaluator.outcome(parameter: "freeChlorine", priorValue: 5.0, measuredValue: 7.0,
+        let fcOutcome = evaluator.outcome(parameter: "freeChlorine", priorValue: 1.5, measuredValue: 3.5,
                                           postCheckTest: post, postCheckTreatments: [chlorine], config: PoolConfiguration())
         let ccOutcome = evaluator.outcome(parameter: "combinedChlorine", priorValue: 1.5, measuredValue: 1.0,
                                           postCheckTest: post, postCheckTreatments: [chlorine], config: PoolConfiguration())
@@ -105,15 +106,15 @@ final class FocusedCheckOutcomeTests: XCTestCase {
     // H. Changes below the method's measurement resolution are not described as improvement.
     func testSubResolutionChangeIsNotImprovement() {
         let config = PoolConfiguration()
-        // FAS-DPD 10 mL resolves 0.5 ppm. Prior 5.0 → 5.2 is unobservable; 5.0 → 5.6 is observable.
-        let unobservablePost = test(fc: 5.2, sample: .tenMl)
-        let observablePost = test(fc: 5.6, sample: .tenMl)
+        // FAS-DPD 10 mL resolves 0.5 ppm. Prior 2.0 -> 2.2 is unobservable; 2.0 -> 2.6 is observable.
+        let unobservablePost = test(fc: 2.2, sample: .tenMl)
+        let observablePost = test(fc: 2.6, sample: .tenMl)
         let chlorineU = followUp(target: "freeChlorine", on: unobservablePost)
         let chlorineO = followUp(target: "freeChlorine", on: observablePost)
 
-        let unobservable = evaluator.outcome(parameter: "freeChlorine", priorValue: 5.0, measuredValue: 5.2,
+        let unobservable = evaluator.outcome(parameter: "freeChlorine", priorValue: 2.0, measuredValue: 2.2,
                                              postCheckTest: unobservablePost, postCheckTreatments: [chlorineU], config: config)
-        let observable = evaluator.outcome(parameter: "freeChlorine", priorValue: 5.0, measuredValue: 5.6,
+        let observable = evaluator.outcome(parameter: "freeChlorine", priorValue: 2.0, measuredValue: 2.6,
                                            postCheckTest: observablePost, postCheckTreatments: [chlorineO], config: config)
 
         XCTAssertEqual(unobservable.kind, .stillOutOfRange, "A 0.2 ppm change is below FAS-DPD resolution.")

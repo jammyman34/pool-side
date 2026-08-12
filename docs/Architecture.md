@@ -221,7 +221,7 @@ ChemistryEngine is responsible for interpreting pool chemistry.
 Its responsibilities include:
 
 - chemical evaluation
-- CYA-adjusted chlorine requirements
+- free-chlorine policy classification and treatment targeting
 - treatment generation
 - treatment suppression
 - product selection
