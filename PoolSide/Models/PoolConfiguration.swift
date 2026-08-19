@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Pool configuration stored in UserDefaults via AppStorage.
 /// Not a SwiftData model — settings are single-instance, not queried.
@@ -124,6 +125,12 @@ struct PoolConfiguration: Codable, Equatable {
     static var current: PoolConfiguration {
         get { persisted ?? recoveredEquipmentSettings(in: PoolConfiguration()) }
         set {
+            // TEMP DIAGNOSTIC — remove before App Store submission. Every write to the persisted
+            // poolConfiguration funnels through this setter, so this is the single choke point that can
+            // catch a stale/default full-struct write clobbering the user's saved preferences. See
+            // `logConfigurationWrite(_:)` for what is captured and how to read it.
+            logConfigurationWrite(newValue)
+
             let data = try? JSONEncoder().encode(newValue)
             UserDefaults.standard.set(data, forKey: defaultsKey)
             if newValue.hasCover {
@@ -164,8 +171,67 @@ struct PoolConfiguration: Codable, Equatable {
         return recovered
     }
 
+    // MARK: - TEMP DIAGNOSTIC (remove before App Store submission)
+
+    /// Traces every write to the persisted poolConfiguration so a stale/default overwrite of the user's
+    /// saved preferences can be caught on the next reproduction. Logs via the unified logging system so it
+    /// is retrievable from a physical device (Console.app or `log collect`) in any build configuration,
+    /// not only when attached to Xcode.
+    ///
+    /// Reads with subsystem "PoolSide.ConfigDiagnostics", category "poolConfiguration". Flags the offending
+    /// signature explicitly: a previously populated, non-default config being overwritten with struct
+    /// defaults (Cal-Hypo / Muriatic / Test Strips).
+    private static let diagnosticsLog = Logger(subsystem: "PoolSide.ConfigDiagnostics", category: "poolConfiguration")
+
+    private static func configFieldsDescription(_ config: PoolConfiguration) -> String {
+        "\(config.chlorinePreference.rawValue) / \(config.pHDecreaserPreference.rawValue) / \(config.testMethod.rawValue)"
+    }
+
+    private static func isDefaultPreferenceTriple(_ config: PoolConfiguration) -> Bool {
+        let defaults = PoolConfiguration()
+        return config.chlorinePreference == defaults.chlorinePreference
+            && config.pHDecreaserPreference == defaults.pHDecreaserPreference
+            && config.testMethod == defaults.testMethod
+    }
+
+    private static func logConfigurationWrite(_ newValue: PoolConfiguration) {
+        let existingData = UserDefaults.standard.data(forKey: defaultsKey)
+        let persistedExistedBefore = existingData != nil
+        let before = existingData.flatMap { try? JSONDecoder().decode(PoolConfiguration.self, from: $0) }
+
+        let beforeDescription = before.map(configFieldsDescription) ?? "nil"
+        let afterDescription = configFieldsDescription(newValue)
+        let beforeWasNonDefault = before.map { !isDefaultPreferenceTriple($0) } ?? false
+        let afterIsDefault = isDefaultPreferenceTriple(newValue)
+        let suspectedReset = persistedExistedBefore && beforeWasNonDefault && afterIsDefault
+
+        // Frames 0/1 are this function + the setter; the rest identify the actual caller/reason.
+        let caller = Thread.callStackSymbols.dropFirst(2).prefix(10).joined(separator: " | ")
+
+        if suspectedReset {
+            diagnosticsLog.fault("""
+            ⚠️ SUSPECTED PREFERENCE RESET — writing struct defaults over a populated config.
+            persistedExistedBefore=\(persistedExistedBefore, privacy: .public) \
+            before=\(beforeDescription, privacy: .public) after=\(afterDescription, privacy: .public)
+            caller=\(caller, privacy: .public)
+            """)
+        } else {
+            diagnosticsLog.notice("""
+            [CONFIG-WRITE] persistedExistedBefore=\(persistedExistedBefore, privacy: .public) \
+            before=\(beforeDescription, privacy: .public) after=\(afterDescription, privacy: .public)
+            caller=\(caller, privacy: .public)
+            """)
+        }
+    }
+
     /// Removes all saved configuration (sign out)
     static func clearCurrent() {
+        // TEMP DIAGNOSTIC — remove before App Store submission. Records any removal of the persisted config
+        // so an unexpected clear (which would drop the user back to defaults/first-use) is visible.
+        diagnosticsLog.fault("""
+        ⚠️ clearCurrent() called — removing persisted poolConfiguration.
+        caller=\(Thread.callStackSymbols.dropFirst(1).prefix(10).joined(separator: " | "), privacy: .public)
+        """)
         UserDefaults.standard.removeObject(forKey: defaultsKey)
         UserDefaults.standard.removeObject(forKey: hasCoverBackupKey)
         UserDefaults.standard.removeObject(forKey: usesRoboticCleanerBackupKey)

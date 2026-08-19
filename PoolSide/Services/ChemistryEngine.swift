@@ -448,6 +448,7 @@ struct ChemistryEngine {
         penalty += combinedChlorinePenalty(for: test)
         penalty += visualIndicatorPenalty(for: test)
         penalty += poolConditionsPenalty(for: test)
+        penalty += combinedScalingRiskPenalty(for: test, config: config)
 
         var score = max(0, min(100, 100 - penalty))
         if let floor = scoreFloor(for: test, previousTest: previousTest, recentHistory: recentHistory, config: config) {
@@ -679,7 +680,10 @@ struct ChemistryEngine {
         previousTest: PoolTest?,
         config: PoolConfiguration
     ) -> Bool {
-        guard config.testMethod == .testStrips || test.testMethod == .testStrips else { return false }
+        // Measurement uncertainty is a property of the actual test that produced these readings — NOT the
+        // saved config default (which is test strips). A precise Taylor/drop-kit or digital test must never
+        // inherit strip variance just because the pool's default method is strips.
+        guard test.testMethod == .testStrips else { return false }
         guard let previousTest else { return false }
 
         switch reading.key {
@@ -687,11 +691,36 @@ struct ChemistryEngine {
             return abs(test.cyanuricAcid - previousTest.cyanuricAcid) >= 10
                 && reading.status == .slightlyLow
         case "totalAlkalinity":
-            return abs(test.totalAlkalinity - previousTest.totalAlkalinity) <= 10
-                && (reading.status == .slightlyLow || reading.status == .slightlyHigh)
+            // A slightly-off TA is plausibly strip noise ONLY when it sits within one observable strip
+            // increment of the canonical ideal band — i.e. it could actually be in range. A value well
+            // outside the band is persistent chemistry, not noise, and keeps its full penalty even when two
+            // consecutive readings are close/equal (repeated elevation is evidence of persistence).
+            guard reading.status == .slightlyLow || reading.status == .slightlyHigh else { return false }
+            return totalAlkalinityWithinMeasurementResolutionOfIdeal(test, config: config)
         default:
             return false
         }
+    }
+
+    /// True when the measured TA is within one observable measurement increment of the ChemistryPolicy
+    /// ideal band (the SSOT for TA's ideal range), i.e. plausibly in range given the method's resolution.
+    /// Introduces no new chemistry thresholds — the band and the increment are both canonical.
+    private func totalAlkalinityWithinMeasurementResolutionOfIdeal(_ test: PoolTest, config: PoolConfiguration) -> Bool {
+        let context = ChemistryPolicyContext.make(
+            config: config,
+            cyanuricAcid: test.cyanuricAcid,
+            pH: test.pH,
+            totalAlkalinity: test.totalAlkalinity,
+            hasScalingEvidence: hasScaling(test),
+            chlorineSampleSize: test.taylorSampleSize
+        )
+        let ideal = TotalAlkalinityPolicy.idealRange(sanitizer: context.sanitizer)
+        let increment = context.measurement.increment(for: .totalAlkalinity)
+        let value = test.totalAlkalinity
+        let distanceOutsideIdeal = value > ideal.upperBound
+            ? value - ideal.upperBound
+            : (value < ideal.lowerBound ? ideal.lowerBound - value : 0)
+        return distanceOutsideIdeal <= increment + 1e-9
     }
 
     private func isPHRising(current test: PoolTest, previousTest: PoolTest?) -> Bool {
@@ -1000,6 +1029,38 @@ struct ChemistryEngine {
         return penalty
     }
 
+    /// A small, non-dominant maintenance-health penalty for an elevated scaling *tendency* that only the
+    /// COMBINATION of parameters reveals — never a single-parameter penalty (CH near the top of its valid
+    /// range is not penalized on its own). This is health/maintenance context only: it is not swim-gating
+    /// (Swimability V2 owns that), not a treatment authority, and not an LSI/CSI implementation. All inputs
+    /// come from canonical ChemistryPolicy classifications/ranges — no new chemistry thresholds.
+    ///
+    /// Fires only when all hold together:
+    ///  - TA is above its canonical ideal band (policy `recommendedHigh`/`actNowHigh`),
+    ///  - CH is still within its canonical ideal band but in the upper quarter of it (near, not over, the top),
+    ///  - pH sits at/near the upper operating boundary (canonical operating upper … swim upper, i.e. 7.6–7.8).
+    ///
+    /// Magnitude is deliberately modest — parity with the existing minor context penalties (e.g. water-change
+    /// +2, scaling visual indicator +6) and well below the confirmed-scaling / major-risk penalties — so it
+    /// adds context without dominating the score.
+    private func combinedScalingRiskPenalty(for test: PoolTest, config: PoolConfiguration) -> Double {
+        let taClassification = policyClassification(.totalAlkalinity, value: test.totalAlkalinity, test: test, config: config)
+        guard taClassification.actionState.isHigh else { return 0 }
+
+        // CH must be in-range (already-high CH carries its own penalty) AND in the upper quarter of the band.
+        let chClassification = policyClassification(.calciumHardness, value: test.calciumHardness, test: test, config: config)
+        guard chClassification.actionState == .ideal else { return 0 }
+        let chIdeal = CalciumHardnessPolicy.idealRange(surface: config.surfaceType)
+        let upperQuarterStart = chIdeal.lowerBound + 0.75 * (chIdeal.upperBound - chIdeal.lowerBound)
+        guard test.calciumHardness >= upperQuarterStart else { return 0 }
+
+        // pH at/near the upper operating boundary (canonical operating upper … swim upper).
+        let nearUpperPH = PHPolicy.operatingRange.upperBound...PHPolicy.swimRange.upperBound
+        guard nearUpperPH.contains(test.pH) else { return 0 }
+
+        return 4
+    }
+
     func recommendationConfidenceInput(
         for test: PoolTest,
         recentHistory: [PoolTest] = []
@@ -1295,7 +1356,7 @@ struct ChemistryEngine {
                 actionDescription: treatment.actionDescription,
                 amount: product.amount,
                 unit: product.unit,
-                instructions: "\(product.instructions) Treatment goal is unchanged from the original plan.",
+                instructions: product.instructions,
                 targetParameter: treatment.targetParameter,
                 urgency: treatment.urgency,
                 expectedEffectParameter: treatment.expectedEffectParameter,
@@ -1327,7 +1388,7 @@ struct ChemistryEngine {
                 actionDescription: treatment.actionDescription,
                 amount: product.amount,
                 unit: product.unit,
-                instructions: "\(product.instructions) Treatment goal is unchanged from the original plan.",
+                instructions: product.instructions,
                 targetParameter: treatment.targetParameter,
                 urgency: treatment.urgency,
                 expectedEffectParameter: treatment.expectedEffectParameter,
@@ -1352,7 +1413,7 @@ struct ChemistryEngine {
                 actionDescription: treatment.actionDescription,
                 amount: product.amount,
                 unit: product.unit,
-                instructions: "\(product.instructions) Treatment goal is unchanged from the original plan.",
+                instructions: product.instructions,
                 targetParameter: treatment.targetParameter,
                 urgency: treatment.urgency,
                 expectedEffectParameter: treatment.expectedEffectParameter,

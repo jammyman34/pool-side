@@ -1267,8 +1267,14 @@ private var heroBanner: some View {
 
         guard let value = Double(sanitized) else { return nil }
         let config = directEntryConfig(for: field)
-        let clamped = value.clamped(to: config.range)
-        return ((clamped / config.step).rounded() * config.step).rounded(toPlaces: config.decimalPlaces)
+        // Manual entry preserves the exact value the user typed (clamped to the valid range and
+        // rounded to the field's display precision); it must NOT snap to the slider step. The
+        // slider keeps its own `step` snapping via SwiftUI `Slider(value:in:step:)`.
+        return ChemicalEntryQuantizer.manualEntryValue(
+            value,
+            range: config.range,
+            decimalPlaces: config.decimalPlaces
+        )
     }
 
     private func chemicalBinding(for field: ChemicalField) -> Binding<Double> {
@@ -2859,6 +2865,41 @@ private struct TestFormSnapshot: Equatable {
     let cloudinessFollowUpResponse: VisualFollowUpResponse
 }
 
+/// Quantization rules for a manually editable chemistry field.
+///
+/// Manual numeric entry and slider/drag interaction are intentionally decoupled:
+/// - Manual entry preserves the exact value the user typed, clamped to the valid range
+///   and rounded only to the field's display precision. It must NOT snap to the slider step.
+/// - Slider/drag snapping is owned by SwiftUI's `Slider(value:in:step:)`; `snappedSliderValue`
+///   documents and guards that same nearest-step contract (the rule that previously leaked into
+///   manual entry and caused values like CYA 48 to become 50).
+///
+/// This applies uniformly to every manually editable chemistry field (FC, CC/TC, pH, TA, CH,
+/// CYA, salt, temperature), not just CYA.
+enum ChemicalEntryQuantizer {
+    /// Value produced by manual numeric entry: clamped to `range`, rounded to `decimalPlaces`,
+    /// never snapped to a step increment.
+    static func manualEntryValue(
+        _ raw: Double,
+        range: ClosedRange<Double>,
+        decimalPlaces: Int
+    ) -> Double {
+        raw.clamped(to: range).rounded(toPlaces: decimalPlaces)
+    }
+
+    /// Value produced by slider/drag interaction: clamped to `range` and snapped to the nearest
+    /// `step` increment, mirroring SwiftUI `Slider(value:in:step:)`.
+    static func snappedSliderValue(
+        _ raw: Double,
+        range: ClosedRange<Double>,
+        step: Double,
+        decimalPlaces: Int
+    ) -> Double {
+        let clamped = raw.clamped(to: range)
+        return ((clamped / step).rounded() * step).rounded(toPlaces: decimalPlaces)
+    }
+}
+
 private struct DirectNumericEntryConfig {
     let title: String
     let range: ClosedRange<Double>
@@ -3044,12 +3085,18 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
 
     var accentColor: Color {
         switch self {
-        case .pH, .calciumHardness:
-            return Color(hex: "126CFF")
-        case .freeChlorine, .combinedChlorine, .totalChlorine, .totalAlkalinity, .saltLevel:
-            return PoolColor.poolTeal
-        case .cyanuricAcid:
+        case .freeChlorine, .combinedChlorine, .totalChlorine:
             return PoolColor.sunshine
+        case .pH:
+            return Color(hex: "FF4B4B")
+        case .totalAlkalinity:
+            return Color(hex: "52C96C")
+        case .calciumHardness:
+            return Color(hex: "126CFF")
+        case .cyanuricAcid:
+            return Color(hex: "8A8F98")
+        case .saltLevel:
+            return PoolColor.poolTeal
         case .temperature:
             return PoolColor.coral
         }
@@ -3057,14 +3104,31 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
 
     var iconBackground: Color {
         switch self {
-        case .pH, .calciumHardness:
-            return Color(hex: "EFF6FF")
-        case .freeChlorine, .combinedChlorine, .totalChlorine, .totalAlkalinity, .saltLevel:
-            return Color(hex: "EAF8F6")
-        case .cyanuricAcid:
+        case .freeChlorine, .combinedChlorine, .totalChlorine:
             return Color(hex: "FFF8E6")
+        case .pH:
+            return Color(hex: "FFECEC")
+        case .totalAlkalinity:
+            return Color(hex: "E9F9EE")
+        case .calciumHardness:
+            return Color(hex: "EFF6FF")
+        case .cyanuricAcid:
+            return .white
+        case .saltLevel:
+            return Color(hex: "EAF8F6")
         case .temperature:
             return Color(hex: "FFF1EA")
+        }
+    }
+
+    /// Border stroke for the icon tile. Most fields use a faint tint of their accent; CYA is intentionally
+    /// uncolored (white fill) and gets a soft gray border to stay legible.
+    var iconBorder: Color {
+        switch self {
+        case .cyanuricAcid:
+            return Color(hex: "8A8F98").opacity(0.55)
+        default:
+            return accentColor.opacity(0.12)
         }
     }
 }
@@ -3167,7 +3231,7 @@ private struct ChemicalIcon: View {
                 .fill(field.iconBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(field.accentColor.opacity(0.12), lineWidth: 1)
+                        .stroke(field.iconBorder, lineWidth: 1)
                 )
 
             Image(field.icon)
