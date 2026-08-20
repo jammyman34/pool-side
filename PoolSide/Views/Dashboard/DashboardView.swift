@@ -636,7 +636,7 @@ struct DashboardView: View {
 
     private var greetingLineText: String {
         if let category = weather.category, let current = weather.currentTemperatureFahrenheit, let high = weather.highTemperatureFahrenheit {
-            let line = "\(greetingText) \(category.shortDescription) C\(current)℉ (H\(high)℉)"
+            let line = "\(greetingText) \n\(category.shortDescription) C\(current)℉ (H\(high)℉)"
             print("[Weather] Greeting with forecast: \(line)")
             return line
         }

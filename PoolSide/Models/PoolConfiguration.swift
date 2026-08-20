@@ -183,6 +183,55 @@ struct PoolConfiguration: Codable, Equatable {
     /// defaults (Cal-Hypo / Muriatic / Test Strips).
     private static let diagnosticsLog = Logger(subsystem: "PoolSide.ConfigDiagnostics", category: "poolConfiguration")
 
+    /// TEMP DIAGNOSTIC — remove before App Store submission. Rolling on-device history of the last
+    /// ~20 configuration events (writes + clears), so an intermittent preference reset can be diagnosed
+    /// later WITHOUT a live Console.app session. Stored under its own UserDefaults key — never the
+    /// `poolConfiguration` key — and every access swallows errors so diagnostic storage can never affect
+    /// real configuration behavior. Retrieve with `dumpDiagnosticHistory()` (see below).
+    static let diagnosticHistoryKey = "poolConfiguration.diagnosticHistory.TEMP"
+    private static let diagnosticHistoryCap = 20
+
+    struct ConfigDiagnosticEvent: Codable, Equatable {
+        enum EventType: String, Codable { case write, clear }
+        let timestamp: Date
+        let eventType: EventType
+        let persistedExistedBefore: Bool
+        let beforeChlorine: String?
+        let afterChlorine: String?
+        let beforePHDecreaser: String?
+        let afterPHDecreaser: String?
+        let beforeTestMethod: String?
+        let afterTestMethod: String?
+        let caller: String
+    }
+
+    /// The recorded diagnostic events, oldest first. Returns empty on any decode failure.
+    static func diagnosticHistoryEntries() -> [ConfigDiagnosticEvent] {
+        guard
+            let data = UserDefaults.standard.data(forKey: diagnosticHistoryKey),
+            let entries = try? JSONDecoder().decode([ConfigDiagnosticEvent].self, from: data)
+        else { return [] }
+        return entries
+    }
+
+    /// Clears the diagnostic history only. Does NOT touch the persisted configuration.
+    static func clearDiagnosticHistory() {
+        UserDefaults.standard.removeObject(forKey: diagnosticHistoryKey)
+    }
+
+    /// Appends one event to the capped rolling history. Fully isolated: any failure is swallowed so it
+    /// can never influence the real configuration write/clear that is happening alongside it.
+    private static func appendDiagnosticEvent(_ event: ConfigDiagnosticEvent) {
+        var entries = diagnosticHistoryEntries()
+        entries.append(event)
+        if entries.count > diagnosticHistoryCap {
+            entries.removeFirst(entries.count - diagnosticHistoryCap)
+        }
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: diagnosticHistoryKey)
+        }
+    }
+
     private static func configFieldsDescription(_ config: PoolConfiguration) -> String {
         "\(config.chlorinePreference.rawValue) / \(config.pHDecreaserPreference.rawValue) / \(config.testMethod.rawValue)"
     }
@@ -208,6 +257,19 @@ struct PoolConfiguration: Codable, Equatable {
         // Frames 0/1 are this function + the setter; the rest identify the actual caller/reason.
         let caller = Thread.callStackSymbols.dropFirst(2).prefix(10).joined(separator: " | ")
 
+        appendDiagnosticEvent(ConfigDiagnosticEvent(
+            timestamp: Date(),
+            eventType: .write,
+            persistedExistedBefore: persistedExistedBefore,
+            beforeChlorine: before?.chlorinePreference.rawValue,
+            afterChlorine: newValue.chlorinePreference.rawValue,
+            beforePHDecreaser: before?.pHDecreaserPreference.rawValue,
+            afterPHDecreaser: newValue.pHDecreaserPreference.rawValue,
+            beforeTestMethod: before?.testMethod.rawValue,
+            afterTestMethod: newValue.testMethod.rawValue,
+            caller: caller
+        ))
+
         if suspectedReset {
             diagnosticsLog.fault("""
             ⚠️ SUSPECTED PREFERENCE RESET — writing struct defaults over a populated config.
@@ -224,14 +286,53 @@ struct PoolConfiguration: Codable, Equatable {
         }
     }
 
+    /// TEMP DIAGNOSTIC — remove before App Store submission. Logs and records every configuration event
+    /// history so it can be inspected later. Returns the entries so a connected DEBUG session (Xcode
+    /// console / `RunCodeSnippet`) can read them directly; also re-emits them through the unified log so a
+    /// later `log collect` retrieves them without a live capture. `#if DEBUG` only.
+    #if DEBUG
+    @discardableResult
+    static func dumpDiagnosticHistory() -> [ConfigDiagnosticEvent] {
+        let entries = diagnosticHistoryEntries()
+        let formatter = ISO8601DateFormatter()
+        diagnosticsLog.notice("[CONFIG-HISTORY] \(entries.count, privacy: .public) event(s) recorded (oldest first):")
+        for (index, event) in entries.enumerated() {
+            diagnosticsLog.notice("""
+            [CONFIG-HISTORY \(index + 1, privacy: .public)/\(entries.count, privacy: .public)] \
+            \(formatter.string(from: event.timestamp), privacy: .public) \(event.eventType.rawValue, privacy: .public) \
+            existedBefore=\(event.persistedExistedBefore, privacy: .public) \
+            chlorine=\(event.beforeChlorine ?? "nil", privacy: .public)->\(event.afterChlorine ?? "nil", privacy: .public) \
+            pHDecreaser=\(event.beforePHDecreaser ?? "nil", privacy: .public)->\(event.afterPHDecreaser ?? "nil", privacy: .public) \
+            testMethod=\(event.beforeTestMethod ?? "nil", privacy: .public)->\(event.afterTestMethod ?? "nil", privacy: .public) \
+            caller=\(event.caller, privacy: .public)
+            """)
+        }
+        return entries
+    }
+    #endif
+
     /// Removes all saved configuration (sign out)
     static func clearCurrent() {
         // TEMP DIAGNOSTIC — remove before App Store submission. Records any removal of the persisted config
         // so an unexpected clear (which would drop the user back to defaults/first-use) is visible.
+        let existing = persisted
+        let caller = Thread.callStackSymbols.dropFirst(1).prefix(10).joined(separator: " | ")
         diagnosticsLog.fault("""
         ⚠️ clearCurrent() called — removing persisted poolConfiguration.
-        caller=\(Thread.callStackSymbols.dropFirst(1).prefix(10).joined(separator: " | "), privacy: .public)
+        caller=\(caller, privacy: .public)
         """)
+        appendDiagnosticEvent(ConfigDiagnosticEvent(
+            timestamp: Date(),
+            eventType: .clear,
+            persistedExistedBefore: existing != nil,
+            beforeChlorine: existing?.chlorinePreference.rawValue,
+            afterChlorine: nil,
+            beforePHDecreaser: existing?.pHDecreaserPreference.rawValue,
+            afterPHDecreaser: nil,
+            beforeTestMethod: existing?.testMethod.rawValue,
+            afterTestMethod: nil,
+            caller: caller
+        ))
         UserDefaults.standard.removeObject(forKey: defaultsKey)
         UserDefaults.standard.removeObject(forKey: hasCoverBackupKey)
         UserDefaults.standard.removeObject(forKey: usesRoboticCleanerBackupKey)
