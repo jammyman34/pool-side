@@ -9,13 +9,14 @@ struct NextTestRecommendation {
     }
 
     enum Source: String {
-        case stablePool
+        // Routine testing cadence anchored to the most recent Full Test Panel.
+        case routineFCAndPH
+        case routineFullPanel
+        // Treatment-specific retest sources (owned by `treatmentRetestRecommendation`).
         case treatmentPlan
         case chlorineCorrection
         case pHCorrection
         case stabilizer
-        case highDemand
-        case possibleDilution
     }
 
     let recommendedDate: Date?
@@ -39,110 +40,68 @@ struct NextTestRecommendation {
     }
 }
 
+/// The canonical routine testing cadence, anchored to the most recent Full Test Panel:
+/// a quick FC & pH check at +3 days and the next Full Test Panel at +7 days. This is the single
+/// source of truth for the "Next Pool Tests" the user sees; Views must not compute these dates.
+/// Treatment-specific Focused Checks and treatment retests are separate and not represented here.
+struct NextTestSchedule {
+    let fcAndPH: NextTestRecommendation
+    let fullPanel: NextTestRecommendation
+    /// The single test the user should see next: the FC & pH check while it is still upcoming,
+    /// otherwise the Full Test Panel. Completing FC & pH never moves the Full Test Panel date.
+    let firstUpcoming: NextTestRecommendation
+
+    var routineTests: [NextTestRecommendation] { [fcAndPH, fullPanel] }
+}
+
 struct NextTestRecommendationEngine {
-    func recommendation(
-        for test: PoolTest,
-        treatmentSteps: [Treatment],
-        watchlist: [Treatment],
-        recentHistory: [PoolTest],
-        config: PoolConfiguration,
-        outstandingCheckDueDates: [Date] = []
-    ) -> NextTestRecommendation {
-        let base = baseRecommendation(
-            for: test,
-            treatmentSteps: treatmentSteps,
-            watchlist: watchlist,
-            recentHistory: recentHistory,
-            config: config
+    // MARK: - Routine cadence SSOT
+
+    static let fcAndPHRoutineDays = 3
+    static let fullPanelRoutineDays = 7
+
+    /// Builds the routine FC & pH (+3d) and Full Test Panel (+7d) schedule from the most recent Full
+    /// Test Panel date. Conditions attached to a test describe events BEFORE that sample, so the sample
+    /// already measured their effect — the routine cadence therefore never adds a same-/next-day
+    /// "confirmation" retest. Only a new Full Test Panel re-anchors this schedule.
+    func routineSchedule(mostRecentFullTestDate anchor: Date, now: Date = Date()) -> NextTestSchedule {
+        let fcAndPH = makeRoutineRecommendation(
+            from: anchor,
+            days: Self.fcAndPHRoutineDays,
+            title: "Test FC & pH",
+            body: "A quick check between full tests to make sure things are on track.",
+            source: .routineFCAndPH
         )
-        return coordinatingWithOutstandingChecks(base, outstandingCheckDueDates: outstandingCheckDueDates)
+        let fullPanel = makeRoutineRecommendation(
+            from: anchor,
+            days: Self.fullPanelRoutineDays,
+            title: "Full Test Panel",
+            body: "Run your complete test panel to reassess overall water balance.",
+            source: .routineFullPanel
+        )
+        let firstUpcoming: NextTestRecommendation = {
+            if let due = fcAndPH.recommendedDate, due > now { return fcAndPH }
+            return fullPanel
+        }()
+        return NextTestSchedule(fcAndPH: fcAndPH, fullPanel: fullPanel, firstUpcoming: firstUpcoming)
     }
 
-    /// While a treatment workflow still has an outstanding focused Check, that Check is the immediate
-    /// required measurement. The routine full pool test must not be scheduled as a competing event on or
-    /// before the Check's due time — otherwise the user is asked for a full panel that duplicates the
-    /// verification the Check already provides. Rather than an arbitrary fixed postponement, the routine
-    /// test is re-anchored to the Check's own due date and advanced by the engine's normally-computed
-    /// cadence (the interval it already chose). If the routine test was independently due later than the
-    /// Check anyway, it is left untouched.
-    private func coordinatingWithOutstandingChecks(
-        _ base: NextTestRecommendation,
-        outstandingCheckDueDates: [Date]
+    private func makeRoutineRecommendation(
+        from anchor: Date,
+        days: Int,
+        title: String,
+        body: String,
+        source: NextTestRecommendation.Source
     ) -> NextTestRecommendation {
-        guard
-            let latestCheckDue = outstandingCheckDueDates.max(),
-            let routineDate = base.recommendedDate,
-            routineDate <= latestCheckDue
-        else { return base }
-
-        return NextTestRecommendation(
-            recommendedDate: latestCheckDue.addingTimeInterval(base.interval),
-            interval: base.interval,
-            reason: "A focused re-test is still pending; routine full testing is deferred until after it is recorded.",
-            title: base.title,
-            body: "Record the pending focused re-test first. Your next full pool test is scheduled for after that result.",
-            urgency: base.urgency,
-            source: base.source,
-            isPendingTreatmentAction: base.isPendingTreatmentAction
+        make(
+            from: anchor,
+            hours: Double(days * 24),
+            reason: body,
+            title: title,
+            body: body,
+            urgency: .routine,
+            source: source
         )
-    }
-
-    private func baseRecommendation(
-        for test: PoolTest,
-        treatmentSteps: [Treatment],
-        watchlist: [Treatment],
-        recentHistory: [PoolTest],
-        config: PoolConfiguration
-    ) -> NextTestRecommendation {
-        let confidence = ChemistryEngine().recommendationConfidenceInput(for: test, recentHistory: recentHistory)
-        let pendingSteps = treatmentSteps.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem && !$0.isFocusedCheckStep }
-
-        if hasCompletedOptionalChlorineTopOff(treatmentSteps) {
-            return treatmentPlanRoutineFollowUp(from: test.date)
-        }
-
-        if confidence.waterChangeScore >= 3 {
-            let backwashed = test.resolvedPoolConditions.backwashedFilter == .yes
-            let reason = backwashed
-                ? "Recent backwashing or water replacement can dilute readings."
-                : "Recent rain or water addition can dilute readings."
-            return make(
-                from: test.date,
-                hours: 24,
-                reason: reason,
-                title: "Next full pool test",
-                body: "Retest after circulation or tomorrow to confirm dilution effects before making large corrections.",
-                urgency: .watch,
-                source: .possibleDilution
-            )
-        }
-
-        if confidence.chlorineDemandScore >= 3 || watchlist.contains(where: { $0.chemicalName.localizedCaseInsensitiveContains("Chlorine Demand") }) {
-            return make(
-                from: test.date,
-                hours: 24,
-                reason: "Recent pool conditions may increase chlorine demand.",
-                title: "Next full pool test",
-                body: "Test again tomorrow to confirm FC is holding after the recent demand.",
-                urgency: .watch,
-                source: .highDemand
-            )
-        }
-
-        if pendingSteps.isEmpty {
-            let days = stableCadenceDays(for: test, recentHistory: recentHistory, confidence: confidence)
-            return make(
-                from: test.date,
-                hours: Double(days * 24),
-                reason: "Pool is stable and does not need immediate treatment.",
-                title: "Next full pool test",
-                body: "Run your normal full pool test to check overall water balance.",
-                urgency: .routine,
-                source: .stablePool
-            )
-        }
-
-        return treatmentPlanRoutineFollowUp(from: test.date)
     }
 
     func treatmentRetestRecommendation(for treatment: Treatment, completedAt: Date = Date()) -> NextTestRecommendation? {
@@ -212,72 +171,8 @@ struct NextTestRecommendationEngine {
         return nil
     }
 
-    private func treatmentPlanRoutineFollowUp(from testDate: Date) -> NextTestRecommendation {
-        make(
-            from: testDate,
-            hours: 24,
-            reason: "A treatment plan is active; routine testing should confirm the overall response tomorrow.",
-            title: "Next full pool test",
-            body: "Run your normal full pool test to check overall water balance.",
-            urgency: .watch,
-            source: .treatmentPlan
-        )
-    }
-
-    private func hasCompletedOptionalChlorineTopOff(_ treatmentSteps: [Treatment]) -> Bool {
-        treatmentSteps.contains { treatment in
-            treatment.isCompleted
-                && !treatment.isSkipped
-                && !treatment.isWatchlistItem
-                && !treatment.isFocusedCheckStep
-                && treatment.targetParameter == "freeChlorine"
-                && isMaintenanceChlorineTopOff(treatment)
-        }
-    }
-
-    /// A maintenance chlorine top-off is a completed FC treatment whose source test FC was at/above the
-    /// readiness minimum (ChemistryPolicy recommendedLow, non-swim-blocking). Detected via
-    /// ChemistryPolicy rather than the urgency label, since maintenance top-offs are now Recommended
-    /// (not Optional) yet must still keep the treatment-plan routine cadence rather than falling to the
-    /// stable-pool cadence.
-    private func isMaintenanceChlorineTopOff(_ treatment: Treatment) -> Bool {
-        guard let test = treatment.poolTest else { return false }
-        let classification = ChemistryPolicy.classify(
-            .freeChlorine,
-            value: test.freeChlorine,
-            context: ChemistryPolicyContext(cyanuricAcid: test.cyanuricAcid)
-        )
-        return classification.actionState == .recommendedLow && !classification.blocksSwimming
-    }
-
-    private func stableCadenceDays(
-        for test: PoolTest,
-        recentHistory: [PoolTest],
-        confidence: RecommendationConfidenceInput
-    ) -> Int {
-        if confidence.chlorineDemandScore >= 2 { return 1 }
-        if recentHistory.prefix(3).contains(where: { $0.freeChlorine < 2.0 || $0.combinedChlorine > 0.5 }) { return 2 }
-        return 3
-    }
-
     private func shouldRetestAfterChlorine(_ treatment: Treatment) -> Bool {
         treatment.urgency.isActionable
-    }
-
-    private func requiresSameDayChlorineVerification(_ treatment: Treatment, test: PoolTest) -> Bool {
-        guard treatment.targetParameter == "freeChlorine" else { return false }
-        // Act Now and Needs Attention FC both sit below the swim-readiness minimum → verify same day.
-        if treatment.urgency == .immediate || treatment.urgency == .needsAttention { return true }
-
-        let indicators = Set(test.visualIndicators)
-        let hasProblemWater = indicators.contains(VisualIndicator.cloudyWater.rawValue)
-            || indicators.contains(VisualIndicator.greenWater.rawValue)
-            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
-            || indicators.contains(VisualIndicator.strongChlorineSmell.rawValue)
-        if hasProblemWater { return true }
-
-        if treatment.urgency == .recommended && test.combinedChlorine > 0.5 { return true }
-        return false
     }
 
     private func chlorineRetestMinutes(for treatment: Treatment) -> Int {
@@ -349,19 +244,6 @@ struct NextTestRecommendationEngine {
             urgency: urgency,
             source: source,
             isPendingTreatmentAction: false
-        )
-    }
-
-    private func pendingTreatmentActionRecommendation() -> NextTestRecommendation {
-        NextTestRecommendation(
-            recommendedDate: nil,
-            interval: 0,
-            reason: "Complete or skip the recommended treatment to schedule your next test.",
-            title: "After treatment is completed",
-            body: "Complete or skip the recommended treatment to schedule your next test.",
-            urgency: .watch,
-            source: .treatmentPlan,
-            isPendingTreatmentAction: true
         )
     }
 }

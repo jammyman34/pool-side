@@ -120,8 +120,8 @@ struct TreatmentPlanSheet: View {
         WhyPlanConfidence(input: confidenceInput, test: test, config: viewModel.poolConfig)
     }
 
-    private var nextTestRecommendation: NextTestRecommendation {
-        viewModel.nextTestRecommendation(for: test, in: tests)
+    private var nextTestSchedule: NextTestSchedule? {
+        viewModel.nextTestSchedule(for: test, in: tests)
     }
 
     private var activeTreatmentEducationTipID: ContextualTipID? {
@@ -980,21 +980,23 @@ struct TreatmentPlanSheet: View {
     }
 
     private var nextPoolTestCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Next Pool Test", systemImage: "calendar.badge.clock")
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Next Pool Tests", systemImage: "calendar.badge.clock")
                 .font(.subheadline)
                 .fontWeight(.semibold)
                 .foregroundStyle(PoolColor.primaryText)
 
-            Text(nextPoolTestDisplayText)
-                .font(.caption)
-                .foregroundStyle(PoolColor.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            nextPoolTestRow(
+                title: "Test FC & pH",
+                dateText: routineDateText(nextTestSchedule?.fcAndPH.recommendedDate),
+                subtitle: "A quick check between full tests to make sure things are on track."
+            )
 
-            Text(nextTestRecommendation.body)
-                .font(.caption)
-                .foregroundStyle(PoolColor.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            nextPoolTestRow(
+                title: "Full Test Panel",
+                dateText: routineDateText(nextTestSchedule?.fullPanel.recommendedDate),
+                subtitle: "Run your complete test panel to reassess overall water balance."
+            )
 
             Text(nextPoolTestReminderStatus)
                 .font(.caption2.weight(.semibold))
@@ -1011,6 +1013,22 @@ struct TreatmentPlanSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+    }
+
+    private func nextPoolTestRow(title: String, dateText: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+            Text(dateText)
+                .font(.caption)
+                .foregroundStyle(PoolColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(PoolColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var whyPlanSummary: [String] {
@@ -1092,38 +1110,33 @@ struct TreatmentPlanSheet: View {
     }
 
     private var nextTestTiming: String {
-        "\(nextTestRecommendation.title): \(nextPoolTestRelativeText). \(nextTestRecommendation.body)"
+        "Test FC & pH: \(routineDateText(nextTestSchedule?.fcAndPH.recommendedDate)). "
+        + "Full Test Panel: \(routineDateText(nextTestSchedule?.fullPanel.recommendedDate))."
     }
 
-    private var nextPoolTestDisplayText: String {
-        "Next full pool test: \(nextPoolTestRelativeText)"
+    private func routineDateText(_ date: Date?) -> String {
+        guard let date else { return "After your next full test" }
+        return relativeText(for: date)
     }
 
-    private var nextPoolTestRelativeText: String {
-        guard let recommendedDate = nextTestRecommendation.recommendedDate else {
-            return "After treatment is completed"
+    private func relativeText(for date: Date) -> String {
+        if Calendar.current.isDateInTomorrow(date) {
+            return "Tomorrow around \(Self.timeFormatter.string(from: date))"
         }
-
-        if Calendar.current.isDateInTomorrow(recommendedDate) {
-            return "Tomorrow around \(Self.timeFormatter.string(from: recommendedDate))"
+        if Calendar.current.isDateInToday(date) {
+            return "Today around \(Self.timeFormatter.string(from: date))"
         }
-        if Calendar.current.isDateInToday(recommendedDate) {
-            return "Today around \(Self.timeFormatter.string(from: recommendedDate))"
-        }
-        return Self.reminderDateFormatter.string(from: recommendedDate)
+        return Self.reminderDateFormatter.string(from: date)
     }
 
     private var nextPoolTestReminderStatus: String {
-        if nextTestRecommendation.isPendingTreatmentAction {
-            return "Reminder waits for treatment completion"
-        }
         if !viewModel.poolConfig.enableNextPoolTestReminders {
             return "Next pool test reminders are off"
         }
         if NotificationService.shared.isAuthorized {
-            return "Reminder scheduled"
+            return "Reminders Scheduled"
         }
-        return "Turn on notifications to get this reminder"
+        return "Turn on notifications to get these reminders"
     }
 
     private var validationPrompt: String {
@@ -2164,7 +2177,6 @@ struct ExternalReviewExportBuilder {
               Treatment verification timing: \(verificationTiming(for: treatment, test: test))
             """
         }.joined(separator: "\n\n")
-        _ = routineNextTestTiming
 
         let checkOutcomes = focusedCheckOutcomesSection(config: config, test: test, recentHistory: recentHistory)
 
@@ -2177,6 +2189,7 @@ struct ExternalReviewExportBuilder {
         - Historical pH trend used: \(pHTrend)
         - Time since last completed acid treatment: \(acidTiming)
         - Suppressed treatment reasons: \(suppressed)
+        - Routine testing: \(routineNextTestTiming)
 
         \(treatmentLines.isEmpty ? "No active treatment products." : treatmentLines)
         \(checkOutcomes)

@@ -195,10 +195,10 @@ struct DashboardView: View {
     }
 
     private func nextTestPill(for test: PoolTest) -> some View {
-        let recommendation = viewModel.nextTestRecommendation(for: test, in: tests)
-
+        // Presentation-only: consume the scheduling authority's firstUpcoming; never derive dates here.
         return TimelineView(.periodic(from: .now, by: 60)) { context in
-            let label = nextTestPillText(for: recommendation.recommendedDate, now: context.date)
+            let firstUpcoming = viewModel.nextTestSchedule(for: test, in: tests, now: context.date)?.firstUpcoming
+            let label = nextTestPillText(for: firstUpcoming, now: context.date)
 
             HStack(spacing: 8) {
                 Image(systemName: "calendar.badge.clock")
@@ -394,8 +394,7 @@ struct DashboardView: View {
     /// 32pt top spacing.
     @ViewBuilder
     private func activeTestsSection(items: [DashboardWorkflowItem], latestTest: PoolTest) -> some View {
-        let recommendedDate = viewModel.nextTestRecommendation(for: latestTest, in: tests).recommendedDate
-        let hasBadge = recommendedDate != nil
+        let hasBadge = viewModel.nextTestSchedule(for: latestTest, in: tests)?.firstUpcoming.recommendedDate != nil
 
         VStack(spacing: 0) {
             if items.isEmpty {
@@ -778,14 +777,22 @@ struct DashboardView: View {
         return f.string(from: date)
     }
 
-    private func nextTestPillText(for date: Date?, now: Date = Date()) -> String {
-        guard let date else { return "Next test after treatment" }
+    private func nextTestPillText(for recommendation: NextTestRecommendation?, now: Date = Date()) -> String {
+        guard let recommendation, let date = recommendation.recommendedDate else { return "Next test after treatment" }
 
-        if date <= now {
-            return "Test pool water today"
+        // Distinct content for the two routine tests; date/time formatting is unchanged.
+        let name: String
+        switch recommendation.source {
+        case .routineFCAndPH:   name = "Test FC & pH"
+        case .routineFullPanel: name = "Full Test Panel"
+        default:                name = "Next test"
         }
 
-        return "Next test \(nextTestPillDateText(date))"
+        if date <= now {
+            return "\(name) today"
+        }
+
+        return "\(name) \(nextTestPillDateText(date))"
     }
 
     private func nextTestPillDateText(_ date: Date) -> String {

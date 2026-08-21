@@ -24,9 +24,15 @@ protocol PoolNotificationScheduling: AnyObject {
     /// not in `validIdentifiers` (its owning treatment/Check was removed or regenerated with a new UUID).
     func reconcileWorkflowNotifications(keeping validIdentifiers: Set<String>) async
     func cancel(identifier: String)
+    /// Routine Full Test Panel reminder (identifier `nextPoolTestIdentifier`).
     func cancelNextPoolTestReminder()
     @discardableResult
     func replaceNextPoolTestReminder(at date: Date, reason: String) async -> String?
+    /// Routine FC & pH quick-check reminder (identifier `nextFCPHTestIdentifier`). Governed by the same
+    /// user setting as the Full Test Panel reminder, but scheduled under its own deterministic identifier.
+    func cancelNextFCPHTestReminder()
+    @discardableResult
+    func replaceNextFCPHTestReminder(at date: Date, reason: String) async -> String?
     func cancelTreatmentReminder(for treatment: Treatment)
 }
 
@@ -35,6 +41,12 @@ extension PoolNotificationScheduling {
     func cancel(identifier: String?) {
         if let identifier { cancel(identifier: identifier) }
     }
+
+    // Default no-op implementations so existing conformers (e.g. test spies) need not change unless they
+    // want to observe the FC & pH routine reminder specifically.
+    func cancelNextFCPHTestReminder() {}
+    @discardableResult
+    func replaceNextFCPHTestReminder(at date: Date, reason: String) async -> String? { nil }
 }
 
 @MainActor
@@ -42,6 +54,7 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
 
     static let shared = NotificationService()
     static let nextPoolTestIdentifier = "next-pool-test"
+    static let nextFCPHTestIdentifier = "next-fc-ph-test"
 
     /// Identifier prefixes for the per-treatment / per-Check workflow reminders Pool Side schedules. The
     /// routine next-full-test reminder uses a distinct identifier (`nextPoolTestIdentifier`) that matches
@@ -111,6 +124,35 @@ final class NotificationService: ObservableObject, PoolNotificationScheduling {
     func replaceNextPoolTestReminder(at date: Date, reason: String) async -> String? {
         cancelNextPoolTestReminder()
         return await scheduleNextPoolTestReminder(at: date, reason: reason)
+    }
+
+    @discardableResult
+    func scheduleNextFCPHTestReminder(at date: Date, reason: String) async -> String? {
+        guard isAuthorized else { return nil }
+        let fireDate = adjustedFutureDate(date)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Test FC & pH"
+        content.body = reason.isEmpty ? "Time for a quick FC & pH check between full tests." : reason
+        content.sound = .default
+        content.categoryIdentifier = "POOL_TEST_REMINDER"
+
+        await schedule(
+            identifier: Self.nextFCPHTestIdentifier,
+            content: content,
+            date: fireDate
+        )
+        return Self.nextFCPHTestIdentifier
+    }
+
+    func cancelNextFCPHTestReminder() {
+        cancel(identifier: Self.nextFCPHTestIdentifier)
+    }
+
+    @discardableResult
+    func replaceNextFCPHTestReminder(at date: Date, reason: String) async -> String? {
+        cancelNextFCPHTestReminder()
+        return await scheduleNextFCPHTestReminder(at: date, reason: reason)
     }
 
     @discardableResult

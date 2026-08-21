@@ -828,13 +828,7 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         let cloudy = try XCTUnwrap(treatments.first {
             $0.targetParameter == "visualIndicators" && $0.chemicalName.contains("Cloudy Water")
         })
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: treatments.filter { !$0.isWatchlistItem },
-            watchlist: treatments.filter { $0.isWatchlistItem },
-            recentHistory: [],
-            config: config
-        )
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
 
         XCTAssertEqual(chlorineTreatments.count, 1)
         XCTAssertEqual(recovery.productIdentifier, ChemicalProductID.liquidChlorine12_5.rawValue)
@@ -861,10 +855,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertEqual(cloudy.amount, 0)
         XCTAssertFalse(cloudy.chemicalName.localizedCaseInsensitiveContains("retest"))
         XCTAssertFalse(cloudy.instructions.localizedCaseInsensitiveContains("retest"))
-        XCTAssertEqual(recommendation.source, .treatmentPlan)
-        XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(recommendation.recommendedDate)
-        XCTAssertEqual(recommendation.title, "Next full pool test")
+        // Routine full testing is owned by the schedule (separate from these treatment actions).
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
+        XCTAssertEqual(schedule.fcAndPH.recommendedDate, test.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(schedule.fullPanel.title, "Full Test Panel")
     }
 
     func testMultipleRecoverySignalsProduceOneMergedChlorineTreatment() async throws {
@@ -941,18 +935,12 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
         let routineTreatments = engine.validatedTreatments(for: routineTest, config: config, recentHistory: [])
             .map { $0.toTreatment(linkedTo: routineTest) }
-        let routineRecommendation = NextTestRecommendationEngine().recommendation(
-            for: routineTest,
-            treatmentSteps: routineTreatments,
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
+        let routineSchedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: routineTest.date)
 
-        XCTAssertEqual(routineRecommendation.source, .treatmentPlan)
-        XCTAssertEqual(routineRecommendation.title, "Next full pool test")
-        XCTAssertEqual(routineRecommendation.interval, 86_400)
-        XCTAssertTrue(routineRecommendation.body.contains("normal full pool test"))
+        XCTAssertEqual(routineSchedule.fcAndPH.recommendedDate, routineTest.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(routineSchedule.fullPanel.recommendedDate, routineTest.date.addingTimeInterval(7 * 24 * 3600))
+        XCTAssertEqual(routineSchedule.fcAndPH.title, "Test FC & pH")
+        XCTAssertEqual(routineSchedule.fullPanel.title, "Full Test Panel")
 
         let urgentTest = ChemistryTestFixtures.currentPool(
             pH: 7.6,
@@ -963,17 +951,11 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
         let urgentTreatments = engine.validatedTreatments(for: urgentTest, config: config, recentHistory: [])
             .map { $0.toTreatment(linkedTo: urgentTest) }
-        let urgentRecommendation = NextTestRecommendationEngine().recommendation(
-            for: urgentTest,
-            treatmentSteps: urgentTreatments,
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-
-        XCTAssertEqual(urgentRecommendation.source, .treatmentPlan)
-        XCTAssertFalse(urgentRecommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(urgentRecommendation.recommendedDate)
+        // Routine testing is unchanged by the urgent treatment: still FC & pH +3d / Full Panel +7d.
+        let urgentRoutine = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: urgentTest.date)
+        XCTAssertEqual(urgentRoutine.fcAndPH.recommendedDate, urgentTest.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(urgentRoutine.fullPanel.recommendedDate, urgentTest.date.addingTimeInterval(7 * 24 * 3600))
+        // Same-day verification is the treatment-specific retest, separate from routine testing.
         XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: urgentTreatments.first { $0.targetParameter == "freeChlorine" }!))
     }
 
@@ -1023,21 +1005,11 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         XCTAssertTrue(chlorine.actionDescription.contains("Maintenance top-off"))
         XCTAssertTrue(chlorine.instructions.contains("Circulate for 60 minutes before swimming."))
 
-        let savedTreatments = treatments.map { $0.toTreatment(linkedTo: test) }
-        let treatmentSteps = savedTreatments.filter { !$0.isWatchlistItem }
-        let watchlist = savedTreatments.filter { $0.isWatchlistItem }
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: treatmentSteps,
-            watchlist: watchlist,
-            recentHistory: [],
-            config: config
-        )
-
-        XCTAssertEqual(recommendation.source, .treatmentPlan)
-        XCTAssertEqual(recommendation.title, "Next full pool test")
-        XCTAssertEqual(recommendation.interval, 86_400)
-        XCTAssertFalse(recommendation.reason.contains("same-day verification"))
+        // A maintenance top-off does not create mandatory same-day verification; routine testing stays on
+        // its normal cadence (FC & pH +3d / Full Panel +7d), which is not a same-day retest.
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(schedule.fcAndPH.recommendedDate, test.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
     }
 
     func testBelowSwimReadinessMinimumChlorineIsRequiredAndRequiresVerificationCopy() throws {
@@ -1226,17 +1198,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         )
         let treatments = engine.validatedTreatments(for: test, config: config, recentHistory: [])
             .map { $0.toTreatment(linkedTo: test) }
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: treatments.filter { !$0.isWatchlistItem },
-            watchlist: treatments.filter { $0.isWatchlistItem },
-            recentHistory: [],
-            config: config
-        )
-
-        XCTAssertEqual(recommendation.source, .treatmentPlan)
-        XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(recommendation.recommendedDate)
+        // Routine testing is the standard cadence, separate from the same-day FC verification.
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
+        // Genuinely low chlorine still requires same-day verification via the treatment-specific retest.
         XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: treatments.first { $0.targetParameter == "freeChlorine" }!))
     }
 
@@ -1341,18 +1306,12 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             expectedDelta: -0.5,
             effectDelayHours: 4
         )
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [acid],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-
-        XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(recommendation.recommendedDate)
-        XCTAssertEqual(recommendation.title, "Next full pool test")
-        XCTAssertEqual(recommendation.body, "Run your normal full pool test to check overall water balance.")
+        // Routine testing always yields absolute dates, independent of any pending treatment.
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(schedule.fcAndPH.recommendedDate, test.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
+        // The pending treatment's retest is owned by the treatment-specific API, separate from routine testing.
+        XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: acid))
     }
 
     func testCompletedAcidTreatmentAnchorsNextPoolTestToCompletedAt() throws {
@@ -1371,17 +1330,10 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         acid.isCompleted = true
         acid.completedAt = completedAt
 
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [acid],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-
-        XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertEqual(recommendation.source, .stablePool)
-        XCTAssertEqual(recommendation.title, "Next full pool test")
+        // Routine testing follows the standard cadence anchored to the full test.
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
+        // The completed acid's retest anchors to completedAt via the treatment-specific API.
         let retest = try XCTUnwrap(NextTestRecommendationEngine().treatmentRetestRecommendation(for: acid, completedAt: completedAt))
         XCTAssertEqual(retest.source, .pHCorrection)
         XCTAssertEqual(retest.title, "Retest pH")
@@ -1420,29 +1372,16 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             effectDelayHours: TreatmentApplicationPolicy.granularCYACanonicalRetestHours
         )
 
-        let pendingRecommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [bakingSoda, calcium, cya],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-        XCTAssertFalse(pendingRecommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(pendingRecommendation.recommendedDate)
+        // Routine testing has absolute dates while treatment retests are pending.
+        let scheduleWhilePending = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(scheduleWhilePending.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
 
         bakingSoda.isCompleted = true
         bakingSoda.completedAt = completedAt
         calcium.isSkipped = true
         cya.isSkipped = true
 
-        let completedRecommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [bakingSoda, calcium, cya],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-        XCTAssertEqual(completedRecommendation.title, "Next full pool test")
+        // Routine testing is unchanged; the TA retest anchors to completedAt via the treatment-specific API.
         let taRetest = try XCTUnwrap(NextTestRecommendationEngine().treatmentRetestRecommendation(for: bakingSoda, completedAt: completedAt))
         XCTAssertEqual(taRetest.title, "Retest TA")
         XCTAssertEqual(taRetest.recommendedDate, completedAt.addingTimeInterval(8 * 60 * 60))
@@ -1450,15 +1389,9 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
         bakingSoda.isSkipped = true
         bakingSoda.isCompleted = false
         bakingSoda.completedAt = nil
-        let skippedRecommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [bakingSoda, calcium, cya],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-        XCTAssertFalse(skippedRecommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(skippedRecommendation.recommendedDate)
+        // A skipped treatment does not fake a retest; routine testing still has its absolute dates.
+        let scheduleAfterSkip = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(scheduleAfterSkip.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
     }
 
     func testMultipleTreatmentPlanDoesNotScheduleFinalRetestBeforePendingStepCompletion() throws {
@@ -1486,34 +1419,23 @@ final class ChemistryEngineBehaviorTests: XCTestCase {
             effectDelayHours: TreatmentApplicationPolicy.granularCYACanonicalRetestHours
         )
 
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [acid, cya],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
-
-        XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(recommendation.recommendedDate)
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
+        // Each treatment step owns its own retest via the treatment-specific API, separate from routine.
         XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: acid, completedAt: completedAt))
+        XCTAssertNotNil(NextTestRecommendationEngine().treatmentRetestRecommendation(for: cya, completedAt: completedAt))
     }
 
     func testRoutineNoTreatmentRecommendationStillHasAbsoluteDate() {
         let config = ChemistryTestFixtures.config()
         let test = ChemistryTestFixtures.currentPool(pH: 7.5, freeChlorine: 6, totalChlorine: 6.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60)
 
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [],
-            watchlist: [],
-            recentHistory: [],
-            config: config
-        )
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
 
-        XCTAssertFalse(recommendation.isPendingTreatmentAction)
-        XCTAssertNotNil(recommendation.recommendedDate)
-        XCTAssertEqual(recommendation.source, .stablePool)
+        XCTAssertNotNil(schedule.firstUpcoming.recommendedDate)
+        XCTAssertEqual(schedule.firstUpcoming.source, .routineFCAndPH)
+        XCTAssertEqual(schedule.fcAndPH.recommendedDate, test.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
     }
 
     func testWatchlistPresentationText() {

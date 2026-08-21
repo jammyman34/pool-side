@@ -74,9 +74,22 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
         return NotificationService.nextPoolTestIdentifier
     }
 
+    private(set) var didCancelNextFCPHTest = false
+    func cancelNextFCPHTestReminder() {
+        didCancelNextFCPHTest = true
+    }
+
+    private(set) var scheduledNextFCPHTest = false
+    func replaceNextFCPHTestReminder(at date: Date, reason: String) async -> String? {
+        scheduledNextFCPHTest = true
+        return NotificationService.nextFCPHTestIdentifier
+    }
+
     func resetNextPoolTestFlag() {
         scheduledNextPoolTest = false
         didCancelNextPoolTest = false
+        scheduledNextFCPHTest = false
+        didCancelNextFCPHTest = false
     }
 
     func cancelTreatmentReminder(for treatment: Treatment) {
@@ -386,79 +399,14 @@ final class CheckVerificationLifecycleTests: XCTestCase {
         XCTAssertFalse(spy.didCancel(identifier), "Logging a full test does not cancel the Check reminder.")
     }
 
-    // MARK: - Focused-Check / routine full-test coordination (§13–18)
+    // MARK: - Focused-Check / routine full-test coordination
 
-    private func pendingPHTreatment(on test: PoolTest) -> Treatment {
-        Treatment(
-            chemicalName: "Muriatic Acid",
-            actionDescription: "Lower pH toward ~7.4",
-            amount: 20,
-            unit: "fl oz",
-            instructions: "Add conservative dose, circulate, then retest.",
-            urgency: .recommended,
-            targetParameter: "pH",
-            sortOrder: 1,
-            effectDelayHours: 4,
-            poolTest: test
-        )
-    }
-
-    // §13/§14 (Test 1) — With an outstanding Check due AFTER the base routine date, the routine full test
-    // is not blindly retained; it is re-anchored to after the Check's due time using the engine's cadence.
-    func testRoutineFullTestDefersWhenCheckDueLaterThanRoutine() {
-        let test = PoolTest(date: Date(timeIntervalSince1970: 1_800_100_000), pH: 7.8,
-                            freeChlorine: 6, totalChlorine: 6, totalAlkalinity: 100,
-                            calciumHardness: 350, cyanuricAcid: 60)
-        let pending = pendingPHTreatment(on: test)
-        let checkDue = test.date.addingTimeInterval(30 * 3600) // later than the 24h routine follow-up
-
-        let rec = NextTestRecommendationEngine().recommendation(
-            for: test, treatmentSteps: [pending], watchlist: [], recentHistory: [],
-            config: PoolConfiguration(), outstandingCheckDueDates: [checkDue]
-        )
-
-        // Base routine would be test.date + 24h; because the Check is due later (30h), the routine test is
-        // re-anchored to checkDue + the same 24h cadence — never left on the stale earlier timestamp.
-        XCTAssertEqual(rec.recommendedDate, checkDue.addingTimeInterval(24 * 3600))
-        XCTAssertTrue(rec.body.localizedCaseInsensitiveContains("focused re-test"))
-    }
-
-    // §13 — When the routine full test is independently due later than the Check, it is left untouched
-    // (the Check is handled by its own owned notification / supersession).
-    func testRoutineFullTestUnchangedWhenAlreadyLaterThanCheck() {
-        let test = PoolTest(date: Date(timeIntervalSince1970: 1_800_100_000), pH: 7.8,
-                            freeChlorine: 6, totalChlorine: 6, totalAlkalinity: 100,
-                            calciumHardness: 350, cyanuricAcid: 60)
-        let pending = pendingPHTreatment(on: test)
-        let checkDue = test.date.addingTimeInterval(2 * 3600) // earlier than the 24h routine follow-up
-
-        let rec = NextTestRecommendationEngine().recommendation(
-            for: test, treatmentSteps: [pending], watchlist: [], recentHistory: [],
-            config: PoolConfiguration(), outstandingCheckDueDates: [checkDue]
-        )
-
-        XCTAssertEqual(rec.recommendedDate, test.date.addingTimeInterval(24 * 3600),
-                       "A routine test already due after the Check is not deferred.")
-    }
-
-    // §17 (Test 6) — With multiple outstanding Checks, routine testing is anchored past the LAST one, so no
-    // routine full test is inserted between them.
-    func testRoutineFullTestAnchorsPastLatestOfMultipleChecks() {
-        let test = PoolTest(date: Date(timeIntervalSince1970: 1_800_100_000), pH: 7.8,
-                            freeChlorine: 6, totalChlorine: 6, totalAlkalinity: 100,
-                            calciumHardness: 350, cyanuricAcid: 60)
-        let pending = pendingPHTreatment(on: test)
-        let firstDue = test.date.addingTimeInterval(26 * 3600)
-        let lastDue = test.date.addingTimeInterval(40 * 3600)
-
-        let rec = NextTestRecommendationEngine().recommendation(
-            for: test, treatmentSteps: [pending], watchlist: [], recentHistory: [],
-            config: PoolConfiguration(), outstandingCheckDueDates: [firstDue, lastDue]
-        )
-
-        XCTAssertEqual(rec.recommendedDate, lastDue.addingTimeInterval(24 * 3600),
-                       "Routine testing anchors past the latest outstanding Check.")
-    }
+    // NOTE: Routine full testing no longer defers around outstanding focused Checks. Routine cadence is
+    // owned by `NextTestRecommendationEngine.routineSchedule(...)` (FC & pH +3d, Full Panel +7d), anchored
+    // to the most recent Full Test Panel and independent of Checks (see RoutineTestScheduleTests). The
+    // former `recommendation(...)`/`coordinatingWithOutstandingChecks(...)` deferral path has been retired,
+    // so its three unit tests were removed with it. Check-owned reminder recomputation is still covered by
+    // `testSavingCheckRecomputesRoutineNextTestReminder` below.
 
     // §16 / item 2C (Test 5) — Saving a focused Check recomputes the routine Next Full Pool Test reminder
     // from the new evidence rather than silently retaining the previous routine schedule.

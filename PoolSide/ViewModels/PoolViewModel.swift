@@ -942,38 +942,6 @@ final class PoolViewModel {
             .sorted { ($0.completedAt ?? $0.createdAt) > ($1.completedAt ?? $1.createdAt) }
     }
 
-    func nextTestRecommendation(for test: PoolTest, in tests: [PoolTest]) -> NextTestRecommendation {
-        let allTreatments = test.treatments
-            .filter { !($0.isSkipped && $0.isWatchlistItem) }
-            .sorted { $0.sortOrder < $1.sortOrder }
-        let treatmentSteps = allTreatments.filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep }
-        let watchlist = allTreatments.filter { $0.isWatchlistItem }
-
-        return nextTestRecommendationEngine.recommendation(
-            for: test,
-            treatmentSteps: treatmentSteps,
-            watchlist: watchlist,
-            recentHistory: recentHistory(before: test, in: tests, limit: 10),
-            config: poolConfig,
-            outstandingCheckDueDates: outstandingCheckDueDates(in: tests)
-        )
-    }
-
-    /// Due dates of all pending focused Checks whose parent treatment has been completed, across every
-    /// test. Used to keep routine full-test timing from competing with an outstanding verification.
-    private func outstandingCheckDueDates(in tests: [PoolTest]) -> [Date] {
-        let allTreatments = tests.flatMap(\.treatments)
-        return allTreatments.compactMap { check -> Date? in
-            guard
-                check.isFocusedCheckStep, !check.isCompleted, !check.isSkipped,
-                let parentID = check.parentTreatmentID,
-                let parent = allTreatments.first(where: { $0.id == parentID }),
-                parent.isCompleted
-            else { return nil }
-            return workflowEngine.availableDate(for: check, in: parent.poolTest?.treatments ?? [])
-        }
-    }
-
     @MainActor
     @discardableResult
     func saveFocusedCheck(
@@ -1107,29 +1075,49 @@ final class PoolViewModel {
         }
     }
 
+    /// Canonical routine testing schedule (FC & pH +3d, Full Test Panel +7d) anchored to the most recent
+    /// Full Test Panel. Views consume this SSOT for the "Next Pool Tests" they display and must not compute
+    /// these dates themselves. Returns nil only when there is no test to anchor to.
+    func nextTestSchedule(for latestTest: PoolTest?, in tests: [PoolTest], now: Date = Date()) -> NextTestSchedule? {
+        guard let anchorDate = mostRecentFullTestDate(in: tests) ?? latestTest?.date else { return nil }
+        return nextTestRecommendationEngine.routineSchedule(mostRecentFullTestDate: anchorDate, now: now)
+    }
+
+    /// The most recent Full Test Panel date. Focused Checks (`isFocusedCheck`) are not full panels and do
+    /// not re-anchor the routine cadence, so completing an FC & pH check never moves the Full Test Panel.
+    private func mostRecentFullTestDate(in tests: [PoolTest]) -> Date? {
+        tests.filter { !$0.isFocusedCheck }.map(\.date).max()
+    }
+
     @MainActor
     func replaceNextPoolTestReminder(for latestTest: PoolTest?, allTests: [PoolTest]) async {
         guard poolConfig.enableNextPoolTestReminders else {
             notifications.cancelNextPoolTestReminder()
+            notifications.cancelNextFCPHTestReminder()
             return
         }
 
         await notifications.checkAuthorizationStatus()
-        guard notifications.isAuthorized, let latestTest else {
+        guard notifications.isAuthorized, let schedule = nextTestSchedule(for: latestTest, in: allTests) else {
             notifications.cancelNextPoolTestReminder()
+            notifications.cancelNextFCPHTestReminder()
             return
         }
 
-        let recommendation = nextTestRecommendation(for: latestTest, in: allTests)
-        guard let recommendedDate = recommendation.recommendedDate else {
+        // Full Test Panel (+7d): the canonical routine full-test reminder.
+        if let fullDate = schedule.fullPanel.recommendedDate {
+            _ = await notifications.replaceNextPoolTestReminder(at: fullDate, reason: schedule.fullPanel.scheduledReason)
+        } else {
             notifications.cancelNextPoolTestReminder()
-            return
         }
 
-        _ = await notifications.replaceNextPoolTestReminder(
-            at: recommendedDate,
-            reason: recommendation.scheduledReason
-        )
+        // FC & pH quick check (+3d): scheduled only while still upcoming. Once past due it is superseded by
+        // the Full Test Panel rather than nagged. Governed by the same enableNextPoolTestReminders setting.
+        if let fcDate = schedule.fcAndPH.recommendedDate, fcDate > Date() {
+            _ = await notifications.replaceNextFCPHTestReminder(at: fcDate, reason: schedule.fcAndPH.scheduledReason)
+        } else {
+            notifications.cancelNextFCPHTestReminder()
+        }
     }
 
     @MainActor

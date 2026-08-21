@@ -35,16 +35,11 @@ final class TreatmentWorkflowEngineTests: XCTestCase {
         XCTAssertEqual(check?.urgency, .optional)
         XCTAssertEqual(check?.workflowStepKind, .focusedCheck)
 
-        let recommendation = NextTestRecommendationEngine().recommendation(
-            for: test,
-            treatmentSteps: [treatment, check].compactMap { $0 },
-            watchlist: [],
-            recentHistory: [],
-            config: PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false, chlorinePreference: .liquidChlorine12_5)
-        )
-        XCTAssertEqual(recommendation.title, "Next full pool test")
-        XCTAssertEqual(recommendation.source.rawValue, "treatmentPlan")
-        XCTAssertNotNil(recommendation.recommendedDate)
+        // The optional Focused Check does not change routine testing: the routine cadence is owned by the
+        // SSOT and anchored to the Full Test Panel (FC & pH +3d, Full Panel +7d), independent of the Check.
+        let schedule = NextTestRecommendationEngine().routineSchedule(mostRecentFullTestDate: test.date)
+        XCTAssertEqual(schedule.fcAndPH.recommendedDate, test.date.addingTimeInterval(3 * 24 * 3600))
+        XCTAssertEqual(schedule.fullPanel.recommendedDate, test.date.addingTimeInterval(7 * 24 * 3600))
     }
 
     func testLowFCCheckWaitActivatesFromTreatmentCompletionTime() {

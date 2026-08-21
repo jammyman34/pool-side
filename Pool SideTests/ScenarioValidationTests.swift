@@ -60,7 +60,7 @@ private enum ScenarioCatalog {
                         swimmingBlocked: false,
                         testingRequired: false,
                         nextTestPending: false,
-                        nextTestSource: .stablePool
+                        nextTestSource: .routineFCAndPH
                     ))
                 ]
             ),
@@ -427,7 +427,7 @@ ScenarioDefinition(id: "MAG-calcium-tens", name: "Calcium Magnitude Guard", area
 
     private static var nextTestScenarios: [ScenarioDefinition] {
         [
-            ScenarioDefinition(id: "NT-routine", name: "Routine Next Test", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 0, nextTestPending: false, nextTestSource: .stablePool, nextTestMinutesFromCurrentTest: 3 * 24 * 60))]),
+            ScenarioDefinition(id: "NT-routine", name: "Routine Next Test", chemistry: .init(freeChlorine: 6, combinedChlorine: 0, pH: 7.5, totalAlkalinity: 100, calciumHardness: 330, cyanuricAcid: 60), steps: [.generate(expect: .init(treatmentCount: 0, nextTestPending: false, nextTestSource: .routineFCAndPH, nextTestMinutesFromCurrentTest: 3 * 24 * 60))]),
             ScenarioDefinition(id: "NT-completion-anchor", name: "Completed Treatment Keeps Routine Next Full Test", config: .init(pHDecreaser: .muriaticAcid), chemistry: .init(freeChlorine: 6.5, combinedChlorine: 0.5, pH: 8.0, totalAlkalinity: 140, calciumHardness: 330, cyanuricAcid: 60), history: pHDriftHistory, steps: [
                 .generate(expect: .init(nextTestPending: false)),
                 .completeTreatment(nameContains: "Acid", minutesAgo: 10, expect: .init(nextTestPending: false))
@@ -444,23 +444,21 @@ ScenarioDefinition(id: "MAG-calcium-tens", name: "Calcium Magnitude Guard", area
                     swimmingBlocked: false,
                     testingRequired: false,
                     verificationRequired: false,
-                    nextTestPending: false,
-                    nextTestMinutesFromCurrentTest: 24 * 60
+                    nextTestPending: false
                 ))
             ]),
             ScenarioDefinition(id: "NT-optional-chlorine-completed", name: "Optional Maintenance Chlorine Keeps Tomorrow After Completion", area: "NEXT POOL TEST", chemistry: optionalMaintenanceChlorineChemistry, state: optionalMaintenanceChlorineState, steps: [
-                .generate(expect: .init(treatmentCount: 1, nextTestPending: false, nextTestMinutesFromCurrentTest: 24 * 60)),
+                .generate(expect: .init(treatmentCount: 1, nextTestPending: false)),
                 .completeTreatment(nameContains: "Liquid Chlorine", minutesAgo: 10, expect: .init(
                     v2State: .readyToSwim,
                     swimmingBlocked: false,
                     testingRequired: false,
                     verificationRequired: false,
-                    nextTestPending: false,
-                    nextTestMinutesFromCurrentTest: 24 * 60
+                    nextTestPending: false
                 ))
             ]),
             ScenarioDefinition(id: "NT-optional-chlorine-skipped", name: "Optional Maintenance Chlorine Skip Does Not Create Verification", area: "NEXT POOL TEST", chemistry: optionalMaintenanceChlorineChemistry, state: optionalMaintenanceChlorineState, steps: [
-                .generate(expect: .init(treatmentCount: 1, nextTestPending: false, nextTestMinutesFromCurrentTest: 24 * 60)),
+                .generate(expect: .init(treatmentCount: 1, nextTestPending: false)),
                 .skipTreatment(nameContains: "Liquid Chlorine", expect: .init(
                     v2State: .readyToSwim,
                     swimmingBlocked: false,
@@ -743,7 +741,7 @@ private final class ScenarioRunner {
         let request = context.request
         let assessment = swimabilityEngine.assess(request: request, evaluationDate: context.evaluationDate)
         let classifications = assessment.treatmentAwareContext?.classifications ?? []
-        let next = nextTestEngine.recommendation(for: context.currentTest, treatmentSteps: treatments, watchlist: context.currentTest.treatments.filter(\.isWatchlistItem), recentHistory: context.history, config: context.config)
+        let next = nextTestEngine.routineSchedule(mostRecentFullTestDate: context.currentTest.date, now: context.evaluationDate).firstUpcoming
 
         func assert(_ condition: Bool, _ message: String) {
             assertions += 1
