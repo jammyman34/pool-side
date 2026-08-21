@@ -5,7 +5,7 @@ import SwiftData
 /// Locks the Dashboard Active/Completed workflow presentation: state derivation, ordering, single-row
 /// guarantee, evolving score, and accessibility — all from canonical workflow/score sources.
 @MainActor
-final class DashboardWorkflowTests: XCTestCase {
+final class DashboardWorkflowTests: ConfigIsolatedTestCase {
 
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(

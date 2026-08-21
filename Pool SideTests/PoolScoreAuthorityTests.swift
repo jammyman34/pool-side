@@ -4,7 +4,7 @@ import SwiftData
 
 /// Increment 2 — one canonical, ChemistryPolicy-aligned Pool Score authority; score never decides
 /// swim readiness (that is Swimability V2).
-final class PoolScoreAuthorityTests: XCTestCase {
+final class PoolScoreAuthorityTests: ConfigIsolatedTestCase {
 
     private let engine = ChemistryEngine()
     private let hypochlorite = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)

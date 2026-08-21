@@ -5,7 +5,7 @@ import SwiftData
 /// Pool Score maintenance-health refinements: the TA test-strip variance discount no longer masks a
 /// persistently elevated TA, scoring stays anchored to canonical ChemistryPolicy ranges, and a modest
 /// combined scaling-tendency penalty adds context without gating swim readiness.
-final class PoolScoreScalingAndVarianceTests: XCTestCase {
+final class PoolScoreScalingAndVarianceTests: ConfigIsolatedTestCase {
 
     private let engine = ChemistryEngine()
     // Default chlorine (cal-hypo) → hypochlorite sanitizer → TA ideal 80–100; config default method = strips.

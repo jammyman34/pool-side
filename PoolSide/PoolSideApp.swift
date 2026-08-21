@@ -19,12 +19,6 @@ struct PoolSideApp: App {
 
     init() {
         configureSegmentedControlAppearance()
-        // TEMP DIAGNOSTIC — remove before App Store submission. Re-emit the rolling poolConfiguration
-        // event history to the unified log on every debug launch, so an intermittent preference reset can
-        // be retrieved later via `log collect` without a live Console.app session.
-        #if DEBUG
-        PoolConfiguration.dumpDiagnosticHistory()
-        #endif
     }
 
     private func configureSegmentedControlAppearance() {

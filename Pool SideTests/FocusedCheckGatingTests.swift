@@ -7,7 +7,7 @@ import SwiftData
 /// pool get no Check; completing them schedules a wait-complete "safe to swim" reminder instead, while
 /// skipping schedules nothing.
 @MainActor
-final class FocusedCheckGatingTests: XCTestCase {
+final class FocusedCheckGatingTests: ConfigIsolatedTestCase {
 
     private let config = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)
 

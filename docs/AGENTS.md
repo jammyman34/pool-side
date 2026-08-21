@@ -154,6 +154,10 @@ For every production change:
 
 In this Codex environment, run automated tests with the Xcode MCP test runner against Xcode’s currently selected iOS Simulator. Do not depend on the developer’s physical iPhone. Direct `xcodebuild` simulator targeting may fail from the Codex shell because `CoreSimulatorService` is not reliably available there; do not modify signing, provisioning, or project settings to work around that.
 
+- Automated `Pool SideTests` must run via the Xcode MCP runner against an **iOS Simulator** by default.
+- **Never run the full test suite on the developer’s dogfooding iPhone** — on-device tests share the app’s `UserDefaults.standard`.
+- Tests that touch app preferences must use the isolated test defaults store (`PoolConfiguration.defaultsStore`, which auto-resolves to an isolated suite under XCTest) and must never read or mutate the production `UserDefaults.standard["poolConfiguration"]`.
+
 Classify failures when behavior changes materially:
 
 - **A** — implementation regression introduced by this change → fix production code.

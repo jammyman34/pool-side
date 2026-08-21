@@ -4,7 +4,7 @@ import SwiftData
 
 /// Increment 1 — defensive completed/superseded focused-Check state guards at the ViewModel boundary.
 @MainActor
-final class CompletedCheckGuardTests: XCTestCase {
+final class CompletedCheckGuardTests: ConfigIsolatedTestCase {
 
     private let config = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)
 

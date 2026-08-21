@@ -647,6 +647,8 @@ struct DashboardView: View {
     private var heroAssetName: String {
         weather.category?.heroAssetName ?? "Sunny Hero"
     }
+    
+    
 
     private var weatherTaskID: String {
         let lat = viewModel.poolConfig.latitude.map { String(format: "%.3f", $0) } ?? "nil"

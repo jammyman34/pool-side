@@ -5,7 +5,7 @@ import SwiftData
 /// Verifies the External Review Export faithfully mirrors the production authorities: treatments vs
 /// focused Checks are separated, verification is canonical (ChemistryPolicy/V2), staged effects don't
 /// overclaim, Swimability V2 is represented, and product-preference changes reprice unfinished steps.
-final class ExternalReviewExportFidelityTests: XCTestCase {
+final class ExternalReviewExportFidelityTests: ConfigIsolatedTestCase {
 
     private let config = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)
 

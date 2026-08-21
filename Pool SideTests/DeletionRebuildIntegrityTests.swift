@@ -5,7 +5,7 @@ import SwiftData
 /// Increment 3 — deletion/edit/rebuild integrity: no stale plans, orphaned Checks, dangling
 /// checkResultTestID links, false completed verification, or orphan notifications.
 @MainActor
-final class DeletionRebuildIntegrityTests: XCTestCase {
+final class DeletionRebuildIntegrityTests: ConfigIsolatedTestCase {
 
     private let config = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)
 

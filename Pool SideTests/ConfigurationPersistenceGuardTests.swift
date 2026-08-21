@@ -5,7 +5,7 @@ import XCTest
 /// defaults (Cal-Hypo / Muriatic) by an unrelated read-modify-write, while intentional setup / Settings /
 /// treatment "save as default" writes continue to work.
 @MainActor
-final class ConfigurationPersistenceGuardTests: XCTestCase {
+final class ConfigurationPersistenceGuardTests: ConfigIsolatedTestCase {
 
     // MARK: - Saved preferences survive refresh and unrelated updates
 

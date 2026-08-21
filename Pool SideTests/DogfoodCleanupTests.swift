@@ -4,7 +4,7 @@ import SwiftData
 
 /// Covers the three-part dogfooding cleanup: "Why This Plan" Check contamination, product-label-first
 /// application guidance, and focused-Check completion/skip interaction.
-final class DogfoodCleanupTests: XCTestCase {
+final class DogfoodCleanupTests: ConfigIsolatedTestCase {
 
     private let engine = ChemistryEngine()
     private let config = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)

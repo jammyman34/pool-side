@@ -2,7 +2,7 @@ import XCTest
 import SwiftData
 @testable import Pool_Side
 
-final class SwimabilityV2StructuralTests: XCTestCase {
+final class SwimabilityV2StructuralTests: ConfigIsolatedTestCase {
     private let evaluationDate = Date(timeIntervalSince1970: 1_800_003_600)
 
     func testAssessmentDerivedGateCollectionsAndBlockingState() {

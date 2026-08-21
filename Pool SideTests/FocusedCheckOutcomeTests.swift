@@ -4,7 +4,7 @@ import SwiftData
 
 /// Locks the focused-Check closure UX: after a Check is saved, the outcome is derived from the POST-check
 /// reassessment (ChemistryPolicy + regenerated plan + Swimability V2), never from a hard-coded View range.
-final class FocusedCheckOutcomeTests: XCTestCase {
+final class FocusedCheckOutcomeTests: ConfigIsolatedTestCase {
 
     private let evaluator = FocusedCheckOutcomeEvaluator()
 

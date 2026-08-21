@@ -119,7 +119,7 @@ final class NotificationSchedulingSpy: PoolNotificationScheduling {
 }
 
 @MainActor
-final class CheckVerificationLifecycleTests: XCTestCase {
+final class CheckVerificationLifecycleTests: ConfigIsolatedTestCase {
 
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(

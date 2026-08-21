@@ -5,7 +5,7 @@ import SwiftData
 /// Watchlist items are observations, not treatments: they never carry repeat-suppression and never appear in
 /// the engine repeat-deferral ("Repeat … dosing is deferred …") pipeline.
 @MainActor
-final class WatchlistContextualizationTests: XCTestCase {
+final class WatchlistContextualizationTests: ConfigIsolatedTestCase {
 
     private let config = PoolConfiguration(volumeGallons: 32_583, surfaceType: .plaster, isSaltwater: false)
 

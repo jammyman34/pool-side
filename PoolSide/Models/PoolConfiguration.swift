@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Pool configuration stored in UserDefaults via AppStorage.
 /// Not a SwiftData model — settings are single-instance, not queried.
@@ -110,13 +109,48 @@ struct PoolConfiguration: Codable, Equatable {
     static let hasCoverExplicitChoiceKey = "poolConfiguration.hasCover.explicitChoice"
     static let usesRoboticCleanerExplicitChoiceKey = "poolConfiguration.usesRoboticCleaner.explicitChoice"
 
+    // MARK: - Persistence store (test-isolation seam)
+
+    /// Dedicated UserDefaults suite used when the process is a test host.
+    static let isolatedTestSuiteName = "com.poolside.tests.isolatedConfig"
+
+    /// The UserDefaults domain backing PoolConfiguration persistence.
+    ///
+    /// Production uses `.standard`. Under XCTest (a DEBUG test host) this defaults to an isolated suite so
+    /// the test suite can never read or overwrite the app's real preferences — the confirmed cause of the
+    /// on-device preference reset (tests wrote fixture configs into the app's `.standard` domain). The
+    /// discriminator is automatic: `XCTestCase` is only linked into the process when tests are running, so
+    /// a normal (dogfooding) launch resolves to `.standard` while any test run resolves to the isolated
+    /// suite. This makes isolation impossible to forget on a per-test basis.
+    nonisolated(unsafe) static var defaultsStore: UserDefaults = {
+        #if DEBUG
+        if NSClassFromString("XCTestCase") != nil,
+           let isolated = UserDefaults(suiteName: isolatedTestSuiteName) {
+            return isolated
+        }
+        #endif
+        return .standard
+    }()
+
+    #if DEBUG
+    /// Test-only: clears every PoolConfiguration key from the current store so each test starts from a
+    /// clean isolated domain. Safe by construction — under tests `defaultsStore` is the isolated suite, so
+    /// this never touches `.standard`.
+    static func resetForTesting() {
+        for key in [defaultsKey, hasCoverBackupKey, usesRoboticCleanerBackupKey,
+                    hasCoverExplicitChoiceKey, usesRoboticCleanerExplicitChoiceKey] {
+            defaultsStore.removeObject(forKey: key)
+        }
+    }
+    #endif
+
     /// The stored configuration when one is present AND decodable, otherwise `nil`. Callers that
     /// read-modify-write MUST use this (not `current`) so a missing/invalid load is never silently
     /// re-persisted as struct defaults (e.g. Cal-Hypo / Muriatic). `current` keeps its default-fallback
     /// behavior for read-only display, but distinguishing "no valid config" is what makes writers safe.
     static var persisted: PoolConfiguration? {
         guard
-            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let data = defaultsStore.data(forKey: defaultsKey),
             let decodedConfig = try? JSONDecoder().decode(PoolConfiguration.self, from: data)
         else { return nil }
         return recoveredEquipmentSettings(in: decodedConfig)
@@ -125,227 +159,61 @@ struct PoolConfiguration: Codable, Equatable {
     static var current: PoolConfiguration {
         get { persisted ?? recoveredEquipmentSettings(in: PoolConfiguration()) }
         set {
-            // TEMP DIAGNOSTIC — remove before App Store submission. Every write to the persisted
-            // poolConfiguration funnels through this setter, so this is the single choke point that can
-            // catch a stale/default full-struct write clobbering the user's saved preferences. See
-            // `logConfigurationWrite(_:)` for what is captured and how to read it.
-            logConfigurationWrite(newValue)
-
             let data = try? JSONEncoder().encode(newValue)
-            UserDefaults.standard.set(data, forKey: defaultsKey)
+            defaultsStore.set(data, forKey: defaultsKey)
             if newValue.hasCover {
-                UserDefaults.standard.set(true, forKey: hasCoverBackupKey)
+                defaultsStore.set(true, forKey: hasCoverBackupKey)
             }
             if newValue.usesRoboticCleaner {
-                UserDefaults.standard.set(true, forKey: usesRoboticCleanerBackupKey)
+                defaultsStore.set(true, forKey: usesRoboticCleanerBackupKey)
             }
         }
     }
 
     /// Whether configuration has been saved at least once
     static var isConfigured: Bool {
-        UserDefaults.standard.data(forKey: defaultsKey) != nil
+        defaultsStore.data(forKey: defaultsKey) != nil
     }
 
     static func markEquipmentChoicesExplicit(_ config: PoolConfiguration) {
-        UserDefaults.standard.set(true, forKey: hasCoverExplicitChoiceKey)
-        UserDefaults.standard.set(true, forKey: usesRoboticCleanerExplicitChoiceKey)
-        UserDefaults.standard.set(config.hasCover, forKey: hasCoverBackupKey)
-        UserDefaults.standard.set(config.usesRoboticCleaner, forKey: usesRoboticCleanerBackupKey)
+        defaultsStore.set(true, forKey: hasCoverExplicitChoiceKey)
+        defaultsStore.set(true, forKey: usesRoboticCleanerExplicitChoiceKey)
+        defaultsStore.set(config.hasCover, forKey: hasCoverBackupKey)
+        defaultsStore.set(config.usesRoboticCleaner, forKey: usesRoboticCleanerBackupKey)
     }
 
     static func recoveredFromTestHistory(_ config: PoolConfiguration, tests: [PoolTest]) -> PoolConfiguration {
         var recovered = recoveredEquipmentSettings(in: config)
         if
             !recovered.hasCover,
-            !UserDefaults.standard.bool(forKey: hasCoverExplicitChoiceKey),
+            !defaultsStore.bool(forKey: hasCoverExplicitChoiceKey),
             tests.contains(where: { $0.resolvedPoolConditions.coverOpenTime != .unknown }) {
             recovered.hasCover = true
         }
         if
             !recovered.usesRoboticCleaner,
-            !UserDefaults.standard.bool(forKey: usesRoboticCleanerExplicitChoiceKey),
+            !defaultsStore.bool(forKey: usesRoboticCleanerExplicitChoiceKey),
             tests.contains(where: { $0.resolvedPoolConditions.cleaningActivity.isRoboticCleanerEvidence }) {
             recovered.usesRoboticCleaner = true
         }
         return recovered
     }
 
-    // MARK: - TEMP DIAGNOSTIC (remove before App Store submission)
-
-    /// Traces every write to the persisted poolConfiguration so a stale/default overwrite of the user's
-    /// saved preferences can be caught on the next reproduction. Logs via the unified logging system so it
-    /// is retrievable from a physical device (Console.app or `log collect`) in any build configuration,
-    /// not only when attached to Xcode.
-    ///
-    /// Reads with subsystem "PoolSide.ConfigDiagnostics", category "poolConfiguration". Flags the offending
-    /// signature explicitly: a previously populated, non-default config being overwritten with struct
-    /// defaults (Cal-Hypo / Muriatic / Test Strips).
-    private static let diagnosticsLog = Logger(subsystem: "PoolSide.ConfigDiagnostics", category: "poolConfiguration")
-
-    /// TEMP DIAGNOSTIC — remove before App Store submission. Rolling on-device history of the last
-    /// ~20 configuration events (writes + clears), so an intermittent preference reset can be diagnosed
-    /// later WITHOUT a live Console.app session. Stored under its own UserDefaults key — never the
-    /// `poolConfiguration` key — and every access swallows errors so diagnostic storage can never affect
-    /// real configuration behavior. Retrieve with `dumpDiagnosticHistory()` (see below).
-    static let diagnosticHistoryKey = "poolConfiguration.diagnosticHistory.TEMP"
-    private static let diagnosticHistoryCap = 20
-
-    struct ConfigDiagnosticEvent: Codable, Equatable {
-        enum EventType: String, Codable { case write, clear }
-        let timestamp: Date
-        let eventType: EventType
-        let persistedExistedBefore: Bool
-        let beforeChlorine: String?
-        let afterChlorine: String?
-        let beforePHDecreaser: String?
-        let afterPHDecreaser: String?
-        let beforeTestMethod: String?
-        let afterTestMethod: String?
-        let caller: String
-    }
-
-    /// The recorded diagnostic events, oldest first. Returns empty on any decode failure.
-    static func diagnosticHistoryEntries() -> [ConfigDiagnosticEvent] {
-        guard
-            let data = UserDefaults.standard.data(forKey: diagnosticHistoryKey),
-            let entries = try? JSONDecoder().decode([ConfigDiagnosticEvent].self, from: data)
-        else { return [] }
-        return entries
-    }
-
-    /// Clears the diagnostic history only. Does NOT touch the persisted configuration.
-    static func clearDiagnosticHistory() {
-        UserDefaults.standard.removeObject(forKey: diagnosticHistoryKey)
-    }
-
-    /// Appends one event to the capped rolling history. Fully isolated: any failure is swallowed so it
-    /// can never influence the real configuration write/clear that is happening alongside it.
-    private static func appendDiagnosticEvent(_ event: ConfigDiagnosticEvent) {
-        var entries = diagnosticHistoryEntries()
-        entries.append(event)
-        if entries.count > diagnosticHistoryCap {
-            entries.removeFirst(entries.count - diagnosticHistoryCap)
-        }
-        if let data = try? JSONEncoder().encode(entries) {
-            UserDefaults.standard.set(data, forKey: diagnosticHistoryKey)
-        }
-    }
-
-    private static func configFieldsDescription(_ config: PoolConfiguration) -> String {
-        "\(config.chlorinePreference.rawValue) / \(config.pHDecreaserPreference.rawValue) / \(config.testMethod.rawValue)"
-    }
-
-    private static func isDefaultPreferenceTriple(_ config: PoolConfiguration) -> Bool {
-        let defaults = PoolConfiguration()
-        return config.chlorinePreference == defaults.chlorinePreference
-            && config.pHDecreaserPreference == defaults.pHDecreaserPreference
-            && config.testMethod == defaults.testMethod
-    }
-
-    private static func logConfigurationWrite(_ newValue: PoolConfiguration) {
-        let existingData = UserDefaults.standard.data(forKey: defaultsKey)
-        let persistedExistedBefore = existingData != nil
-        let before = existingData.flatMap { try? JSONDecoder().decode(PoolConfiguration.self, from: $0) }
-
-        let beforeDescription = before.map(configFieldsDescription) ?? "nil"
-        let afterDescription = configFieldsDescription(newValue)
-        let beforeWasNonDefault = before.map { !isDefaultPreferenceTriple($0) } ?? false
-        let afterIsDefault = isDefaultPreferenceTriple(newValue)
-        let suspectedReset = persistedExistedBefore && beforeWasNonDefault && afterIsDefault
-
-        // Frames 0/1 are this function + the setter; the rest identify the actual caller/reason.
-        let caller = Thread.callStackSymbols.dropFirst(2).prefix(10).joined(separator: " | ")
-
-        appendDiagnosticEvent(ConfigDiagnosticEvent(
-            timestamp: Date(),
-            eventType: .write,
-            persistedExistedBefore: persistedExistedBefore,
-            beforeChlorine: before?.chlorinePreference.rawValue,
-            afterChlorine: newValue.chlorinePreference.rawValue,
-            beforePHDecreaser: before?.pHDecreaserPreference.rawValue,
-            afterPHDecreaser: newValue.pHDecreaserPreference.rawValue,
-            beforeTestMethod: before?.testMethod.rawValue,
-            afterTestMethod: newValue.testMethod.rawValue,
-            caller: caller
-        ))
-
-        if suspectedReset {
-            diagnosticsLog.fault("""
-            ⚠️ SUSPECTED PREFERENCE RESET — writing struct defaults over a populated config.
-            persistedExistedBefore=\(persistedExistedBefore, privacy: .public) \
-            before=\(beforeDescription, privacy: .public) after=\(afterDescription, privacy: .public)
-            caller=\(caller, privacy: .public)
-            """)
-        } else {
-            diagnosticsLog.notice("""
-            [CONFIG-WRITE] persistedExistedBefore=\(persistedExistedBefore, privacy: .public) \
-            before=\(beforeDescription, privacy: .public) after=\(afterDescription, privacy: .public)
-            caller=\(caller, privacy: .public)
-            """)
-        }
-    }
-
-    /// TEMP DIAGNOSTIC — remove before App Store submission. Logs and records every configuration event
-    /// history so it can be inspected later. Returns the entries so a connected DEBUG session (Xcode
-    /// console / `RunCodeSnippet`) can read them directly; also re-emits them through the unified log so a
-    /// later `log collect` retrieves them without a live capture. `#if DEBUG` only.
-    #if DEBUG
-    @discardableResult
-    static func dumpDiagnosticHistory() -> [ConfigDiagnosticEvent] {
-        let entries = diagnosticHistoryEntries()
-        let formatter = ISO8601DateFormatter()
-        diagnosticsLog.notice("[CONFIG-HISTORY] \(entries.count, privacy: .public) event(s) recorded (oldest first):")
-        for (index, event) in entries.enumerated() {
-            diagnosticsLog.notice("""
-            [CONFIG-HISTORY \(index + 1, privacy: .public)/\(entries.count, privacy: .public)] \
-            \(formatter.string(from: event.timestamp), privacy: .public) \(event.eventType.rawValue, privacy: .public) \
-            existedBefore=\(event.persistedExistedBefore, privacy: .public) \
-            chlorine=\(event.beforeChlorine ?? "nil", privacy: .public)->\(event.afterChlorine ?? "nil", privacy: .public) \
-            pHDecreaser=\(event.beforePHDecreaser ?? "nil", privacy: .public)->\(event.afterPHDecreaser ?? "nil", privacy: .public) \
-            testMethod=\(event.beforeTestMethod ?? "nil", privacy: .public)->\(event.afterTestMethod ?? "nil", privacy: .public) \
-            caller=\(event.caller, privacy: .public)
-            """)
-        }
-        return entries
-    }
-    #endif
-
     /// Removes all saved configuration (sign out)
     static func clearCurrent() {
-        // TEMP DIAGNOSTIC — remove before App Store submission. Records any removal of the persisted config
-        // so an unexpected clear (which would drop the user back to defaults/first-use) is visible.
-        let existing = persisted
-        let caller = Thread.callStackSymbols.dropFirst(1).prefix(10).joined(separator: " | ")
-        diagnosticsLog.fault("""
-        ⚠️ clearCurrent() called — removing persisted poolConfiguration.
-        caller=\(caller, privacy: .public)
-        """)
-        appendDiagnosticEvent(ConfigDiagnosticEvent(
-            timestamp: Date(),
-            eventType: .clear,
-            persistedExistedBefore: existing != nil,
-            beforeChlorine: existing?.chlorinePreference.rawValue,
-            afterChlorine: nil,
-            beforePHDecreaser: existing?.pHDecreaserPreference.rawValue,
-            afterPHDecreaser: nil,
-            beforeTestMethod: existing?.testMethod.rawValue,
-            afterTestMethod: nil,
-            caller: caller
-        ))
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
-        UserDefaults.standard.removeObject(forKey: hasCoverBackupKey)
-        UserDefaults.standard.removeObject(forKey: usesRoboticCleanerBackupKey)
-        UserDefaults.standard.removeObject(forKey: hasCoverExplicitChoiceKey)
-        UserDefaults.standard.removeObject(forKey: usesRoboticCleanerExplicitChoiceKey)
+        defaultsStore.removeObject(forKey: defaultsKey)
+        defaultsStore.removeObject(forKey: hasCoverBackupKey)
+        defaultsStore.removeObject(forKey: usesRoboticCleanerBackupKey)
+        defaultsStore.removeObject(forKey: hasCoverExplicitChoiceKey)
+        defaultsStore.removeObject(forKey: usesRoboticCleanerExplicitChoiceKey)
     }
 
     private static func recoveredEquipmentSettings(in config: PoolConfiguration) -> PoolConfiguration {
         var recovered = config
-        if !recovered.hasCover && UserDefaults.standard.bool(forKey: hasCoverBackupKey) {
+        if !recovered.hasCover && defaultsStore.bool(forKey: hasCoverBackupKey) {
             recovered.hasCover = true
         }
-        if !recovered.usesRoboticCleaner && UserDefaults.standard.bool(forKey: usesRoboticCleanerBackupKey) {
+        if !recovered.usesRoboticCleaner && defaultsStore.bool(forKey: usesRoboticCleanerBackupKey) {
             recovered.usesRoboticCleaner = true
         }
         return recovered

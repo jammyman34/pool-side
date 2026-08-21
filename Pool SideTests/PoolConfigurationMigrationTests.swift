@@ -1,7 +1,7 @@
 import XCTest
 @testable import Pool_Side
 
-final class PoolConfigurationMigrationTests: XCTestCase {
+final class PoolConfigurationMigrationTests: ConfigIsolatedTestCase {
     func testRetiredPreferenceLabelsMigrateToCurrentProducts() throws {
         XCTAssertEqual(try decode(ChlorinePreference.self, from: "Chlorine Granules"), .calHypo)
         XCTAssertEqual(try decode(ChlorinePreference.self, from: "Chlorine Tablets"), .tablets)
