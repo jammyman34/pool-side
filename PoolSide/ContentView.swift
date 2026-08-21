@@ -4,57 +4,144 @@ import SwiftData
 struct ContentView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
+
     @State private var selectedTab: Tab = .dashboard
     @State private var showingAddTest = false
     @State private var showingSettings = false
     @State private var showingStartupSplash = true
+    @State private var hasStartedFirstUseSetup = false
+    @State private var firstTestFlowInProgress = false
+    @State private var firstTestTreatmentPlanDisplayed = false
+    @State private var testCountWhenOpeningAddTest = 0
+
+    private var firstUseState: FirstUseStateResolver.State {
+        FirstUseStateResolver.resolve(
+            isConfigurationPersisted: PoolConfiguration.isConfigured,
+            configuration: viewModel.poolConfig,
+            savedTestCount: tests.count,
+            hasStartedSetup: hasStartedFirstUseSetup,
+            firstTestFlowInProgress: firstTestFlowInProgress,
+            firstTestTreatmentPlanDisplayed: firstTestTreatmentPlanDisplayed
+        )
+    }
 
     var body: some View {
         ZStack {
-            ZStack(alignment: .bottom) {
-                // Tab content — no TabView wrapper, drive visibility manually
-                // to keep the custom tab bar fully in control
-                Group {
-                    switch selectedTab {
-                    case .dashboard:
-                        DashboardView(
-                            showingAddTest: $showingAddTest,
-                            showingSettings: $showingSettings
-                        )
-                    case .insights:
-                        InsightsView()
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Custom tab bar
-                PoolTabBar(
-                    selectedTab: $selectedTab,
-                    showingAddTest: $showingAddTest
-                )
-            }
-            .ignoresSafeArea(edges: .bottom)
+            rootContent
 
             if showingStartupSplash {
                 StartupSplashView()
                     .transition(.opacity)
-                    .zIndex(1)
+                    .zIndex(3)
             }
         }
-        .fullScreenCover(isPresented: $showingAddTest) {
-            AddTestView()
+        .fullScreenCover(isPresented: $showingAddTest, onDismiss: handleAddTestDismissed) {
+            AddTestView(onFirstTestTreatmentPlanDisplayed: {
+                firstTestTreatmentPlanDisplayed = true
+            })
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }
+        .onAppear {
+            viewModel.refreshConfigFromStorage(reconcilingWith: tests)
+        }
+        .onChange(of: tests.count) { _, _ in
+            viewModel.refreshConfigFromStorage(reconcilingWith: tests)
+        }
         .task {
+            // One-time cleanup: reopen any Check that an earlier build auto-completed via full-test
+            // supersession (now removed). Idempotent and safe — never touches a user's own completions.
+            viewModel.reopenAutoCompletedChecks(in: tests, modelContext: modelContext)
+
+            // Cancel workflow reminders orphaned by earlier plan regenerations / prior sessions (their
+            // owning treatment/Check no longer exists), so stale wait/retest notifications never pile up.
+            // Routine next-test reminders are preserved. Idempotent.
+            await viewModel.reconcileWorkflowNotifications(in: tests)
+
             try? await Task.sleep(for: .milliseconds(1000))
             withAnimation(.easeOut(duration: 0.2)) {
                 showingStartupSplash = false
             }
-            if !PoolConfiguration.isConfigured {
-                showingSettings = true
+        }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        switch firstUseState {
+        case .welcome:
+            FirstUseWelcomeView {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                    hasStartedFirstUseSetup = true
+                }
             }
+        case .poolSetup:
+            FirstUsePoolSetupView {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                    hasStartedFirstUseSetup = false
+                }
+            }
+        case .firstTestEmptyDashboard, .firstTestInProgress, .firstTestCompletedTreatmentPlan:
+            firstTestDashboard
+        case .normalDashboard:
+            normalDashboard
+        }
+    }
+
+    private var normalDashboard: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                switch selectedTab {
+                case .dashboard:
+                    DashboardView(
+                        showingAddTest: $showingAddTest,
+                        showingSettings: $showingSettings
+                    )
+                case .insights:
+                    InsightsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            PoolTabBar(
+                selectedTab: $selectedTab,
+                showingAddTest: $showingAddTest,
+                onAddTest: openAddTest,
+                plusNamespace: nil,
+                isAddButtonEnabled: true
+            )
+        }
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var firstTestDashboard: some View {
+        FirstTestEmptyDashboardView(
+            onAddFirstTest: openAddTest,
+            onOpenSettings: {
+                showingSettings = true
+            },
+            isTransitioning: false,
+            plusNamespace: nil
+        )
+    }
+
+    private func openAddTest() {
+        testCountWhenOpeningAddTest = tests.count
+        firstTestFlowInProgress = tests.isEmpty
+        firstTestTreatmentPlanDisplayed = false
+        showingAddTest = true
+    }
+
+    private func handleAddTestDismissed() {
+        defer {
+            firstTestFlowInProgress = false
+            firstTestTreatmentPlanDisplayed = false
+        }
+
+        if testCountWhenOpeningAddTest == 0 && tests.count > 0 {
+            selectedTab = .dashboard
         }
     }
 }
@@ -78,19 +165,19 @@ private struct StartupSplashView: View {
                     .font(.custom("AvenirNext-DemiBold", size: 42))
                     .foregroundStyle(PoolColor.deepWater)
                     .minimumScaleFactor(0.78)
-                    .offset(y: 128)
+//                    .offset(y: 128)
 
                 Image("Test Data Hero")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 330)
 
-                Text("Know what your pool needs")
+                Text("Know when it’s ready to swim")
                     .font(.custom("AvenirNext-Medium", size: 20))
                     .foregroundStyle(PoolColor.deepWater.opacity(0.88))
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.82)
-                    .offset(y: -128)
+                    //.offset(y: 0)
             }
             .padding(.horizontal, 32)
             .offset(y: 4)
@@ -109,6 +196,9 @@ enum Tab: Hashable {
 struct PoolTabBar: View {
     @Binding var selectedTab: Tab
     @Binding var showingAddTest: Bool
+    var onAddTest: (() -> Void)? = nil
+    var plusNamespace: Namespace.ID? = nil
+    var isAddButtonEnabled: Bool = true
 
     private let raisedHeight: CGFloat = 24
     private let buttonSize: CGFloat = 80
@@ -154,9 +244,14 @@ struct PoolTabBar: View {
         .frame(width: 84)
     }
 
+    @ViewBuilder
     private var addButton: some View {
-        Button {
-            showingAddTest = true
+        let button = Button {
+            if let onAddTest {
+                onAddTest()
+            } else {
+                showingAddTest = true
+            }
         } label: {
             ZStack {
                 Circle()
@@ -167,6 +262,13 @@ struct PoolTabBar: View {
                     .foregroundStyle(.white)
             }
             .shadow(color: PoolColor.sunshine.opacity(0.35), radius: 14, y: 8)
+        }
+        .disabled(!isAddButtonEnabled)
+
+        if let plusNamespace {
+            button.matchedGeometryEffect(id: "firstUsePlus", in: plusNamespace)
+        } else {
+            button
         }
     }
 }

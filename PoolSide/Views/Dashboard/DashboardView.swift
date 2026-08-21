@@ -7,6 +7,7 @@ struct DashboardView: View {
     @Binding var showingSettings: Bool
     @Environment(PoolViewModel.self) private var viewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     @State private var showingHistory = false
@@ -39,12 +40,9 @@ struct DashboardView: View {
                             scoreCard(test: test)
                                 .padding(.horizontal, 28)
 
-                            nextTestPill(for: test)
-                                .padding(.horizontal, 28)
-                                .padding(.top, 12)
-
-                            // Recent tests
-                            recentTestsSection
+                            // Active (persistent) / Completed workflow sections.
+                            // The next-test badge lives inside the Active Tests header.
+                            workflowSections(for: test)
                                 .padding(.horizontal, 28)
                                 .padding(.top, 28)
                         } else {
@@ -125,6 +123,13 @@ struct DashboardView: View {
             .task(id: weatherTaskID) {
                 await refreshWeatherIfPossible()
             }
+            // Re-check the forecast whenever the app returns to the foreground. This is a non-forced
+            // refresh, so PoolWeatherService's freshness cache (30 min) avoids redundant network calls.
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                Task { await refreshWeatherIfPossible() }
+            }
+            .dashboardWalkthrough(isEligible: latestTest != nil)
             // Full history sheet
             .sheet(isPresented: $showingHistory) {
                 HistoryView()
@@ -185,27 +190,15 @@ struct DashboardView: View {
                 .frame(height: latestTest == nil ? 112 : 112)
                 .zIndex(0)
 //                .border(.red, width: 0.5)
-
-            if let test = latestTest {
-                HStack(spacing: 5) {
-                    Text("Latest Test")
-                        .fontWeight(.bold)
-                        .foregroundStyle(PoolColor.primaryText)
-                    Text("• \(test.date.relativeDisplay), \(timeString(test.date))")
-                        .foregroundStyle(PoolColor.secondaryText)
-                }
-                .font(.system(size: 17, weight: .medium))
-                .padding(.top, 10)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func nextTestPill(for test: PoolTest) -> some View {
-        let recommendation = viewModel.nextTestRecommendation(for: test, in: tests)
-
+        // Presentation-only: consume the scheduling authority's firstUpcoming; never derive dates here.
         return TimelineView(.periodic(from: .now, by: 60)) { context in
-            let label = nextTestPillText(for: recommendation.recommendedDate, now: context.date)
+            let firstUpcoming = viewModel.nextTestSchedule(for: test, in: tests, now: context.date)?.firstUpcoming
+            let label = nextTestPillText(for: firstUpcoming, now: context.date)
 
             HStack(spacing: 8) {
                 Image(systemName: "calendar.badge.clock")
@@ -220,65 +213,53 @@ struct DashboardView: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
-            .background(PoolColor.sand.opacity(0.60), in: Capsule())
+            .background(PoolColor.poolTeal.opacity(0.14), in: Capsule())
             .overlay(
                 Capsule()
-                    .stroke(PoolColor.sunshine.opacity(0.40), lineWidth: 1)
+                    .stroke(PoolColor.poolTeal.opacity(0.40), lineWidth: 1)
             )
             .accessibilityLabel(label)
         }
     }
 
     private func dashboardHeroTitle(for test: PoolTest) -> String {
+        // The hero headline is driven first by the canonical Swimability V2 readiness state (mapped via`swimReadinessStatus`). Only when V2 can't produce a definitive readiness (`.unknown`) do we fall back to describing the treatment-plan state.
         switch swimReadinessStatus(for: test) {
         case .readyNow:
-            return "Pool is ready"
+            // Shown when Swimability V2 says the pool is ready to swim right now (all swim gates pass, evidence is fresh). This is the "green light" headline.
+            return "Pool is ready, enjoy!"
         case .readyAfterWait:
+            // Shown when V2 expects the pool to become swim-ready after a wait — e.g. a treatment is circulating or a product needs time to disperse, but no gate currently fails outright.
             return "Almost swim-ready"
         case .notRecommended:
+            // Shown when V2 actively blocks swimming (a gate fails — e.g. low sanitizer, high pH/CC, algae/cloudy water). This is the "do not swim / verify first" headline.
             return "Check before swimming"
         case .unknown:
+            // V2 has no definitive readiness (e.g. insufficient/stale evidence). Fall through to the treatment-plan-based headlines below.
             break
         }
 
+        // Reached only on `.unknown`. If a required correction is still outstanding, prompt the user to act — surfaced when at least one non-watchlist treatment step is pending at immediate/recommended urgency.
         let pendingActions = test.treatments.filter { !$0.isCompleted && !$0.isSkipped && !$0.isWatchlistItem }
-        if pendingActions.contains(where: { $0.urgency == .immediate || $0.urgency == .recommended }) {
+        if pendingActions.contains(where: { $0.urgency.isActionable }) {
             return "Review your plan"
         }
 
+        // Reached on `.unknown` with no required treatment outstanding. If nothing at all is in progress (no incomplete/non-skipped treatments or checks), the workflow is quiet — surface a reassuring "nothing to do" headline.
         let activeTreatments = test.treatments.filter { !$0.isCompleted && !$0.isSkipped }
         if activeTreatments.isEmpty {
             return "All clear for now"
         }
 
+        // Reached on `.unknown` when work is still in progress but nothing is a *required* action right now (e.g. only optional/advisory steps or a pending focused Check remain). A neutral fallback headline.
         return "Latest pool check"
     }
 
+    /// Presentation only: the Dashboard maps the canonical Swimability V2 assessment (the single
+    /// production readiness authority) to its hero vocabulary. It performs NO chemistry/readiness
+    /// calculation of its own — all thresholds live in ChemistryPolicy / SwimReadinessGateEvaluator.
     private func swimReadinessStatus(for test: PoolTest) -> DashboardSwimReadinessStatus {
-        let indicators = Set(test.visualIndicators)
-        let hasVisibleProblem = indicators.contains(VisualIndicator.greenWater.rawValue)
-            || indicators.contains(VisualIndicator.algaeSpots.rawValue)
-            || indicators.contains(VisualIndicator.cloudyWater.rawValue)
-            || indicators.contains(VisualIndicator.foam.rawValue)
-        let targetRange = ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: test.cyanuricAcid)
-
-        if hasVisibleProblem
-            || test.pH < 7.2
-            || test.pH > 7.8
-            || test.combinedChlorine > 0.5
-            || test.freeChlorine < targetRange.lowerBound {
-            return .notRecommended
-        }
-
-        if test.freeChlorine > max(10, targetRange.upperBound) {
-            return .readyAfterWait
-        }
-
-        if test.visualIndicators.isEmpty {
-            return .unknown
-        }
-
-        return .readyNow
+        DashboardSwimReadinessStatus(swimabilityState: viewModel.swimReadinessAssessment(for: test, in: tests).state)
     }
 
     @ViewBuilder
@@ -395,95 +376,143 @@ struct DashboardView: View {
 
     // MARK: - Recent Tests
 
-    private var recentTestsSection: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Recent Tests")
-                    .font(.headline)
-                    .fontWeight(.bold)
-                    .foregroundStyle(PoolColor.primaryText)
-                Spacer()
-//                Button("See all") { showingHistory = true }
-//                    .font(.subheadline)
-//                    .fontWeight(.medium)
-//                    .foregroundStyle(PoolColor.poolTeal)
-            }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 12)
+    private func workflowSections(for latestTest: PoolTest) -> some View {
+        let workflows = viewModel.dashboardWorkflows(from: tests)
+        return VStack(alignment: .leading, spacing: 28) {
+            // Active Tests is always present. Its header hosts the next-test badge.
+            activeTestsSection(items: workflows.active, latestTest: latestTest)
 
-            VStack(spacing: 0) {
-                ForEach(Array(tests.prefix(7).enumerated()), id: \.element.id) { index, test in
-                    SwipeToDeleteRow(
-                        isOpen: swipedTestID == test.id,
-                        onOpen: { swipedTestID = test.id },
-                        onClose: { swipedTestID = nil },
-                        onDelete: { deleteTest(test) }
-                    ) {
-                        recentTestRow(test)
-                            .background(Color.white)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if swipedTestID == test.id {
-                                    swipedTestID = nil
-                                } else {
-                                    editRoute = DashboardEditRoute(
-                                        test: test,
-                                        startsOnTreatmentPlan: true
-                                    )
-                                }
-                            }
-                    }
-
-                    if index < min(tests.count, 7) - 1 {
-                        Divider()
-                            .overlay(PoolColor.divider)
-                            .padding(.leading, 20)
-                    }
-                }
+            if !workflows.completed.isEmpty {
+                workflowSection(title: "Completed Tests", items: Array(workflows.completed.prefix(12)))
             }
-            .frame(maxWidth: .infinity)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func recentTestRow(_ test: PoolTest) -> some View {
-        let score = score(for: test)
+    /// Persistent Active Tests section. When there are active rows the next-test badge sits on the
+    /// title row (≥24pt gap); when there are none the badge drops beneath the title, centered, with
+    /// 32pt top spacing.
+    @ViewBuilder
+    private func activeTestsSection(items: [DashboardWorkflowItem], latestTest: PoolTest) -> some View {
+        let hasBadge = viewModel.nextTestSchedule(for: latestTest, in: tests)?.firstUpcoming.recommendedDate != nil
 
-        return HStack(spacing: 14) {
-            // Date
+        VStack(spacing: 0) {
+            if items.isEmpty {
+                HStack {
+                    activeTestsTitle
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+
+                if hasBadge {
+                    nextTestPill(for: latestTest)
+                        .padding(.top, 32)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } else {
+                HStack(alignment: .center) {
+                    activeTestsTitle
+                    if hasBadge {
+                        Spacer(minLength: 24)
+                        nextTestPill(for: latestTest)
+                    } else {
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.bottom, 12)
+
+                workflowRowsCard(items: items)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var activeTestsTitle: some View {
+        Text("Active Tests")
+            .font(.headline)
+            .fontWeight(.bold)
+            .foregroundStyle(PoolColor.primaryText)
+    }
+
+    private func workflowSection(title: String, items: [DashboardWorkflowItem]) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(PoolColor.primaryText)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 12)
+
+            workflowRowsCard(items: items)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func workflowRowsCard(items: [DashboardWorkflowItem]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                SwipeToDeleteRow(
+                    isOpen: swipedTestID == item.rootTestID,
+                    onOpen: { swipedTestID = item.rootTestID },
+                    onClose: { swipedTestID = nil },
+                    onDelete: { deleteTestID(item.rootTestID) }
+                ) {
+                    workflowRow(item)
+                        .background(Color.white)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if swipedTestID == item.rootTestID {
+                                swipedTestID = nil
+                            } else if let test = tests.first(where: { $0.id == item.rootTestID }) {
+                                editRoute = DashboardEditRoute(test: test, startsOnTreatmentPlan: true)
+                            }
+                        }
+                }
+
+                if index < items.count - 1 {
+                    Divider()
+                        .overlay(PoolColor.divider)
+                        .padding(.leading, 20)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+    }
+
+    @ViewBuilder
+    private func workflowRow(_ item: DashboardWorkflowItem) -> some View {
+        HStack(spacing: 14) {
+            // Leading: original date/time
             VStack(alignment: .leading, spacing: 1) {
-                Text(shortDate(test.date))
+                Text(shortDate(item.originalTestDate))
                     .font(.subheadline)
                     .foregroundStyle(PoolColor.primaryText)
-                Text(timeString(test.date))
+                Text(timeString(item.originalTestDate))
                     .font(.caption2)
                     .foregroundStyle(PoolColor.secondaryText)
             }
-            .frame(width: 80, alignment: .leading)
+            .frame(width: 72, alignment: .leading)
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            // Score circle
-            ZStack {
-                Circle()
-                    .stroke(scoreColor(score).opacity(0.2), lineWidth: 2)
-                Circle()
-                    .fill(scoreColor(score).opacity(0.1))
-                Text("\(score)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(scoreColor(score))
+            // Center: workflow state or final score
+            switch item.state {
+            case .treatmentNeeded:
+                workflowStateContent(icon: "flask.fill", label: "Treatment Needed", color: PoolColor.treatmentAccent)
+            case .awaitingPoolCheck:
+                workflowStateContent(icon: "list.bullet.clipboard", label: "Awaiting Pool Check", color: PoolColor.checkAccent)
+            case .completed:
+                completedStateContent(item)
             }
-            .frame(width: 40, height: 40)
 
-            // Status label
-            Text(scoreLabel(score))
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(scoreColor(score))
-                .frame(width: 100, alignment: .leading)
+            Spacer(minLength: 8)
 
             Image(systemName: "chevron.right")
                 .font(.caption2)
@@ -492,6 +521,46 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.accessibilityLabel)
+    }
+
+    private func workflowStateContent(icon: String, label: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func completedStateContent(_ item: DashboardWorkflowItem) -> some View {
+        let score = item.finalScore ?? 0
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().stroke(scoreColor(score).opacity(0.25), lineWidth: 2)
+                Circle().fill(scoreColor(score).opacity(0.1))
+                Text("\(score)")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(scoreColor(score))
+            }
+            .frame(width: 38, height: 38)
+
+            Text(item.finalGrade ?? viewModel.scoreGrade(score))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(scoreColor(score))
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func deleteTestID(_ id: UUID) {
+        guard let test = tests.first(where: { $0.id == id }) else { return }
+        deleteTest(test)
     }
 
     private func score(for test: PoolTest) -> Int {
@@ -566,7 +635,7 @@ struct DashboardView: View {
 
     private var greetingLineText: String {
         if let category = weather.category, let current = weather.currentTemperatureFahrenheit, let high = weather.highTemperatureFahrenheit {
-            let line = "\(greetingText) \(category.shortDescription) C\(current)℉ (H\(high)℉)"
+            let line = "\(greetingText) \n\(category.shortDescription) C\(current)℉ (H\(high)℉)"
             print("[Weather] Greeting with forecast: \(line)")
             return line
         }
@@ -578,6 +647,8 @@ struct DashboardView: View {
     private var heroAssetName: String {
         weather.category?.heroAssetName ?? "Sunny Hero"
     }
+    
+    
 
     private var weatherTaskID: String {
         let lat = viewModel.poolConfig.latitude.map { String(format: "%.3f", $0) } ?? "nil"
@@ -593,8 +664,18 @@ struct DashboardView: View {
         print("\n===== WEATHER REFRESH BEGIN =====")
         print("[Weather] Config snapshot: location=\(loc), lat=\(latStr), lon=\(lonStr), force=\(force)")
 
+        // Backfill coordinates from a typed location string if they were never captured (only "Use Current
+        // Location" previously set coordinates). This is what lets weather work for manually entered places.
+        if viewModel.poolConfig.latitude == nil || viewModel.poolConfig.longitude == nil {
+            await viewModel.resolveCoordinatesIfNeeded()
+        }
+
         guard let latitude = viewModel.poolConfig.latitude, let longitude = viewModel.poolConfig.longitude else {
-            print("[Weather] Decision: SKIP — coordinates are nil (cannot query weather provider)")
+            let hasLocationText = !viewModel.poolConfig.location.trimmingCharacters(in: .whitespaces).isEmpty
+            weather.lastErrorMessage = hasLocationText
+                ? "Couldn't find “\(viewModel.poolConfig.location)”. Try a nearby city, or tap Use Current Location in Settings."
+                : "Add your location in Settings to see local weather."
+            print("[Weather] Decision: SKIP — no coordinates (hasLocationText=\(hasLocationText))")
             print("===== WEATHER REFRESH END =====\n")
             return
         }
@@ -624,13 +705,7 @@ struct DashboardView: View {
     }
 
     private func scoreLabel(_ score: Int) -> String {
-        switch score {
-        case 90...100: return "Great"
-        case 75..<90:  return "Good"
-        case 60..<75:  return "Alright"
-        case 40..<60:  return "Not Great"
-        default:       return "Real Bad"
-        }
+        viewModel.scoreGrade(score)
     }
 
     private func scoreColor(_ score: Int) -> Color {
@@ -704,12 +779,22 @@ struct DashboardView: View {
         return f.string(from: date)
     }
 
-    private func nextTestPillText(for date: Date, now: Date = Date()) -> String {
-        if date <= now {
-            return "Test pool water today"
+    private func nextTestPillText(for recommendation: NextTestRecommendation?, now: Date = Date()) -> String {
+        guard let recommendation, let date = recommendation.recommendedDate else { return "Next test after treatment" }
+
+        // Distinct content for the two routine tests; date/time formatting is unchanged.
+        let name: String
+        switch recommendation.source {
+        case .routineFCAndPH:   name = "Test FC & pH"
+        case .routineFullPanel: name = "Full Test Panel"
+        default:                name = "Next test"
         }
 
-        return "Next test \(nextTestPillDateText(date))"
+        if date <= now {
+            return "\(name) today"
+        }
+
+        return "\(name) \(nextTestPillDateText(date))"
     }
 
     private func nextTestPillDateText(_ date: Date) -> String {
@@ -733,11 +818,27 @@ private struct DashboardEditRoute: Identifiable {
     var id: UUID { test.id }
 }
 
-private enum DashboardSwimReadinessStatus {
+/// Pure presentation mapping from the canonical Swimability V2 state to the Dashboard hero vocabulary.
+/// Kept `internal` (not private) so it is unit-testable as a presentation layer — it contains no
+/// chemistry logic. If V2 gains states this must map them intentionally rather than hide distinctions.
+enum DashboardSwimReadinessStatus: Equatable {
     case readyNow
     case readyAfterWait
     case notRecommended
     case unknown
+
+    init(swimabilityState state: SwimabilityState) {
+        switch state {
+        case .readyToSwim:
+            self = .readyNow
+        case .expectedReadyAfterTreatment, .expectedReadyAroundTime:
+            self = .readyAfterWait
+        case .doNotSwim, .testBeforeSwimming:
+            self = .notRecommended
+        case .moreInformationNeeded:
+            self = .unknown
+        }
+    }
 }
 
 private enum DashboardWelcomeMessage {
@@ -853,4 +954,59 @@ private struct SwipeToDeleteRow<Content: View>: View {
     )
     .environment(PoolViewModel())
     .modelContainer(for: [PoolTest.self, Treatment.self], inMemory: true)
+}
+
+#Preview("Active + Completed") {
+    @Previewable @State var showingAddTest = false
+    @Previewable @State var showingSettings = false
+    let container = try! ModelContainer(
+        for: PoolTest.self, Treatment.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    let now = Date()
+
+    // Completed (latest, shown in the score card too)
+    let done = PoolTest(date: now, pH: 7.5, freeChlorine: 7, totalChlorine: 7,
+                        totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60)
+    // Active — Treatment Needed
+    let needs = PoolTest(date: now.addingTimeInterval(-3600), pH: 7.9, freeChlorine: 6, totalChlorine: 6,
+                         totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60)
+    needs.treatments = [Treatment(chemicalName: "Muriatic Acid", actionDescription: "Lower pH", amount: 20,
+                                  unit: "fl oz", instructions: "", urgency: .recommended, targetParameter: "pH",
+                                  sortOrder: 1, effectDelayHours: 4, poolTest: needs)]
+    // Active — Awaiting Pool Check
+    let awaiting = PoolTest(date: now.addingTimeInterval(-7200), pH: 7.8, freeChlorine: 6, totalChlorine: 6,
+                            totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60)
+    let parent = Treatment(chemicalName: "Muriatic Acid", actionDescription: "Lower pH", amount: 20, unit: "fl oz",
+                           instructions: "", urgency: .recommended, isCompleted: true, completedAt: now.addingTimeInterval(-1800),
+                           targetParameter: "pH", sortOrder: 1, effectDelayHours: 4, poolTest: awaiting)
+    let check = TreatmentWorkflowEngine().makeCheckStep(after: parent, sortOrder: 2)!
+    awaiting.treatments = [parent, check]
+
+    for t in [done, needs, awaiting] { container.mainContext.insert(t) }
+
+    ContextualEducationStore.shared.markSeen(ContextualWalkthroughID.dashboard)
+    return DashboardView(showingAddTest: $showingAddTest, showingSettings: $showingSettings)
+        .environment(PoolViewModel())
+        .modelContainer(container)
+}
+
+#Preview("Completed only (empty Active)") {
+    @Previewable @State var showingAddTest = false
+    @Previewable @State var showingSettings = false
+    let container = try! ModelContainer(
+        for: PoolTest.self, Treatment.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    let now = Date()
+    let done = PoolTest(date: now, pH: 7.5, freeChlorine: 7, totalChlorine: 7,
+                        totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60)
+    let older = PoolTest(date: now.addingTimeInterval(-172_800), pH: 7.4, freeChlorine: 6, totalChlorine: 6,
+                         totalAlkalinity: 100, calciumHardness: 350, cyanuricAcid: 60)
+    for t in [done, older] { container.mainContext.insert(t) }
+
+    ContextualEducationStore.shared.markSeen(ContextualWalkthroughID.dashboard)
+    return DashboardView(showingAddTest: $showingAddTest, showingSettings: $showingSettings)
+        .environment(PoolViewModel())
+        .modelContainer(container)
 }

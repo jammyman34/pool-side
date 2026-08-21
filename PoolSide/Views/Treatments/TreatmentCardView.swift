@@ -19,17 +19,13 @@ struct TreatmentCardView: View {
     var onRestore: @MainActor (Treatment) async -> Void
     @Binding var openSwipeTreatmentID: UUID?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.modelContext) private var modelContext
     @Environment(PoolViewModel.self) private var viewModel
 
     @State private var expanded: Bool = false
     @State private var isCompleting: Bool = false
-    @State private var dragOffset: CGFloat = 0
-    @State private var isSkipOpen: Bool = false
-    @State private var isRestoreOpen: Bool = false
     @State private var showingProductPicker: Bool = false
-
-    private let actionWidth: CGFloat = 92
 
     private var swappableCategory: ChemicalProductCategory? {
         guard allowsActions, !treatment.isCompleted, !treatment.isSkipped else { return nil }
@@ -38,24 +34,11 @@ struct TreatmentCardView: View {
 
     private var urgencyColor: Color {
         if treatment.isSkipped { return PoolColor.statusSlight }
-        switch treatment.urgency {
-        case .immediate:   return PoolColor.statusCritical
-        case .recommended: return PoolColor.statusOffRange
-        case .optional:    return PoolColor.statusSlight
-        case .advisory:    return PoolColor.secondaryText
-        }
+        return PoolColor.urgencyStatusColor(treatment.urgency)
     }
 
     private var urgencyLabel: String {
         treatment.isSkipped ? "Skipped" : treatment.urgency.displayName
-    }
-
-    private var cardOffset: CGFloat {
-        guard allowsActions else { return 0 }
-        if dragOffset < 0 { return max(dragOffset, -actionWidth) }
-        if dragOffset > 0 { return min(dragOffset, actionWidth) }
-        if isSkipOpen { return -actionWidth }
-        return isRestoreOpen ? actionWidth : 0
     }
 
     /// e.g. "2.5 lbs" — suppresses "0 " when amount is zero
@@ -68,34 +51,15 @@ struct TreatmentCardView: View {
     }
 
     var body: some View {
-        ZStack {
-            if allowsActions && treatment.isSkipped && cardOffset > 0 {
-                restoreAction
-                    .zIndex(1)
-            } else if allowsActions && !treatment.isCompleted && cardOffset < 0 {
-                skipAction
-                    .zIndex(1)
-            }
-
+        SwipeableSkipRow(
+            itemID: treatment.id,
+            isSkipped: treatment.isSkipped,
+            gestureEnabled: allowsActions && !treatment.isCompleted,
+            openSwipeID: $openSwipeTreatmentID,
+            onSkip: { await onSkip(treatment) },
+            onRestore: { await onRestore(treatment) }
+        ) {
             cardContent
-                .offset(x: cardOffset)
-                .zIndex(0)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if isSkipOpen || isRestoreOpen {
-                        closeSwipeActions(clearOpenTreatment: true)
-                    }
-                }
-                .conditionalSimultaneousGesture(skipGesture, enabled: allowsActions && !treatment.isCompleted)
-                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isSkipOpen)
-                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isRestoreOpen)
-                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .onChange(of: openSwipeTreatmentID) { _, newValue in
-            if newValue != treatment.id {
-                closeSwipeActions(clearOpenTreatment: false)
-            }
         }
         .sheet(isPresented: $showingProductPicker) {
             if let category = swappableCategory {
@@ -119,9 +83,7 @@ struct TreatmentCardView: View {
     private var chemicalNameView: some View {
         if let category = swappableCategory {
             Button {
-                if isSkipOpen || isRestoreOpen {
-                    closeSwipeActions(clearOpenTreatment: true)
-                }
+                openSwipeTreatmentID = nil   // close any open swipe row
                 showingProductPicker = true
             } label: {
                 HStack(spacing: 6) {
@@ -172,6 +134,8 @@ struct TreatmentCardView: View {
         )
         guard let newTemplate = repricedTemplate ?? proposedTemplate else { return }
 
+        let previousProductIdentifier = treatment.productIdentifier
+        let previousChemicalName = treatment.chemicalName
         treatment.chemicalName = newTemplate.chemicalName
         treatment.amount = newTemplate.amount
         treatment.unit = newTemplate.unit
@@ -189,8 +153,20 @@ struct TreatmentCardView: View {
 
         try? modelContext.save()
 
+        if previousProductIdentifier != treatment.productIdentifier || previousChemicalName != treatment.chemicalName {
+            Task { @MainActor in
+                _ = await viewModel.refreshTreatmentNotificationsAfterProductChange(
+                    treatment,
+                    in: [test],
+                    modelContext: modelContext
+                )
+            }
+        }
+
         if saveAsDefault {
-            viewModel.saveConfig(updatedConfig)
+            viewModel.updateConfig { config in
+                config = category.configApplying(selection: selection, to: config)
+            }
         }
     }
 
@@ -225,12 +201,15 @@ struct TreatmentCardView: View {
                         Label(waitLabel, systemImage: "clock.badge.exclamationmark")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(PoolColor.poolTeal)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                            .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.9)
+                            .labelStyle(.titleAndIcon)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityElement(children: .combine)
                             .padding(.top, 2)
                     }
                 }
@@ -336,22 +315,124 @@ struct TreatmentCardView: View {
         .opacity(treatment.isCompleted ? 0.65 : 1)
     }
 
+    private var waitLabel: String? {
+        guard allowsActions, !treatment.isCompleted, !treatment.isSkipped else { return nil }
+        return TreatmentTimingGuidance.cardTip(
+            for: treatment,
+            nextActionableTreatment: nextActionableTreatment,
+            requiresVerificationBeforeSwimming: requiresVerificationBeforeSwimming
+        )
+    }
+
+    private var requiresVerificationBeforeSwimming: Bool {
+        TreatmentTimingGuidance.requiresVerificationBeforeSwimming(for: treatment)
+    }
+}
+
+// MARK: - Shared swipe-to-skip / swipe-to-restore container
+
+/// The single swipe interaction used by both treatment cards and focused-Check cards:
+/// right-to-left reveals Skip; left-to-right on a skipped row reveals Restore. VoiceOver users get
+/// equivalent accessibility actions. Only one row's actions are open at a time via `openSwipeID`.
+struct SwipeableSkipRow<Content: View>: View {
+    let itemID: UUID
+    let isSkipped: Bool
+    /// Enable the gesture (typically `allowsActions && !isCompleted`).
+    let gestureEnabled: Bool
+    let cornerRadius: CGFloat
+    let skipAccessibilityLabel: String
+    let restoreAccessibilityLabel: String
+    let onSkip: @MainActor () async -> Void
+    let onRestore: @MainActor () async -> Void
+    @Binding var openSwipeID: UUID?
+    private let content: Content
+
+    @State private var dragOffset: CGFloat = 0
+    @State private var isSkipOpen = false
+    @State private var isRestoreOpen = false
+    private let actionWidth: CGFloat = 92
+
+    init(
+        itemID: UUID,
+        isSkipped: Bool,
+        gestureEnabled: Bool,
+        cornerRadius: CGFloat = 16,
+        skipAccessibilityLabel: String = "Skip",
+        restoreAccessibilityLabel: String = "Restore",
+        openSwipeID: Binding<UUID?>,
+        onSkip: @escaping @MainActor () async -> Void,
+        onRestore: @escaping @MainActor () async -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.itemID = itemID
+        self.isSkipped = isSkipped
+        self.gestureEnabled = gestureEnabled
+        self.cornerRadius = cornerRadius
+        self.skipAccessibilityLabel = skipAccessibilityLabel
+        self.restoreAccessibilityLabel = restoreAccessibilityLabel
+        self._openSwipeID = openSwipeID
+        self.onSkip = onSkip
+        self.onRestore = onRestore
+        self.content = content()
+    }
+
+    private var cardOffset: CGFloat {
+        guard gestureEnabled else { return 0 }
+        if dragOffset < 0 { return max(dragOffset, -actionWidth) }
+        if dragOffset > 0 { return min(dragOffset, actionWidth) }
+        if isSkipOpen { return -actionWidth }
+        return isRestoreOpen ? actionWidth : 0
+    }
+
+    var body: some View {
+        ZStack {
+            if gestureEnabled && isSkipped && cardOffset > 0 {
+                restoreAction.zIndex(1)
+            } else if gestureEnabled && !isSkipped && cardOffset < 0 {
+                skipAction.zIndex(1)
+            }
+
+            content
+                .offset(x: cardOffset)
+                .zIndex(0)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isSkipOpen || isRestoreOpen { close(clear: true) }
+                }
+                .conditionalSimultaneousGesture(gesture, enabled: gestureEnabled)
+                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isSkipOpen)
+                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isRestoreOpen)
+                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .onChange(of: openSwipeID) { _, newValue in
+            if newValue != itemID { close(clear: false) }
+        }
+        .accessibilityActions {
+            if gestureEnabled && !isSkipped {
+                Button(skipAccessibilityLabel) { Task { await performSkip() } }
+            }
+            if gestureEnabled && isSkipped {
+                Button(restoreAccessibilityLabel) { Task { await performRestore() } }
+            }
+        }
+    }
+
+    @MainActor private func performSkip() async {
+        await onSkip(); isSkipOpen = false; openSwipeID = nil; dragOffset = 0
+    }
+
+    @MainActor private func performRestore() async {
+        await onRestore(); isRestoreOpen = false; openSwipeID = nil; dragOffset = 0
+    }
+
     private var skipAction: some View {
         HStack(spacing: 0) {
             Spacer()
-            Button {
-                Task {
-                    await onSkip(treatment)
-                    isSkipOpen = false
-                    openSwipeTreatmentID = nil
-                    dragOffset = 0
-                }
-            } label: {
+            Button { Task { await performSkip() } } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: "slash.circle")
-                        .font(.headline)
-                    Text("Skip")
-                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "slash.circle").font(.headline)
+                    Text("Skip").font(.caption2.weight(.semibold))
                 }
                 .foregroundStyle(.white)
                 .frame(width: actionWidth)
@@ -363,19 +444,10 @@ struct TreatmentCardView: View {
 
     private var restoreAction: some View {
         HStack(spacing: 0) {
-            Button {
-                Task {
-                    await onRestore(treatment)
-                    isRestoreOpen = false
-                    openSwipeTreatmentID = nil
-                    dragOffset = 0
-                }
-            } label: {
+            Button { Task { await performRestore() } } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: "arrow.uturn.left.circle")
-                        .font(.headline)
-                    Text("Restore")
-                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "arrow.uturn.left.circle").font(.headline)
+                    Text("Restore").font(.caption2.weight(.semibold))
                 }
                 .foregroundStyle(.white)
                 .frame(width: actionWidth)
@@ -386,14 +458,11 @@ struct TreatmentCardView: View {
         }
     }
 
-    private var skipGesture: some Gesture {
+    private var gesture: some Gesture {
         DragGesture(minimumDistance: 18)
             .onChanged { value in
-                guard allowsActions else { return }
-                guard !treatment.isCompleted else { return }
-                guard isHorizontalSwipe(value.translation) else { return }
-
-                if treatment.isSkipped {
+                guard gestureEnabled, isHorizontalSwipe(value.translation) else { return }
+                if isSkipped {
                     let baseOffset = isRestoreOpen ? actionWidth : 0
                     dragOffset = max(0, min(actionWidth, baseOffset + value.translation.width))
                 } else {
@@ -402,25 +471,13 @@ struct TreatmentCardView: View {
                 }
             }
             .onEnded { value in
-                guard allowsActions else {
-                    dragOffset = 0
-                    return
-                }
-                guard !treatment.isCompleted else {
-                    dragOffset = 0
-                    return
-                }
-                guard isHorizontalSwipe(value.translation) else {
-                    dragOffset = 0
-                    return
-                }
-
-                if treatment.isSkipped {
+                guard gestureEnabled, isHorizontalSwipe(value.translation) else { dragOffset = 0; return }
+                if isSkipped {
                     isRestoreOpen = cardOffset > actionWidth * 0.45
-                    openSwipeTreatmentID = isRestoreOpen ? treatment.id : nil
+                    openSwipeID = isRestoreOpen ? itemID : nil
                 } else {
                     isSkipOpen = cardOffset < -(actionWidth * 0.45)
-                    openSwipeTreatmentID = isSkipOpen ? treatment.id : nil
+                    openSwipeID = isSkipOpen ? itemID : nil
                 }
                 dragOffset = 0
             }
@@ -430,20 +487,13 @@ struct TreatmentCardView: View {
         abs(translation.width) > abs(translation.height) * 1.35
     }
 
-    private func closeSwipeActions(clearOpenTreatment: Bool) {
+    private func close(clear: Bool) {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
             isSkipOpen = false
             isRestoreOpen = false
-            if clearOpenTreatment {
-                openSwipeTreatmentID = nil
-            }
+            if clear { openSwipeID = nil }
             dragOffset = 0
         }
-    }
-
-    private var waitLabel: String? {
-        guard allowsActions, !treatment.isCompleted, !treatment.isSkipped else { return nil }
-        return TreatmentTimingGuidance.cardTip(for: treatment, nextActionableTreatment: nextActionableTreatment)
     }
 }
 

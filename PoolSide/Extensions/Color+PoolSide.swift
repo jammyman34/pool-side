@@ -74,7 +74,27 @@ enum PoolColor {
     /// #A8A8A8 — Testing / awaiting results
     static let statusTesting      = Color("StatusTesting")
 
+    // MARK: - Canonical urgency → status color
+
+    /// The single mapping from canonical treatment urgency to a semantic status color. Every surface that
+    /// colors by urgency consumes this, so Act Now / Needs Attention / Recommended read identically
+    /// everywhere. Focused Checks (verification) use `statusTesting` directly at their call sites.
+    static func urgencyStatusColor(_ urgency: TreatmentUrgency) -> Color {
+        switch urgency {
+        case .immediate:      return statusCritical   // Act Now
+        case .needsAttention: return statusOffRange    // Needs Attention
+        case .recommended:    return statusSlight       // Recommended (optimization)
+        case .optional:       return statusSlight       // legacy — treat as optimization
+        case .advisory:       return secondaryText       // watchlist observation (muted)
+        }
+    }
+
     // MARK: - Semantic Aliases (Light Theme)
+
+    // Workflow accents (Dashboard Active Tests). Additive semantic tokens — the treatment workflow
+    // reads purple and the focused-Check workflow reads orange in the current Dashboard mockup.
+    static let treatmentAccent    = Color(hex: "7A5CFF")  // purple — "Treatment Needed"
+    static let checkAccent        = coral                  // orange — "Awaiting Pool Check"
 
     static let appBackground      = Color(hex: "F5F7F6")  // very light teal-tinted white
     static let cardBackground     = cloudWhite             // pure white cards

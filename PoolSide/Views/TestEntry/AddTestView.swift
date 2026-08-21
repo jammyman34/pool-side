@@ -71,6 +71,11 @@ private enum CyaMixingTimerState: Equatable {
     }
 }
 
+private enum FirstTestEntryStep {
+    case waterTest
+    case poolState
+}
+
 struct AddTestView: View {
 
     private static let taylorSampleSizeDefaultsKey = "AddTestView.taylorSampleSize"
@@ -78,10 +83,16 @@ struct AddTestView: View {
     /// When non-nil, the view is in "edit" mode for an existing test
     var editingTest: PoolTest? = nil
     var startsOnTreatmentPlan: Bool = false
+    var onFirstTestTreatmentPlanDisplayed: (() -> Void)? = nil
 
-    init(editingTest: PoolTest? = nil, startsOnTreatmentPlan: Bool = false) {
+    init(
+        editingTest: PoolTest? = nil,
+        startsOnTreatmentPlan: Bool = false,
+        onFirstTestTreatmentPlanDisplayed: (() -> Void)? = nil
+    ) {
         self.editingTest = editingTest
         self.startsOnTreatmentPlan = startsOnTreatmentPlan
+        self.onFirstTestTreatmentPlanDisplayed = onFirstTestTreatmentPlanDisplayed
         _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
         _taylorSampleSize = State(initialValue: Self.savedTaylorSampleSize)
     }
@@ -108,6 +119,11 @@ struct AddTestView: View {
     @State private var includeTemperature: Bool = false
     @State private var includeSalt: Bool = false
     @State private var selectedVisualIndicators: Set<String> = []
+    @State private var waterClarityAssessment: WaterClarityAssessment = .notRecorded
+    @State private var visibleAlgaeAssessment: VisibleAlgaeAssessment = .notRecorded
+    @State private var algaeFollowUpResponse: VisualFollowUpResponse = .notRecorded
+    @State private var cloudinessFollowUpResponse: VisualFollowUpResponse = .notRecorded
+    @State private var isUnusualObservationExpanded: Bool = false
     @State private var swimmingLoad: SwimmingLoad = .unknown
     @State private var petSwimmingLoad: PetSwimmingLoad = .unknown
     @State private var rainLoad: RainLoad = .unknown
@@ -138,6 +154,7 @@ struct AddTestView: View {
     @State private var showingTreatmentPlan: Bool = false
     @State private var didAutoShowInitialTreatmentPlan: Bool = false
     @State private var isSaving: Bool = false
+    @State private var firstTestEntryStep: FirstTestEntryStep = .waterTest
 
     // New states for TestingMethodCard integration
     @State private var showTestingMethodEditor: Bool = false
@@ -164,6 +181,10 @@ struct AddTestView: View {
 
     private var isEditing: Bool { editingTest != nil || savedTest != nil }
 
+    private var isGuidedNewTest: Bool {
+        editingTest == nil && savedTest == nil
+    }
+
     private var navTitle: String {
         if editingTest != nil {
             return "Edit Test Log"
@@ -174,6 +195,9 @@ struct AddTestView: View {
     private var heroTitle: String {
         if let test = editingTest {
             return "\(shortDate(test.date)), \(timeString(test.date)) test results"
+        }
+        if isGuidedNewTest && firstTestEntryStep == .poolState {
+            return "pool conditions (since last test log)"
         }
         return "test results"
     }
@@ -187,7 +211,33 @@ struct AddTestView: View {
         return currentSnapshot != originalSnapshot
     }
 
+    private var testEntryContext: TestEntryContext {
+        let history = tests.filter { $0.id != editingTest?.id }
+        return TestEntryContextResolver().resolve(
+            poolConfig: viewModel.poolConfig,
+            recentHistory: history
+        )
+    }
+
+    private var shouldShowDetailedVisualQuestions: Bool {
+        switch testEntryContext.kind {
+        case .initialAssessment:
+            return true
+        case .maintenance:
+            return isUnusualObservationExpanded
+                || waterClarityAssessment == .cloudy
+                || waterClarityAssessment == .cannotTell
+                || visibleAlgaeAssessment == .present
+                || visibleAlgaeAssessment == .cannotTell
+        case .followUp:
+            return true
+        }
+    }
+
     private var treatmentButtonTitle: String {
+        if isGuidedNewTest && firstTestEntryStep == .waterTest {
+            return "Continue"
+        }
         if isEditing {
             if hasFormChanges { return "Update Treatment" }
             if hasExistingTreatmentPlan { return "View Treatment" }
@@ -215,7 +265,11 @@ struct AddTestView: View {
             taylorCHDrops: usesDropHardness ? taylorCHDrops : nil,
             poolConditions: currentPoolConditions,
             notes: notes,
-            visualIndicators: orderedVisualIndicators
+            visualIndicators: orderedVisualIndicators,
+            waterClarityAssessment: waterClarityAssessment,
+            visibleAlgaeAssessment: visibleAlgaeAssessment,
+            algaeFollowUpResponse: algaeFollowUpResponse,
+            cloudinessFollowUpResponse: cloudinessFollowUpResponse
         )
     }
 
@@ -439,74 +493,98 @@ struct AddTestView: View {
             ZStack(alignment: .bottom) {
                 PoolColor.appBackground.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Teal hero banner
-                        heroBanner
+                ScrollViewReader { scrollProxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            Color.clear
+                                .frame(height: 0)
+                                .id("addTestTop")
 
-                        // Place TestingMethodCard immediately after heroBanner
-                        TestingMethodCard(
-                            mode: .summary(onTap: { showTestingMethodEditor = true }),
-                            testMethod: testMethod,
-                            saveAsDefault: saveTestMethodAsDefault,
-                            liquidDropKitBrand: liquidDropKitBrand
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.top, -16)
+                            // Teal hero banner
+                            heroBanner
 
-                        // Form rows on white card
-                        ZStack(alignment: .topLeading) {
-                            VStack(spacing: 0) {
-                                ForEach(Array(visibleChemicalFields.enumerated()), id: \.element.id) { index, chemical in
-                                    chemicalRow(for: chemical)
-                                        .opacity(draggedChemical == chemical ? 0.12 : 1)
-                                        .background(rowFrameReader(for: chemical))
+                            // Place TestingMethodCard immediately after heroBanner
+                            if !isGuidedNewTest || firstTestEntryStep == .waterTest {
+                                TestingMethodCard(
+                                    mode: .summary(onTap: { showTestingMethodEditor = true }),
+                                    testMethod: testMethod,
+                                    saveAsDefault: saveTestMethodAsDefault,
+                                    liquidDropKitBrand: liquidDropKitBrand
+                                )
+                                .padding(.horizontal, 16)
+                                .padding(.top, -16)
+                            }
 
-                                    if index < visibleChemicalFields.count - 1 {
-                                        divider
-                                    }
-                                }
+                            // Form rows on white card
+                            if !isGuidedNewTest || firstTestEntryStep == .waterTest {
+                                ZStack(alignment: .topLeading) {
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(visibleChemicalFields.enumerated()), id: \.element.id) { index, chemical in
+                                            chemicalRow(for: chemical)
+                                                .opacity(draggedChemical == chemical ? 0.12 : 1)
+                                                .background(rowFrameReader(for: chemical))
+
+                                            if index < visibleChemicalFields.count - 1 {
+                                                divider
+                                            }
+                                        }
 
 //                                divider
 //                                resetChemicalOrderButton
-                            }
-                            .animation(.spring(response: 0.28, dampingFraction: 0.86), value: chemicalOrder)
+                                    }
+                                    .animation(.spring(response: 0.28, dampingFraction: 0.86), value: chemicalOrder)
 
-                            if let draggedChemical {
-                                chemicalDragPreview(for: draggedChemical, width: dragStartFrame.width)
-                                    .offset(
-                                        x: dragStartFrame.minX,
-                                        y: dragStartFrame.minY + dragTranslation.height
-                                    )
-                                    .zIndex(10)
-                                    .allowsHitTesting(false)
+                                    if let draggedChemical {
+                                        chemicalDragPreview(for: draggedChemical, width: dragStartFrame.width)
+                                            .offset(
+                                                x: dragStartFrame.minX,
+                                                y: dragStartFrame.minY + dragTranslation.height
+                                            )
+                                            .zIndex(10)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+                                .coordinateSpace(name: "chemicalList")
+                                .onPreferenceChange(ChemicalRowFramePreferenceKey.self) { frames in
+                                    // The row frame readers publish continuously, and the implicit reorder
+                                    // animation on this same subtree re-emits them every interpolation tick.
+                                    // Writing straight into @State from inside that layout/preference pass is
+                                    // what makes SwiftUI warn "tried to update multiple times per frame" — the
+                                    // write invalidates the very subtree that produced the preference. These
+                                    // frames are consumed only by drag-to-reorder, never by row layout, so we
+                                    // skip redundant writes and hop off the current pass to break the cycle.
+                                    guard frames != chemicalRowFrames else { return }
+                                    DispatchQueue.main.async { chemicalRowFrames = frames }
+                                }
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                                .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 16) // overlap with banner bottom
+                            }
+
+                            if !isGuidedNewTest || firstTestEntryStep == .poolState {
+                                poolConditionsCard
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, isGuidedNewTest ? -16 : 16)
+
+                                visualIndicatorsCard
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 16)
+
+                                notesCard
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 16)
                             }
                         }
-                        .coordinateSpace(name: "chemicalList")
-                        .onPreferenceChange(ChemicalRowFramePreferenceKey.self) { frames in
-                            chemicalRowFrames = frames
-                        }
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16) // overlap with banner bottom
-
-                        poolConditionsCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
-
-                        visualIndicatorsCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
-
-                        notesCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
+                        .padding(.bottom, 100)
                     }
-                    .padding(.bottom, 100)
+                    .onChange(of: firstTestEntryStep) { _, _ in
+                        scrollToTop(scrollProxy)
+                    }
                 }
                 .scrollDisabled(draggedChemical != nil)
+                .dismissesKeyboardOnScroll()
                 .ignoresSafeArea(edges: .top)
 
                 if showingCyaTimerToast {
@@ -519,7 +597,13 @@ struct AddTestView: View {
 
                 // Treatment button pinned at bottom
                 Button {
-                    Task { await save() }
+                    if isGuidedNewTest && firstTestEntryStep == .waterTest {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                            firstTestEntryStep = .poolState
+                        }
+                    } else {
+                        Task { await save() }
+                    }
                 } label: {
                     ZStack {
                         if isSaving {
@@ -566,7 +650,10 @@ struct AddTestView: View {
                         embedsInNavigationStack: false,
                         showsCloseButton: true,
                         showsDoneButton: false,
-                        onClose: { dismiss() }
+                        onClose: {
+                            onFirstTestTreatmentPlanDisplayed?()
+                            dismiss()
+                        }
                     )
                 }
             }
@@ -654,6 +741,14 @@ struct AddTestView: View {
         .task {
             await showInitialTreatmentPlanIfNeeded()
         }
+        .contextualTip(
+            .firstChemistryEntry,
+            isEligible: isGuidedNewTest && firstTestEntryStep == .waterTest
+        )
+        .contextualTip(
+            .firstPoolStateQuestions,
+            isEligible: isGuidedNewTest && firstTestEntryStep == .poolState
+        )
     }
 
     private var cyaTimerToast: some View {
@@ -696,10 +791,23 @@ private var heroBanner: some View {
                     Text("Enter your")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.85))
-                    Text(heroTitle)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
+                    if isGuidedNewTest && firstTestEntryStep == .poolState {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("pool conditions")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("(since last test log)")
+                                .font(.subheadline)
+                                .fontWeight(.regular)
+                                .foregroundStyle(.white.opacity(0.86))
+                        }
                         .lineLimit(2)
+                    } else {
+                        Text(heroTitle)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                    }
                 }
                 .padding(.leading, 20)
                 .padding(.trailing, 210)
@@ -711,6 +819,7 @@ private var heroBanner: some View {
                     .scaledToFit()
                     .frame(width: 180)
                     .padding(.trailing, 20)
+                    .offset(y: -48)
                     .padding(.bottom, -40)
             }
         }
@@ -1158,8 +1267,14 @@ private var heroBanner: some View {
 
         guard let value = Double(sanitized) else { return nil }
         let config = directEntryConfig(for: field)
-        let clamped = value.clamped(to: config.range)
-        return ((clamped / config.step).rounded() * config.step).rounded(toPlaces: config.decimalPlaces)
+        // Manual entry preserves the exact value the user typed (clamped to the valid range and
+        // rounded to the field's display precision); it must NOT snap to the slider step. The
+        // slider keeps its own `step` snapping via SwiftUI `Slider(value:in:step:)`.
+        return ChemicalEntryQuantizer.manualEntryValue(
+            value,
+            range: config.range,
+            decimalPlaces: config.decimalPlaces
+        )
     }
 
     private func chemicalBinding(for field: ChemicalField) -> Binding<Double> {
@@ -1817,9 +1932,34 @@ private var heroBanner: some View {
     }
 
     private var orderedVisualIndicators: [String] {
-        VisualIndicator.allCases
+        var selected = selectedVisualIndicators
+
+        switch waterClarityAssessment {
+        case .clear:
+            selected.insert(VisualIndicator.crystalClear.rawValue)
+        case .cloudy:
+            selected.insert(VisualIndicator.cloudyWater.rawValue)
+        case .cannotTell, .notRecorded:
+            break
+        }
+
+        if visibleAlgaeAssessment == .present {
+            selected.insert(VisualIndicator.algaeSpots.rawValue)
+        }
+
+        return VisualIndicator.allCases
             .map(\.rawValue)
-            .filter { selectedVisualIndicators.contains($0) }
+            .filter { selected.contains($0) }
+    }
+
+    private var supplementalVisualIndicators: [VisualIndicator] {
+        VisualIndicator.allCases.filter { indicator in
+            !indicator.representsPrimaryVisualAssessment
+        }
+    }
+
+    private var selectedSupplementalVisualIndicators: [VisualIndicator] {
+        supplementalVisualIndicators.filter { selectedVisualIndicators.contains($0.rawValue) }
     }
 
     private var divider: some View {
@@ -1831,14 +1971,16 @@ private var heroBanner: some View {
 
     private var poolConditionsCard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Pool Conditions (recommended)")
-                    .font(.headline)
-                    .fontWeight(.bold)
-                    .foregroundStyle(PoolColor.primaryText)
-                Text("Since last test log")
-                    .font(.caption)
-                    .foregroundStyle(PoolColor.secondaryText)
+            if !(isGuidedNewTest && firstTestEntryStep == .poolState) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pool Conditions (recommended)")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundStyle(PoolColor.primaryText)
+                    Text("Since last test log")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
             }
 
             VStack(spacing: 18) {
@@ -2069,17 +2211,151 @@ private var heroBanner: some View {
     private var visualIndicatorsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Visual Indicators (optional)")
+                Text("Pool Observations")
                     .font(.headline)
                     .fontWeight(.bold)
                     .foregroundStyle(PoolColor.primaryText)
-                Text("Visual signs you want considered when generating treatment.")
+                Text(visualIndicatorsSubtitle)
                     .font(.caption)
                     .foregroundStyle(PoolColor.secondaryText)
             }
 
-            let gridIndicators = VisualIndicator.allCases.filter { !$0.requiresFullWidthBadge }
-            let fullWidthIndicators = VisualIndicator.allCases.filter { $0.requiresFullWidthBadge }
+            switch testEntryContext.kind {
+            case .initialAssessment:
+                baselineVisualQuestions
+                unusualObservationDisclosure
+            case .maintenance:
+                maintenanceVisualPrompt
+                if shouldShowDetailedVisualQuestions {
+                    baselineVisualQuestions
+                    unusualObservationDisclosure
+                } else if !selectedSupplementalVisualIndicators.isEmpty {
+                    selectedObservationSummary
+                }
+            case .followUp:
+                followUpVisualQuestions
+                baselineVisualQuestions
+                unusualObservationDisclosure
+            }
+        }
+        .padding(18)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private var visualIndicatorsSubtitle: String {
+        switch testEntryContext.kind {
+        case .initialAssessment:
+            return "A quick baseline helps Pool Side understand what the water looks like today."
+        case .maintenance:
+            return "Routine tests stay fast unless something looks different."
+        case .followUp:
+            return "Pool Side is checking whether a recent concern improved."
+        }
+    }
+
+    private var baselineVisualQuestions: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            visualAssessmentQuestion(
+                title: "Water clarity",
+                options: WaterClarityAssessment.allCases.filter { $0 != .notRecorded },
+                selection: $waterClarityAssessment
+            )
+
+            visualAssessmentQuestion(
+                title: "Visible algae",
+                options: VisibleAlgaeAssessment.allCases.filter { $0 != .notRecorded },
+                selection: $visibleAlgaeAssessment
+            )
+        }
+    }
+
+    private var maintenanceVisualPrompt: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("How does the pool look today?")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+
+            VStack(spacing: 8) {
+                adaptiveVisualButton(
+                    title: "Looks clear / normal",
+                    isSelected: waterClarityAssessment == .clear && visibleAlgaeAssessment == .absent
+                ) {
+                    applyMaintenanceVisualResponse(.looksClearNormal)
+                }
+
+                adaptiveVisualButton(
+                    title: "Something looks different",
+                    isSelected: isUnusualObservationExpanded
+                        && (waterClarityAssessment == .notRecorded || waterClarityAssessment == .cloudy || visibleAlgaeAssessment == .present)
+                ) {
+                    applyMaintenanceVisualResponse(.somethingLooksDifferent)
+                }
+
+                adaptiveVisualButton(
+                    title: "Cannot tell",
+                    isSelected: waterClarityAssessment == .cannotTell && visibleAlgaeAssessment == .cannotTell
+                ) {
+                    applyMaintenanceVisualResponse(.cannotTell)
+                }
+            }
+        }
+    }
+
+    private var followUpVisualQuestions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(testEntryContext.followUpReasons.prefix(2))) { reason in
+                switch reason {
+                case .previouslyReportedAlgae:
+                    followUpQuestion(
+                        title: "Did the algae go away?",
+                        selection: algaeFollowUpResponse,
+                        onSelect: applyAlgaeFollowUpResponse
+                    )
+                case .previouslyCloudyWater:
+                    followUpQuestion(
+                        title: "Has the water cleared up?",
+                        selection: cloudinessFollowUpResponse,
+                        onSelect: applyCloudinessFollowUpResponse
+                    )
+                case .previousElevatedCombinedChlorineConcern:
+                    Text("Check whether the water still has a strong chlorine smell or looks unusual.")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                case .recentRecoveryTreatment, .previousTreatmentRequiringFollowUp:
+                    Text("Confirm how the water looks after the recent treatment.")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+            }
+        }
+    }
+
+    private func followUpQuestion(
+        title: String,
+        selection: VisualFollowUpResponse,
+        onSelect: @escaping (VisualFollowUpResponse) -> Void
+    ) -> some View {
+        visualAssessmentRow(
+            title: title,
+            options: VisualFollowUpResponse.allCases
+                .filter { $0 != .notRecorded }
+                .map { ($0.displayName, $0.rawValue) },
+            selectedRawValue: selection == .notRecorded ? nil : selection.rawValue
+        ) { rawValue in
+            onSelect(VisualFollowUpResponse(rawValue: rawValue) ?? .notRecorded)
+        }
+    }
+
+    private var unusualObservationDisclosure: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Anything unusual with the pool?")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+
+            let gridIndicators = supplementalVisualIndicators.filter { !$0.requiresFullWidthBadge }
+            let fullWidthIndicators = supplementalVisualIndicators.filter { $0.requiresFullWidthBadge }
 
             VStack(spacing: 10) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -2093,10 +2369,114 @@ private var heroBanner: some View {
                 }
             }
         }
-        .padding(18)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private var selectedObservationSummary: some View {
+        Text(selectedSupplementalVisualIndicators.map(\.rawValue).joined(separator: ", "))
+            .font(.caption)
+            .foregroundStyle(PoolColor.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func adaptiveVisualButton(
+        title: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+            }
+            .foregroundStyle(isSelected ? .white : PoolColor.primaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                isSelected ? PoolColor.poolTeal : PoolColor.appBackground,
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? PoolColor.poolTeal : PoolColor.divider, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func visualAssessmentQuestion(
+        title: String,
+        options: [WaterClarityAssessment],
+        selection: Binding<WaterClarityAssessment>
+    ) -> some View {
+        visualAssessmentRow(
+            title: title,
+            options: options.map { ($0.displayName, $0.rawValue) },
+            selectedRawValue: selection.wrappedValue == .notRecorded ? nil : selection.wrappedValue.rawValue
+        ) { rawValue in
+            selection.wrappedValue = selection.wrappedValue.rawValue == rawValue
+                ? .notRecorded
+                : WaterClarityAssessment(rawValue: rawValue) ?? .notRecorded
+        }
+    }
+
+    private func visualAssessmentQuestion(
+        title: String,
+        options: [VisibleAlgaeAssessment],
+        selection: Binding<VisibleAlgaeAssessment>
+    ) -> some View {
+        visualAssessmentRow(
+            title: title,
+            options: options.map { ($0.displayName, $0.rawValue) },
+            selectedRawValue: selection.wrappedValue == .notRecorded ? nil : selection.wrappedValue.rawValue
+        ) { rawValue in
+            selection.wrappedValue = selection.wrappedValue.rawValue == rawValue
+                ? .notRecorded
+                : VisibleAlgaeAssessment(rawValue: rawValue) ?? .notRecorded
+        }
+    }
+
+    private func visualAssessmentRow(
+        title: String,
+        options: [(label: String, rawValue: String)],
+        selectedRawValue: String?,
+        onSelect: @escaping (String) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PoolColor.primaryText)
+
+            HStack(spacing: 8) {
+                ForEach(options, id: \.rawValue) { option in
+                    let isSelected = selectedRawValue == option.rawValue
+                    Button {
+                        onSelect(option.rawValue)
+                    } label: {
+                        Text(option.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(isSelected ? .white : PoolColor.primaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                isSelected ? PoolColor.poolTeal : PoolColor.appBackground,
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(isSelected ? PoolColor.poolTeal : PoolColor.divider, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private func visualIndicatorBadge(_ indicator: VisualIndicator) -> some View {
@@ -2135,6 +2515,59 @@ private var heroBanner: some View {
         .buttonStyle(.plain)
     }
 
+    private func applyMaintenanceVisualResponse(_ response: MaintenanceVisualResponseMapper.Response) {
+        let mapped = MaintenanceVisualResponseMapper.mappedAssessments(for: response)
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+            waterClarityAssessment = mapped.clarity
+            visibleAlgaeAssessment = mapped.algae
+            algaeFollowUpResponse = .notRecorded
+            cloudinessFollowUpResponse = .notRecorded
+            isUnusualObservationExpanded = mapped.revealsDetailedObservations
+            removePrimaryVisualIndicators()
+        }
+    }
+
+    private func applyAlgaeFollowUpResponse(_ response: VisualFollowUpResponse) {
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+            algaeFollowUpResponse = response
+            visibleAlgaeAssessment = FollowUpVisualResponseMapper.algaeResponse(response)
+            switch visibleAlgaeAssessment {
+            case .present:
+                selectedVisualIndicators.insert(VisualIndicator.algaeSpots.rawValue)
+            case .absent, .cannotTell, .notRecorded:
+                selectedVisualIndicators.remove(VisualIndicator.algaeSpots.rawValue)
+                if visibleAlgaeAssessment != .present {
+                    selectedVisualIndicators.remove(VisualIndicator.greenWater.rawValue)
+                }
+            }
+        }
+    }
+
+    private func applyCloudinessFollowUpResponse(_ response: VisualFollowUpResponse) {
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+            cloudinessFollowUpResponse = response
+            waterClarityAssessment = FollowUpVisualResponseMapper.cloudinessResponse(response)
+            switch waterClarityAssessment {
+            case .clear:
+                selectedVisualIndicators.insert(VisualIndicator.crystalClear.rawValue)
+                selectedVisualIndicators.remove(VisualIndicator.cloudyWater.rawValue)
+                selectedVisualIndicators.remove(VisualIndicator.greenWater.rawValue)
+            case .cloudy:
+                selectedVisualIndicators.insert(VisualIndicator.cloudyWater.rawValue)
+                selectedVisualIndicators.remove(VisualIndicator.crystalClear.rawValue)
+            case .cannotTell, .notRecorded:
+                selectedVisualIndicators.remove(VisualIndicator.crystalClear.rawValue)
+                selectedVisualIndicators.remove(VisualIndicator.cloudyWater.rawValue)
+            }
+        }
+    }
+
+    private func removePrimaryVisualIndicators() {
+        VisualIndicator.allCases
+            .filter(\.representsPrimaryVisualAssessment)
+            .forEach { selectedVisualIndicators.remove($0.rawValue) }
+    }
+
     private var notesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Notes (optional)")
@@ -2158,6 +2591,8 @@ private var heroBanner: some View {
     // MARK: - Actions
 
     private func prefill() {
+        viewModel.refreshConfigFromStorage(reconcilingWith: tests)
+
         if let test = editingTest {
             date = test.date
             pH = test.pH
@@ -2179,6 +2614,11 @@ private var heroBanner: some View {
             saveTestMethodAsDefault = false
             notes = test.notes
             selectedVisualIndicators = Set(test.visualIndicators)
+            waterClarityAssessment = displayWaterClarityAssessment(for: test)
+            visibleAlgaeAssessment = displayVisibleAlgaeAssessment(for: test)
+            algaeFollowUpResponse = test.algaeFollowUpResponse
+            cloudinessFollowUpResponse = test.cloudinessFollowUpResponse
+            isUnusualObservationExpanded = !selectedSupplementalVisualIndicators.isEmpty
             originalSnapshot = currentSnapshot
         } else if let last = tests.first {
             testMethod = viewModel.poolConfig.testMethod
@@ -2193,19 +2633,54 @@ private var heroBanner: some View {
             cyanuricAcid = last.cyanuricAcid
             if let t = last.temperatureFahrenheit { temperature = t; includeTemperature = true }
             if let s = last.saltLevel { saltLevel = s; includeSalt = true }
+            isUnusualObservationExpanded = false
         } else {
             testMethod = viewModel.poolConfig.testMethod
             liquidDropKitBrand = viewModel.poolConfig.liquidDropKitBrand
             saveTestMethodAsDefault = false
             taylorSampleSize = Self.savedTaylorSampleSize
+            isUnusualObservationExpanded = false
         }
         normalizeBrandForCurrentMethod()
+    }
+
+    private func scrollToTop(_ scrollProxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.2)) {
+                scrollProxy.scrollTo("addTestTop", anchor: .top)
+            }
+        }
     }
 
     private func normalizeBrandForCurrentMethod() {
         if !liquidDropKitBrand.isAvailable(for: testMethod) {
             liquidDropKitBrand = LiquidDropKitBrand.defaultBrand(for: testMethod)
         }
+    }
+
+    private func displayWaterClarityAssessment(for test: PoolTest) -> WaterClarityAssessment {
+        if test.waterClarityAssessment != .notRecorded {
+            return test.waterClarityAssessment
+        }
+        let indicators = Set(test.visualIndicators)
+        if indicators.contains(VisualIndicator.cloudyWater.rawValue) || indicators.contains(VisualIndicator.greenWater.rawValue) {
+            return .cloudy
+        }
+        if indicators.contains(VisualIndicator.crystalClear.rawValue) {
+            return .clear
+        }
+        return .notRecorded
+    }
+
+    private func displayVisibleAlgaeAssessment(for test: PoolTest) -> VisibleAlgaeAssessment {
+        if test.visibleAlgaeAssessment != .notRecorded {
+            return test.visibleAlgaeAssessment
+        }
+        let indicators = Set(test.visualIndicators)
+        if indicators.contains(VisualIndicator.algaeSpots.rawValue) || indicators.contains(VisualIndicator.greenWater.rawValue) {
+            return .present
+        }
+        return .notRecorded
     }
 
     private func applyPoolConditions(_ conditions: PoolConditions) {
@@ -2285,6 +2760,10 @@ private var heroBanner: some View {
             existing.poolConditions = currentPoolConditions
             existing.notes = notes
             existing.visualIndicators = orderedVisualIndicators
+            existing.waterClarityAssessment = waterClarityAssessment
+            existing.visibleAlgaeAssessment = visibleAlgaeAssessment
+            existing.algaeFollowUpResponse = algaeFollowUpResponse
+            existing.cloudinessFollowUpResponse = cloudinessFollowUpResponse
             test = existing
         } else {
             test = PoolTest(
@@ -2301,7 +2780,11 @@ private var heroBanner: some View {
                 liquidDropKitBrand: persistedBrand,
                 poolConditions: currentPoolConditions,
                 notes: notes,
-                visualIndicators: orderedVisualIndicators
+                visualIndicators: orderedVisualIndicators,
+                waterClarityAssessment: waterClarityAssessment,
+                visibleAlgaeAssessment: visibleAlgaeAssessment,
+                algaeFollowUpResponse: algaeFollowUpResponse,
+                cloudinessFollowUpResponse: cloudinessFollowUpResponse
             )
             if usesDropChlorine || usesDropAlkalinity || usesDropHardness {
                 test.taylorSampleSize = taylorSampleSize
@@ -2314,18 +2797,11 @@ private var heroBanner: some View {
         }
 
         if saveTestMethodAsDefault {
-            var updatedConfig = viewModel.poolConfig
-            var changed = false
-            if updatedConfig.testMethod != testMethod {
-                updatedConfig.testMethod = testMethod
-                changed = true
-            }
-            if testMethod.usesBrandPicker, updatedConfig.liquidDropKitBrand != liquidDropKitBrand {
-                updatedConfig.liquidDropKitBrand = liquidDropKitBrand
-                changed = true
-            }
-            if changed {
-                viewModel.saveConfig(updatedConfig)
+            viewModel.updateConfig { config in
+                config.testMethod = testMethod
+                if testMethod.usesBrandPicker {
+                    config.liquidDropKitBrand = liquidDropKitBrand
+                }
             }
         }
 
@@ -2341,6 +2817,7 @@ private var heroBanner: some View {
         do {
             try modelContext.save()
             let testsForReminder = [test] + tests.filter { $0.id != test.id }
+            // Logging a full test never auto-completes a pending Check — Checks are user-completed only.
             let latestTest = testsForReminder.sorted { $0.date > $1.date }.first
             await viewModel.replaceNextPoolTestReminder(for: latestTest, allTests: testsForReminder)
         } catch {
@@ -2382,6 +2859,45 @@ private struct TestFormSnapshot: Equatable {
     let poolConditions: PoolConditions
     let notes: String
     let visualIndicators: [String]
+    let waterClarityAssessment: WaterClarityAssessment
+    let visibleAlgaeAssessment: VisibleAlgaeAssessment
+    let algaeFollowUpResponse: VisualFollowUpResponse
+    let cloudinessFollowUpResponse: VisualFollowUpResponse
+}
+
+/// Quantization rules for a manually editable chemistry field.
+///
+/// Manual numeric entry and slider/drag interaction are intentionally decoupled:
+/// - Manual entry preserves the exact value the user typed, clamped to the valid range
+///   and rounded only to the field's display precision. It must NOT snap to the slider step.
+/// - Slider/drag snapping is owned by SwiftUI's `Slider(value:in:step:)`; `snappedSliderValue`
+///   documents and guards that same nearest-step contract (the rule that previously leaked into
+///   manual entry and caused values like CYA 48 to become 50).
+///
+/// This applies uniformly to every manually editable chemistry field (FC, CC/TC, pH, TA, CH,
+/// CYA, salt, temperature), not just CYA.
+enum ChemicalEntryQuantizer {
+    /// Value produced by manual numeric entry: clamped to `range`, rounded to `decimalPlaces`,
+    /// never snapped to a step increment.
+    static func manualEntryValue(
+        _ raw: Double,
+        range: ClosedRange<Double>,
+        decimalPlaces: Int
+    ) -> Double {
+        raw.clamped(to: range).rounded(toPlaces: decimalPlaces)
+    }
+
+    /// Value produced by slider/drag interaction: clamped to `range` and snapped to the nearest
+    /// `step` increment, mirroring SwiftUI `Slider(value:in:step:)`.
+    static func snappedSliderValue(
+        _ raw: Double,
+        range: ClosedRange<Double>,
+        step: Double,
+        decimalPlaces: Int
+    ) -> Double {
+        let clamped = raw.clamped(to: range)
+        return ((clamped / step).rounded() * step).rounded(toPlaces: decimalPlaces)
+    }
 }
 
 private struct DirectNumericEntryConfig {
@@ -2569,12 +3085,18 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
 
     var accentColor: Color {
         switch self {
-        case .pH, .calciumHardness:
-            return Color(hex: "126CFF")
-        case .freeChlorine, .combinedChlorine, .totalChlorine, .totalAlkalinity, .saltLevel:
-            return PoolColor.poolTeal
-        case .cyanuricAcid:
+        case .freeChlorine, .combinedChlorine, .totalChlorine:
             return PoolColor.sunshine
+        case .pH:
+            return Color(hex: "FF4B4B")
+        case .totalAlkalinity:
+            return Color(hex: "52C96C")
+        case .calciumHardness:
+            return Color(hex: "126CFF")
+        case .cyanuricAcid:
+            return Color(hex: "8A8F98")
+        case .saltLevel:
+            return PoolColor.poolTeal
         case .temperature:
             return PoolColor.coral
         }
@@ -2582,14 +3104,31 @@ private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
 
     var iconBackground: Color {
         switch self {
-        case .pH, .calciumHardness:
-            return Color(hex: "EFF6FF")
-        case .freeChlorine, .combinedChlorine, .totalChlorine, .totalAlkalinity, .saltLevel:
-            return Color(hex: "EAF8F6")
-        case .cyanuricAcid:
+        case .freeChlorine, .combinedChlorine, .totalChlorine:
             return Color(hex: "FFF8E6")
+        case .pH:
+            return Color(hex: "FFECEC")
+        case .totalAlkalinity:
+            return Color(hex: "E9F9EE")
+        case .calciumHardness:
+            return Color(hex: "EFF6FF")
+        case .cyanuricAcid:
+            return .white
+        case .saltLevel:
+            return Color(hex: "EAF8F6")
         case .temperature:
             return Color(hex: "FFF1EA")
+        }
+    }
+
+    /// Border stroke for the icon tile. Most fields use a faint tint of their accent; CYA is intentionally
+    /// uncolored (white fill) and gets a soft gray border to stay legible.
+    var iconBorder: Color {
+        switch self {
+        case .cyanuricAcid:
+            return Color(hex: "8A8F98").opacity(0.55)
+        default:
+            return accentColor.opacity(0.12)
         }
     }
 }
@@ -2692,7 +3231,7 @@ private struct ChemicalIcon: View {
                 .fill(field.iconBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(field.accentColor.opacity(0.12), lineWidth: 1)
+                        .stroke(field.iconBorder, lineWidth: 1)
                 )
 
             Image(field.icon)

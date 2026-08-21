@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import CoreLocation
 import Observation
 import UIKit
@@ -7,6 +8,8 @@ struct SettingsView: View {
 
     @Environment(PoolViewModel.self) private var viewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     // Pool Settings
     @State private var poolName: String = ""
@@ -31,6 +34,10 @@ struct SettingsView: View {
     @State private var location: String = ""
     @State private var latitude: Double?
     @State private var longitude: Double?
+    /// The location text that `latitude`/`longitude` currently correspond to. When the user edits the
+    /// location field to something different, the stored coordinates are stale and must be re-resolved
+    /// rather than reused — otherwise a new place (e.g. "Richmond, IN") keeps the previous place's weather.
+    @State private var coordinatesSourceLocation: String?
     @State private var locationService = PoolLocationService()
 
     @State private var showingVolumeHelp: Bool = false
@@ -39,6 +46,7 @@ struct SettingsView: View {
     @State private var showLocationToast: Bool = false
     @State private var locationToastMessage: String = ""
     @State private var showingFeedback: Bool = false
+    @State private var showingResetInfoTipsConfirmation: Bool = false
 
     private var currentConfig: PoolConfiguration {
         PoolConfiguration(
@@ -122,6 +130,10 @@ struct SettingsView: View {
                             }
                         }
 
+                        sectionCard(header: "Help") {
+                            resetInfoTipsRow
+                        }
+
                         feedbackCard
                         versionFooter
                     }
@@ -129,6 +141,7 @@ struct SettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 48)
                 }
+                .dismissesKeyboardOnScroll()
 
                 if showLocationToast {
                     VStack {
@@ -194,6 +207,18 @@ struct SettingsView: View {
             } message: {
                 Text(locationService.errorMessage ?? "")
             }
+            .confirmationDialog(
+                "Reset info tips?",
+                isPresented: $showingResetInfoTipsConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Reset", role: .destructive) {
+                    ContextualEducationStore.shared.resetAll()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Pool Side will show first-time guidance again as you use the app.")
+            }
         }
         .onAppear(perform: loadCurrentConfig)
         .onChange(of: locationService.resolvedLocationText) { _, newValue in
@@ -201,6 +226,18 @@ struct SettingsView: View {
             location = newValue
             latitude = locationService.latitude
             longitude = locationService.longitude
+            // Persist GPS coordinates immediately. CLLocationManager is the reliable coordinate source;
+            // this guarantees weather works even before the user taps Save and without relying on the
+            // (rate-limited, error-prone) forward geocoder.
+            if let lat = locationService.latitude, let lon = locationService.longitude {
+                coordinatesSourceLocation = newValue
+                viewModel.updateConfig { config in
+                    config.location = newValue
+                    config.latitude = lat
+                    config.longitude = lon
+                }
+                print(String(format: "[Location] Persisted coordinates to config: %.5f, %.5f", lat, lon))
+            }
         }
         .onChange(of: locationService.isLocating) { _, locating in
             if locating {
@@ -286,11 +323,10 @@ struct SettingsView: View {
             Picker(label, selection: selection) {
                 ForEach(Array(T.allCases), id: \.self) { option in
                     Text(option.description)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
                         .tag(option)
                 }
             }
+            .pickerStyle(.menu)
             .tint(PoolColor.poolTeal)
         }
         .padding(.horizontal, 18)
@@ -388,6 +424,42 @@ struct SettingsView: View {
             .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
     }
 
+    private var resetInfoTipsRow: some View {
+        Button {
+            showingResetInfoTipsConfirmation = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(PoolColor.poolTeal)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reset Info Tips")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(PoolColor.primaryText)
+                    Text("Show first-time tips again as you use Pool Side.")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText.opacity(0.7))
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reset Info Tips")
+        .accessibilityHint("Show first-time tips again as you use Pool Side.")
+    }
+
     private var versionFooter: some View {
         Text("Version \(appVersion)")
             .font(.caption)
@@ -408,6 +480,23 @@ struct SettingsView: View {
                     .foregroundStyle(PoolColor.secondaryText)
                     .multilineTextAlignment(.trailing)
                     .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        let query = location
+                        Task {
+                            if let coords = await PoolLocationService.coordinates(for: query) {
+                                latitude = coords.latitude
+                                longitude = coords.longitude
+                                coordinatesSourceLocation = query
+                            } else {
+                                // Geocode failed: drop stale coordinates so save/Dashboard re-resolve
+                                // the new location rather than reusing the previous place's fix.
+                                latitude = nil
+                                longitude = nil
+                                coordinatesSourceLocation = nil
+                            }
+                        }
+                    }
 
                 Button {
                     let generator = UIImpactFeedbackGenerator(style: .light)
@@ -565,6 +654,7 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func loadCurrentConfig() {
+        viewModel.refreshConfigFromStorage()
         let config = viewModel.poolConfig
         poolName = config.name
         volumeGallons = config.volumeGallons
@@ -589,6 +679,8 @@ struct SettingsView: View {
         location = config.location
         latitude = config.latitude
         longitude = config.longitude
+        // Coordinates loaded from config correspond to the saved location text.
+        coordinatesSourceLocation = (config.latitude != nil && config.longitude != nil) ? config.location : nil
         originalConfig = currentConfig
     }
 
@@ -599,10 +691,50 @@ struct SettingsView: View {
     }
 
     private func save() {
+        Task { await performSave() }
+    }
+
+    @MainActor
+    private func performSave() async {
+        let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canReuseCoordinates = LocationCoordinateResolver.canReuseCoordinates(
+            typedLocation: trimmedLocation,
+            coordinateSource: coordinatesSourceLocation,
+            latitude: latitude,
+            longitude: longitude
+        )
+        if trimmedLocation.isEmpty {
+            // No location → no coordinates.
+            latitude = nil
+            longitude = nil
+            coordinatesSourceLocation = nil
+        } else if !canReuseCoordinates {
+            // Coordinates are missing or belong to a different (previously entered) location. Re-resolve
+            // from the typed location so a new place gets its own weather rather than reusing the old fix.
+            // On failure, drop the stale coordinates so the Dashboard retries against the new location text.
+            if let coords = await PoolLocationService.coordinates(for: trimmedLocation) {
+                latitude = coords.latitude
+                longitude = coords.longitude
+                coordinatesSourceLocation = trimmedLocation
+            } else {
+                latitude = nil
+                longitude = nil
+                coordinatesSourceLocation = nil
+            }
+        }
+        // If coordinates already match the typed location (e.g. from "Use Current Location"), keep them —
+        // a failing geocoder must never wipe out a good location fix for the same place.
+
         normalizeBrandForCurrentMethod()
         var updatedConfig = currentConfig
         updatedConfig.normalizeChemicalPreferences()
-        viewModel.saveConfig(updatedConfig)
+        let productPreferencesChanged = chemicalProductPreferencesChanged(from: originalConfig, to: updatedConfig)
+        viewModel.saveConfig(updatedConfig, marksEquipmentChoicesExplicit: true)
+        // A product-preference change reprices only the unfinished future chemical steps of the active
+        // plan (completed/skipped history is preserved), keeping the plan consistent with the new choice.
+        if productPreferencesChanged {
+            viewModel.repriceUnfinishedTreatmentsForPreferenceChange(in: tests, modelContext: modelContext)
+        }
         if !updatedConfig.enableNextPoolTestReminders {
             NotificationService.shared.cancelNextPoolTestReminder()
         }
@@ -610,6 +742,16 @@ struct SettingsView: View {
             NotificationService.shared.cancelAllPoolSideNotifications()
         }
         dismiss()
+    }
+
+    private func chemicalProductPreferencesChanged(from original: PoolConfiguration?, to updated: PoolConfiguration) -> Bool {
+        guard let original else { return false }
+        return original.chlorinePreference != updated.chlorinePreference
+            || original.pHIncreaserPreference != updated.pHIncreaserPreference
+            || original.pHDecreaserPreference != updated.pHDecreaserPreference
+            || original.alkalinityIncreaserPreference != updated.alkalinityIncreaserPreference
+            || original.calciumIncreaserPreference != updated.calciumIncreaserPreference
+            || original.stabilizerPreference != updated.stabilizerPreference
     }
 }
 
@@ -717,7 +859,7 @@ struct FeedbackSheet: View {
                     .padding(.top, 16)
                     .padding(.bottom, 112)
                 }
-                .scrollDismissesKeyboard(.interactively)
+                .dismissesKeyboardOnScroll()
 
                 sendButton
             }
@@ -904,7 +1046,7 @@ struct PoolVolumeHelpView: View {
                         .padding(.top, 16)
                         .padding(.bottom, 104)
                     }
-                    .scrollDismissesKeyboard(.interactively)
+                    .dismissesKeyboardOnScroll()
                     .onChange(of: focusedFieldID) { _, newID in
                         guard let newID else { return }
                         Task { @MainActor in
@@ -1569,6 +1711,27 @@ final class PoolLocationService: NSObject, CLLocationManagerDelegate, @unchecked
         print("[Location] didFailWithError: \(error.localizedDescription)")
         isLocating = false
         errorMessage = "Could not get your current location. You can still type it manually."
+    }
+}
+
+extension PoolLocationService {
+    /// Forward-geocodes a typed location string (e.g. "Phoenix, AZ") into coordinates so weather can be
+    /// fetched for manually entered locations, not just "Use Current Location".
+    static func coordinates(for address: String) async -> (latitude: Double, longitude: Double)? {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            let placemarks = try await CLGeocoder().geocodeAddressString(trimmed)
+            guard let location = placemarks.first?.location else {
+                print("[Location] Forward geocode produced no placemark for '\(trimmed)'")
+                return nil
+            }
+            print(String(format: "[Location] Forward geocoded '%@' → %.5f, %.5f", trimmed, location.coordinate.latitude, location.coordinate.longitude))
+            return (location.coordinate.latitude, location.coordinate.longitude)
+        } catch {
+            print("[Location] Forward geocode failed for '\(trimmed)': \(error.localizedDescription)")
+            return nil
+        }
     }
 }
 

@@ -77,56 +77,146 @@ struct PoolConfiguration: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "My Pool"
-        volumeGallons = try container.decodeIfPresent(Double.self, forKey: .volumeGallons) ?? 15000
-        poolType = try container.decodeIfPresent(PoolType.self, forKey: .poolType) ?? .inground
-        surfaceType = try container.decodeIfPresent(SurfaceType.self, forKey: .surfaceType) ?? .plaster
-        testMethod = try container.decodeIfPresent(TestMethod.self, forKey: .testMethod) ?? .testStrips
-        liquidDropKitBrand = try container.decodeIfPresent(LiquidDropKitBrand.self, forKey: .liquidDropKitBrand) ?? .taylorK2006FASDPD
-        isSaltwater = try container.decodeIfPresent(Bool.self, forKey: .isSaltwater) ?? false
-        hasCover = try container.decodeIfPresent(Bool.self, forKey: .hasCover) ?? false
-        petsRegularlySwim = try container.decodeIfPresent(Bool.self, forKey: .petsRegularlySwim) ?? false
-        usesRoboticCleaner = try container.decodeIfPresent(Bool.self, forKey: .usesRoboticCleaner) ?? false
-        enableNextPoolTestReminders = try container.decodeIfPresent(Bool.self, forKey: .enableNextPoolTestReminders) ?? true
-        enableTreatmentStepReminders = try container.decodeIfPresent(Bool.self, forKey: .enableTreatmentStepReminders) ?? true
-        chlorinePreference = try container.decodeIfPresent(ChlorinePreference.self, forKey: .chlorinePreference) ?? .calHypo
-        lastNonSaltChlorinePreference = try container.decodeIfPresent(ChlorinePreference.self, forKey: .lastNonSaltChlorinePreference) ?? (chlorinePreference.isSaltGenerator ? .liquidChlorine10 : chlorinePreference)
-        pHIncreaserPreference = try container.decodeIfPresent(PHIncreaserPreference.self, forKey: .pHIncreaserPreference) ?? .sodaAsh
-        pHDecreaserPreference = try container.decodeIfPresent(PHDecreaserPreference.self, forKey: .pHDecreaserPreference) ?? .muriaticAcid
-        alkalinityIncreaserPreference = try container.decodeIfPresent(AlkalinityIncreaserPreference.self, forKey: .alkalinityIncreaserPreference) ?? .sodiumBicarbonate
-        calciumIncreaserPreference = try container.decodeIfPresent(CalciumIncreaserPreference.self, forKey: .calciumIncreaserPreference) ?? .calciumChloride
-        stabilizerPreference = try container.decodeIfPresent(StabilizerPreference.self, forKey: .stabilizerPreference) ?? .granularCYA
-        location = try container.decodeIfPresent(String.self, forKey: .location) ?? ""
-        latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
-        longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
+        name = container.decodeLossy(String.self, forKey: .name, default: "My Pool")
+        volumeGallons = container.decodeLossy(Double.self, forKey: .volumeGallons, default: 15000)
+        poolType = container.decodeLossy(PoolType.self, forKey: .poolType, default: .inground)
+        surfaceType = container.decodeLossy(SurfaceType.self, forKey: .surfaceType, default: .plaster)
+        testMethod = container.decodeLossy(TestMethod.self, forKey: .testMethod, default: .testStrips)
+        liquidDropKitBrand = container.decodeLossy(LiquidDropKitBrand.self, forKey: .liquidDropKitBrand, default: .taylorK2006FASDPD)
+        isSaltwater = container.decodeLossy(Bool.self, forKey: .isSaltwater, default: false)
+        hasCover = container.decodeLossy(Bool.self, forKey: .hasCover, default: false)
+        petsRegularlySwim = container.decodeLossy(Bool.self, forKey: .petsRegularlySwim, default: false)
+        usesRoboticCleaner = container.decodeLossy(Bool.self, forKey: .usesRoboticCleaner, default: false)
+        enableNextPoolTestReminders = container.decodeLossy(Bool.self, forKey: .enableNextPoolTestReminders, default: true)
+        enableTreatmentStepReminders = container.decodeLossy(Bool.self, forKey: .enableTreatmentStepReminders, default: true)
+        chlorinePreference = container.decodeLossy(ChlorinePreference.self, forKey: .chlorinePreference, default: .calHypo)
+        lastNonSaltChlorinePreference = container.decodeLossy(ChlorinePreference.self, forKey: .lastNonSaltChlorinePreference, default: chlorinePreference.isSaltGenerator ? .liquidChlorine10 : chlorinePreference)
+        pHIncreaserPreference = container.decodeLossy(PHIncreaserPreference.self, forKey: .pHIncreaserPreference, default: .sodaAsh)
+        pHDecreaserPreference = container.decodeLossy(PHDecreaserPreference.self, forKey: .pHDecreaserPreference, default: .muriaticAcid)
+        alkalinityIncreaserPreference = container.decodeLossy(AlkalinityIncreaserPreference.self, forKey: .alkalinityIncreaserPreference, default: .sodiumBicarbonate)
+        calciumIncreaserPreference = container.decodeLossy(CalciumIncreaserPreference.self, forKey: .calciumIncreaserPreference, default: .calciumChloride)
+        stabilizerPreference = container.decodeLossy(StabilizerPreference.self, forKey: .stabilizerPreference, default: .granularCYA)
+        location = container.decodeLossy(String.self, forKey: .location, default: "")
+        latitude = container.decodeLossyIfPresent(Double.self, forKey: .latitude)
+        longitude = container.decodeLossyIfPresent(Double.self, forKey: .longitude)
         normalizeChemicalPreferences()
     }
 
     // MARK: - Persistence key
     static let defaultsKey = "poolConfiguration"
+    static let hasCoverBackupKey = "poolConfiguration.hasCover.backup"
+    static let usesRoboticCleanerBackupKey = "poolConfiguration.usesRoboticCleaner.backup"
+    static let hasCoverExplicitChoiceKey = "poolConfiguration.hasCover.explicitChoice"
+    static let usesRoboticCleanerExplicitChoiceKey = "poolConfiguration.usesRoboticCleaner.explicitChoice"
+
+    // MARK: - Persistence store (test-isolation seam)
+
+    /// Dedicated UserDefaults suite used when the process is a test host.
+    static let isolatedTestSuiteName = "com.poolside.tests.isolatedConfig"
+
+    /// The UserDefaults domain backing PoolConfiguration persistence.
+    ///
+    /// Production uses `.standard`. Under XCTest (a DEBUG test host) this defaults to an isolated suite so
+    /// the test suite can never read or overwrite the app's real preferences — the confirmed cause of the
+    /// on-device preference reset (tests wrote fixture configs into the app's `.standard` domain). The
+    /// discriminator is automatic: `XCTestCase` is only linked into the process when tests are running, so
+    /// a normal (dogfooding) launch resolves to `.standard` while any test run resolves to the isolated
+    /// suite. This makes isolation impossible to forget on a per-test basis.
+    nonisolated(unsafe) static var defaultsStore: UserDefaults = {
+        #if DEBUG
+        if NSClassFromString("XCTestCase") != nil,
+           let isolated = UserDefaults(suiteName: isolatedTestSuiteName) {
+            return isolated
+        }
+        #endif
+        return .standard
+    }()
+
+    #if DEBUG
+    /// Test-only: clears every PoolConfiguration key from the current store so each test starts from a
+    /// clean isolated domain. Safe by construction — under tests `defaultsStore` is the isolated suite, so
+    /// this never touches `.standard`.
+    static func resetForTesting() {
+        for key in [defaultsKey, hasCoverBackupKey, usesRoboticCleanerBackupKey,
+                    hasCoverExplicitChoiceKey, usesRoboticCleanerExplicitChoiceKey] {
+            defaultsStore.removeObject(forKey: key)
+        }
+    }
+    #endif
+
+    /// The stored configuration when one is present AND decodable, otherwise `nil`. Callers that
+    /// read-modify-write MUST use this (not `current`) so a missing/invalid load is never silently
+    /// re-persisted as struct defaults (e.g. Cal-Hypo / Muriatic). `current` keeps its default-fallback
+    /// behavior for read-only display, but distinguishing "no valid config" is what makes writers safe.
+    static var persisted: PoolConfiguration? {
+        guard
+            let data = defaultsStore.data(forKey: defaultsKey),
+            let decodedConfig = try? JSONDecoder().decode(PoolConfiguration.self, from: data)
+        else { return nil }
+        return recoveredEquipmentSettings(in: decodedConfig)
+    }
 
     static var current: PoolConfiguration {
-        get {
-            guard
-                let data = UserDefaults.standard.data(forKey: defaultsKey),
-                let config = try? JSONDecoder().decode(PoolConfiguration.self, from: data)
-            else { return PoolConfiguration() }
-            return config
-        }
+        get { persisted ?? recoveredEquipmentSettings(in: PoolConfiguration()) }
         set {
             let data = try? JSONEncoder().encode(newValue)
-            UserDefaults.standard.set(data, forKey: defaultsKey)
+            defaultsStore.set(data, forKey: defaultsKey)
+            if newValue.hasCover {
+                defaultsStore.set(true, forKey: hasCoverBackupKey)
+            }
+            if newValue.usesRoboticCleaner {
+                defaultsStore.set(true, forKey: usesRoboticCleanerBackupKey)
+            }
         }
     }
 
     /// Whether configuration has been saved at least once
     static var isConfigured: Bool {
-        UserDefaults.standard.data(forKey: defaultsKey) != nil
+        defaultsStore.data(forKey: defaultsKey) != nil
+    }
+
+    static func markEquipmentChoicesExplicit(_ config: PoolConfiguration) {
+        defaultsStore.set(true, forKey: hasCoverExplicitChoiceKey)
+        defaultsStore.set(true, forKey: usesRoboticCleanerExplicitChoiceKey)
+        defaultsStore.set(config.hasCover, forKey: hasCoverBackupKey)
+        defaultsStore.set(config.usesRoboticCleaner, forKey: usesRoboticCleanerBackupKey)
+    }
+
+    static func recoveredFromTestHistory(_ config: PoolConfiguration, tests: [PoolTest]) -> PoolConfiguration {
+        var recovered = recoveredEquipmentSettings(in: config)
+        if
+            !recovered.hasCover,
+            !defaultsStore.bool(forKey: hasCoverExplicitChoiceKey),
+            tests.contains(where: { $0.resolvedPoolConditions.coverOpenTime != .unknown }) {
+            recovered.hasCover = true
+        }
+        if
+            !recovered.usesRoboticCleaner,
+            !defaultsStore.bool(forKey: usesRoboticCleanerExplicitChoiceKey),
+            tests.contains(where: { $0.resolvedPoolConditions.cleaningActivity.isRoboticCleanerEvidence }) {
+            recovered.usesRoboticCleaner = true
+        }
+        return recovered
     }
 
     /// Removes all saved configuration (sign out)
     static func clearCurrent() {
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        defaultsStore.removeObject(forKey: defaultsKey)
+        defaultsStore.removeObject(forKey: hasCoverBackupKey)
+        defaultsStore.removeObject(forKey: usesRoboticCleanerBackupKey)
+        defaultsStore.removeObject(forKey: hasCoverExplicitChoiceKey)
+        defaultsStore.removeObject(forKey: usesRoboticCleanerExplicitChoiceKey)
+    }
+
+    private static func recoveredEquipmentSettings(in config: PoolConfiguration) -> PoolConfiguration {
+        var recovered = config
+        if !recovered.hasCover && defaultsStore.bool(forKey: hasCoverBackupKey) {
+            recovered.hasCover = true
+        }
+        if !recovered.usesRoboticCleaner && defaultsStore.bool(forKey: usesRoboticCleanerBackupKey) {
+            recovered.usesRoboticCleaner = true
+        }
+        return recovered
     }
 
     mutating func setSaltwater(_ enabled: Bool) {
@@ -157,6 +247,16 @@ struct PoolConfiguration: Codable, Equatable {
         if !chlorinePreference.isSaltGenerator {
             lastNonSaltChlorinePreference = chlorinePreference
         }
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeLossy<T: Decodable>(_ type: T.Type, forKey key: Key, default defaultValue: T) -> T {
+        (try? decodeIfPresent(type, forKey: key)) ?? defaultValue
+    }
+
+    func decodeLossyIfPresent<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        try? decodeIfPresent(type, forKey: key)
     }
 }
 

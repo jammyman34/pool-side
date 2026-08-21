@@ -67,6 +67,35 @@ enum PoolWeatherCategory: String, Sendable {
     }
 }
 
+/// Pure decision for whether previously resolved coordinates may still be reused for a typed location,
+/// or whether they are stale and must be re-geocoded.
+///
+/// This exists to keep the "Richmond, IN" regression fixed and testable outside the UI: when the user
+/// edits their location, the stored latitude/longitude belong to the *previous* place. Reusing them made
+/// a new location silently show the old location's weather. Coordinates are reusable only when they exist
+/// and were resolved for the same location text the user currently has entered.
+enum LocationCoordinateResolver {
+    /// - Parameters:
+    ///   - typedLocation: The location text the user currently has entered.
+    ///   - coordinateSource: The location text the stored coordinates were resolved for, if known.
+    ///   - latitude: The stored latitude, if any.
+    ///   - longitude: The stored longitude, if any.
+    /// - Returns: `true` when the stored coordinates can be reused as-is; `false` when they are missing or
+    ///   belong to a different location and must be re-resolved.
+    static func canReuseCoordinates(
+        typedLocation: String,
+        coordinateSource: String?,
+        latitude: Double?,
+        longitude: Double?
+    ) -> Bool {
+        let typed = typedLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, latitude != nil, longitude != nil else { return false }
+        guard let source = coordinateSource?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !source.isEmpty else { return false }
+        return source.caseInsensitiveCompare(typed) == .orderedSame
+    }
+}
+
 /// Fetches the day's forecast and exposes a summary the dashboard can read.
 @MainActor
 @Observable
