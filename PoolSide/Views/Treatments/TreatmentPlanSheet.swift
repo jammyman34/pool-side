@@ -1114,6 +1114,14 @@ struct TreatmentPlanSheet: View {
         + "Full Test Panel: \(routineDateText(nextTestSchedule?.fullPanel.recommendedDate))."
     }
 
+    /// Export-facing routine timing that consumes the canonical schedule satisfaction state via
+    /// `firstUpcoming`: a satisfied/past FC & pH quick check is no longer upcoming (firstUpcoming advances
+    /// to the Full Test Panel), so it is omitted here. The Full Test Panel is always reported, and both are
+    /// reported while the FC & pH check is still upcoming. No dates are re-derived.
+    private var exportNextTestTiming: String {
+        ExternalReviewExportBuilder.routineTimingLine(schedule: nextTestSchedule, dateText: routineDateText)
+    }
+
     private func routineDateText(_ date: Date?) -> String {
         guard let date else { return "After your next full test" }
         return relativeText(for: date)
@@ -1232,7 +1240,7 @@ struct TreatmentPlanSheet: View {
         \(ExternalReviewExportBuilder.engineDeferralsSection(allTreatments: allTreatments))
 
         14. Next Full Pool Test
-        - \(nextTestTiming)
+        - \(exportNextTestTiming)
 
         15. Product and Timing Audit
         \(ExternalReviewExportBuilder.treatmentAuditSection(
@@ -1240,7 +1248,7 @@ struct TreatmentPlanSheet: View {
             test: test,
             treatments: treatmentSteps,
             recentHistory: recentHistory,
-            routineNextTestTiming: nextTestTiming
+            routineNextTestTiming: exportNextTestTiming
         ))
 
         16. User Prompt
@@ -1264,7 +1272,7 @@ struct TreatmentPlanSheet: View {
           Expected effect: \(expectedEffectText(for: treatment))
           Treatment verification classification: \(verificationClassificationText(for: treatment))
           Treatment verification timing: \(verificationTimingText(for: treatment))
-          Recommended next routine test timing: \(nextTestTiming)
+          Recommended next routine test timing: \(exportNextTestTiming)
           Retest/wait timing: \(waitTimingText(for: treatment))
           Status: \(treatmentStatusText(treatment))
         """
@@ -2133,6 +2141,20 @@ private struct FocusedCheckResultView: View {
 }
 
 struct ExternalReviewExportBuilder {
+    /// Builds the routine "next tests" line for the export, consuming the canonical schedule satisfaction
+    /// state via `firstUpcoming`. A satisfied/past FC & pH quick check (firstUpcoming advanced to the Full
+    /// Test Panel) is omitted; the Full Test Panel is always reported; both are reported while the FC & pH
+    /// check is still upcoming. `dateText` formats an optional date exactly as the plan UI does — no dates
+    /// are re-derived here.
+    static func routineTimingLine(schedule: NextTestSchedule?, dateText: (Date?) -> String) -> String {
+        var lines: [String] = []
+        if schedule?.firstUpcoming.source == .routineFCAndPH {
+            lines.append("Test FC & pH: \(dateText(schedule?.fcAndPH.recommendedDate)).")
+        }
+        lines.append("Full Test Panel: \(dateText(schedule?.fullPanel.recommendedDate)).")
+        return lines.joined(separator: " ")
+    }
+
     static func treatmentAuditSection(
         config: PoolConfiguration,
         test: PoolTest,
@@ -2418,7 +2440,15 @@ struct ExternalReviewExportBuilder {
             || treatment.targetParameter == "pH"
             || treatment.targetParameter == "totalAlkalinity"
         if staged {
-            return "This application begins moving \(param) toward the operating range; it is not expected to complete the full correction. Verify with the focused Check after circulation before adding more — the next step is recalculated from the new measurement."
+            // Copy must reflect the actual workflow: only reference a focused Check when one really exists
+            // for this treatment. Otherwise verification is discretionary — instruct a plain retest.
+            let hasFocusedCheck = treatment.poolTest?.treatments.contains {
+                $0.isFocusedCheckStep && $0.parentTreatmentID == treatment.id
+            } ?? false
+            let verifyClause = hasFocusedCheck
+                ? "Verify with the focused Check after circulation before adding more"
+                : "Retest \(param) after circulation before adding more"
+            return "This application begins moving \(param) toward the operating range; it is not expected to complete the full correction. \(verifyClause) — the next step is recalculated from the new measurement."
         }
         // Uncapped linear addition (e.g. liquid chlorine): a dose-derived estimate of THIS application.
         let sign = treatment.expectedDelta > 0 ? "+" : ""

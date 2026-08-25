@@ -37,7 +37,7 @@ struct SwimabilityV2Engine {
             testingRequired: testingRequired,
             earliestPredictedReadyTime: predictedReadyTime(for: swimabilityState, treatmentContext: treatmentContext),
             treatmentAwareContext: treatmentContext,
-            summary: summary(for: swimabilityState, confidence: confidence, gateResults: gateResults)
+            summary: summary(for: swimabilityState, evidenceType: evidenceType, confidence: confidence, gateResults: gateResults)
         )
     }
 
@@ -207,14 +207,17 @@ struct SwimabilityV2Engine {
 
     private func summary(
         for state: SwimabilityState,
+        evidenceType: SwimabilityEvidenceType,
         confidence: SwimabilityConfidence,
         gateResults: [SwimReadinessGateResult]
     ) -> String {
         let failed = gateResults.filter { $0.state == .fail }.map(\.identifier.rawValue)
         let unknown = gateResults.filter { $0.state == .unknown }.map(\.identifier.rawValue)
 
+        // The explanation must name the same evidence basis reported by `evidenceType` (observed /
+        // predicted / confirmed / unknown) so the two never disagree.
         return state.rawValue
-            + " observed assessment with "
+            + " \(evidenceType.rawValue) assessment with "
             + confidence.rawValue
             + " confidence. Failed gates: "
             + (failed.isEmpty ? "none" : failed.joined(separator: ", "))

@@ -260,6 +260,7 @@ final class PoolViewModel {
                 completed.append(DashboardWorkflowItem(
                     rootTestID: test.id,
                     originalTestDate: test.date,
+                    testScope: test.routineTestScope,
                     state: .completed,
                     nextActionDate: nil,
                     isActionable: false,
@@ -271,6 +272,7 @@ final class PoolViewModel {
                 active.append(DashboardWorkflowItem(
                     rootTestID: test.id,
                     originalTestDate: test.date,
+                    testScope: test.routineTestScope,
                     state: state,
                     nextActionDate: nextAction,
                     isActionable: (nextAction ?? evaluationDate) <= evaluationDate,
@@ -1080,13 +1082,33 @@ final class PoolViewModel {
     /// these dates themselves. Returns nil only when there is no test to anchor to.
     func nextTestSchedule(for latestTest: PoolTest?, in tests: [PoolTest], now: Date = Date()) -> NextTestSchedule? {
         guard let anchorDate = mostRecentFullTestDate(in: tests) ?? latestTest?.date else { return nil }
-        return nextTestRecommendationEngine.routineSchedule(mostRecentFullTestDate: anchorDate, now: now)
+        // A routine FC & pH test recorded at/after the scheduled FC & pH date satisfies that quick check, so
+        // it no longer appears upcoming. FC & pH tests never re-anchor the Full Test Panel (see anchor below).
+        let scheduledFCDate = anchorDate.addingTimeInterval(
+            TimeInterval(NextTestRecommendationEngine.fcAndPHRoutineDays * 24 * 60 * 60)
+        )
+        let fcAndPHSatisfied = tests.contains {
+            !$0.isFocusedCheck && $0.routineTestScope == .fcAndPH && $0.date >= scheduledFCDate
+        }
+        return nextTestRecommendationEngine.routineSchedule(
+            mostRecentFullTestDate: anchorDate, now: now, fcAndPHSatisfied: fcAndPHSatisfied
+        )
     }
 
-    /// The most recent Full Test Panel date. Focused Checks (`isFocusedCheck`) are not full panels and do
-    /// not re-anchor the routine cadence, so completing an FC & pH check never moves the Full Test Panel.
+    /// The most recent Full Test Panel date. Only a `.fullPanel` routine test re-anchors the routine
+    /// cadence — Focused Checks (`isFocusedCheck`) and FC & pH routine tests satisfy their scheduled check
+    /// but never move the Full Test Panel.
     private func mostRecentFullTestDate(in tests: [PoolTest]) -> Date? {
-        tests.filter { !$0.isFocusedCheck }.map(\.date).max()
+        tests.filter { !$0.isFocusedCheck && $0.routineTestScope == .fullPanel }.map(\.date).max()
+    }
+
+    /// The routine scope the global + / scheduled pill should preselect, derived from the SSOT's
+    /// `firstUpcoming`. Falls back to `.fullPanel` when no routine schedule exists.
+    func firstUpcomingRoutineScope(for latestTest: PoolTest?, in tests: [PoolTest], now: Date = Date()) -> RoutineTestScope {
+        switch nextTestSchedule(for: latestTest, in: tests, now: now)?.firstUpcoming.source {
+        case .routineFCAndPH: return .fcAndPH
+        default:              return .fullPanel
+        }
     }
 
     @MainActor
@@ -1111,9 +1133,10 @@ final class PoolViewModel {
             notifications.cancelNextPoolTestReminder()
         }
 
-        // FC & pH quick check (+3d): scheduled only while still upcoming. Once past due it is superseded by
-        // the Full Test Panel rather than nagged. Governed by the same enableNextPoolTestReminders setting.
-        if let fcDate = schedule.fcAndPH.recommendedDate, fcDate > Date() {
+        // FC & pH quick check (+3d): scheduled only while still upcoming AND not already satisfied by a
+        // recorded FC & pH test. Once past due or satisfied it is superseded by the Full Test Panel rather
+        // than nagged. Governed by the same enableNextPoolTestReminders setting.
+        if let fcDate = schedule.fcAndPH.recommendedDate, fcDate > Date(), !schedule.fcAndPHSatisfied {
             _ = await notifications.replaceNextFCPHTestReminder(at: fcDate, reason: schedule.fcAndPH.scheduledReason)
         } else {
             notifications.cancelNextFCPHTestReminder()

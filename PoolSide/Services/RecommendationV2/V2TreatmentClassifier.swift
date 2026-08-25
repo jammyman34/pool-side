@@ -84,7 +84,12 @@ struct V2TreatmentClassifier {
             // (7.0–7.2 / 7.6–7.8) is pool care and does not block swimming; only pH outside 7.0–7.8 blocks.
             return currentPHBlocksSwimming(treatment) ? .swimBlocking : .poolCare
         case "totalAlkalinity":
-            return treatment.isAcidTreatment ? .swimBlocking : .poolCare
+            // A non-acid alkalinity adjustment is pool care. An acid TA treatment mirrors the pH rule: a
+            // COMPLETED acid dose keeps its circulation hold, and a PLANNED acid TA optimization only blocks
+            // when the current pH itself is outside the swim range. TA alone never blocks swimming.
+            guard treatment.isAcidTreatment else { return .poolCare }
+            if treatment.isCompleted { return .swimBlocking }
+            return currentPHBlocksSwimming(treatment) ? .swimBlocking : .poolCare
         case "calciumHardness", "cyanuricAcid", "saltLevel":
             return .poolCare
         default:

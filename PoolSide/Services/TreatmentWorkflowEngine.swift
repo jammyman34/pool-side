@@ -287,6 +287,8 @@ enum DashboardWorkflowState: String, Sendable, Equatable {
 struct DashboardWorkflowItem: Identifiable, Equatable {
     let rootTestID: UUID
     let originalTestDate: Date
+    /// Routine scope of the root test — drives the row's test-type icon (Active/Completed rows only).
+    let testScope: RoutineTestScope
     let state: DashboardWorkflowState
     /// When the next required action should occur (active ordering). nil for completed.
     let nextActionDate: Date?

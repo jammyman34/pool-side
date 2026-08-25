@@ -38,9 +38,12 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(isPresented: $showingAddTest, onDismiss: handleAddTestDismissed) {
-            AddTestView(onFirstTestTreatmentPlanDisplayed: {
-                firstTestTreatmentPlanDisplayed = true
-            })
+            AddTestView(
+                initialScope: viewModel.firstUpcomingRoutineScope(for: tests.first, in: tests),
+                onFirstTestTreatmentPlanDisplayed: {
+                    firstTestTreatmentPlanDisplayed = true
+                }
+            )
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()

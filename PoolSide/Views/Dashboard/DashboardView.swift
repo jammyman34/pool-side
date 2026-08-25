@@ -196,29 +196,37 @@ struct DashboardView: View {
 
     private func nextTestPill(for test: PoolTest) -> some View {
         // Presentation-only: consume the scheduling authority's firstUpcoming; never derive dates here.
+        // Tapping opens Add Test preselected to the scheduled scope. The global + cover resolves the same
+        // firstUpcoming scope, so both routes land on the correct FC & pH / Full Test entry.
         return TimelineView(.periodic(from: .now, by: 60)) { context in
             let firstUpcoming = viewModel.nextTestSchedule(for: test, in: tests, now: context.date)?.firstUpcoming
             let label = nextTestPillText(for: firstUpcoming, now: context.date)
 
-            HStack(spacing: 8) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(PoolColor.poolTeal)
+            Button {
+                showingAddTest = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PoolColor.poolTeal)
 
-                Text(label)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(PoolColor.primaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                    Text(label)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PoolColor.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(PoolColor.poolTeal.opacity(0.14), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(PoolColor.poolTeal.opacity(0.40), lineWidth: 1)
+                )
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(PoolColor.poolTeal.opacity(0.14), in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(PoolColor.poolTeal.opacity(0.40), lineWidth: 1)
-            )
+            .buttonStyle(.plain)
             .accessibilityLabel(label)
+            .accessibilityHint("Opens Add Test for the scheduled test type")
         }
     }
 
@@ -489,7 +497,13 @@ struct DashboardView: View {
     @ViewBuilder
     private func workflowRow(_ item: DashboardWorkflowItem) -> some View {
         HStack(spacing: 14) {
-            // Leading: original date/time
+            // Leading: test-type icon (Active/Completed rows only) + original date/time
+            Image(systemName: item.testScope.iconName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(PoolColor.poolTeal)
+                .frame(width: 20)
+                .accessibilityLabel(item.testScope.displayName)
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(shortDate(item.originalTestDate))
                     .font(.subheadline)

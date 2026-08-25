@@ -85,16 +85,23 @@ struct AddTestView: View {
     var startsOnTreatmentPlan: Bool = false
     var onFirstTestTreatmentPlanDisplayed: (() -> Void)? = nil
 
+    /// Routine scope to preselect for a NEW test (from the scheduled firstUpcoming). Ignored when editing —
+    /// an existing test's scope is derived from its stored value and locked.
+    var initialScope: RoutineTestScope = .fullPanel
+
     init(
         editingTest: PoolTest? = nil,
         startsOnTreatmentPlan: Bool = false,
+        initialScope: RoutineTestScope = .fullPanel,
         onFirstTestTreatmentPlanDisplayed: (() -> Void)? = nil
     ) {
         self.editingTest = editingTest
         self.startsOnTreatmentPlan = startsOnTreatmentPlan
+        self.initialScope = initialScope
         self.onFirstTestTreatmentPlanDisplayed = onFirstTestTreatmentPlanDisplayed
         _chemicalOrder = State(initialValue: ChemicalField.savedDisplayOrder)
         _taylorSampleSize = State(initialValue: Self.savedTaylorSampleSize)
+        _selectedScope = State(initialValue: Self.resolvedScope(editing: editingTest, preselected: initialScope))
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -104,6 +111,7 @@ struct AddTestView: View {
     @Query(sort: \PoolTest.date, order: .reverse) private var tests: [PoolTest]
 
     // MARK: - Form State
+    @State private var selectedScope: RoutineTestScope = .fullPanel
     @State private var date: Date = Date()
     @State private var pH: Double = 7.4
     @State private var freeChlorine: Double = 2.0
@@ -178,6 +186,12 @@ struct AddTestView: View {
     }
 
     private var activeSavedTest: PoolTest? { editingTest ?? savedTest }
+
+    /// Most recent prior test, used to carry forward unmeasured chemistry (with its original evidence
+    /// timestamps) when saving an FC & pH routine test.
+    private var carryForwardSource: PoolTest? {
+        tests.first(where: { $0.id != editingTest?.id })
+    }
 
     private var isEditing: Bool { editingTest != nil || savedTest != nil }
 
@@ -297,9 +311,24 @@ struct AddTestView: View {
         isTaylorK2006Mode || isTaylorK2005Mode
     }
 
+    /// Fields collected in FC & pH scope, derived from the model's single source of truth (`RoutineTestScope`).
+    private static let fcAndPHChemicalFields: Set<ChemicalField> =
+        Set(RoutineTestScope.fcAndPH.measuredChemistryParameters.compactMap(ChemicalField.init(rawValue:)))
+
+    /// Resolves the scope to open with: an existing test's stored scope (locked) always wins; otherwise the
+    /// preselected scope (from the scheduled firstUpcoming).
+    static func resolvedScope(editing: PoolTest?, preselected: RoutineTestScope) -> RoutineTestScope {
+        editing?.routineTestScope ?? preselected
+    }
+
     private var visibleChemicalFields: [ChemicalField] {
         let baseOrder = fixedChemicalOrderForSelectedTest ?? (isTaylorMode ? ChemicalField.taylorDisplayOrder : chemicalOrder)
         return baseOrder.filter { field in
+            // FC & pH scope collects only FC/pH (+ CC/TC where the method exposes them); the method/brand
+            // logic below still decides which of TC/CC are actually present.
+            if selectedScope == .fcAndPH && !Self.fcAndPHChemicalFields.contains(field) {
+                return false
+            }
             switch field {
             case .temperature:
                 return includeTemperature
@@ -502,6 +531,13 @@ struct AddTestView: View {
 
                             // Teal hero banner
                             heroBanner
+
+                            // Routine test-scope selector (FC & pH vs Full Test)
+                            if !isGuidedNewTest || firstTestEntryStep == .waterTest {
+                                testScopeSelector
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, -16)
+                            }
 
                             // Place TestingMethodCard immediately after heroBanner
                             if !isGuidedNewTest || firstTestEntryStep == .waterTest {
@@ -749,6 +785,28 @@ struct AddTestView: View {
             .firstPoolStateQuestions,
             isEligible: isGuidedNewTest && firstTestEntryStep == .poolState
         )
+    }
+
+    private var testScopeSelector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoutineScopeSegmentedControl(selection: $selectedScope, isDisabled: isEditing)
+
+            switch selectedScope {
+            case .fcAndPH:
+                scopeCaption(title: "FC & pH", detail: "Quick check between full tests.")
+            case .fullPanel:
+                scopeCaption(title: "Full Test", detail: "Complete assessment of your pool chemistry.")
+            }
+        }
+        .padding(14)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private func scopeCaption(title: String, detail: String) -> some View {
+        (Text(title + ": ").font(.caption.weight(.semibold)).foregroundColor(PoolColor.primaryText)
+         + Text(detail).font(.caption).foregroundColor(PoolColor.secondaryText))
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var cyaTimerToast: some View {
@@ -2736,8 +2794,10 @@ private var heroBanner: some View {
             guard usesDropChlorine else { return totalChlorine }
             return taylorTCAvailable ? taylorTCPpm : taylorFCPpm
         }()
-        let resolvedTA = usesDropAlkalinity ? taylorTAPpm : totalAlkalinity
-        let resolvedCH = usesDropHardness ? taylorCHPpm : calciumHardness
+        // In FC & pH scope, TA/CH are never measured — carry forward the @State value (prefilled from the
+        // most recent test) rather than deriving 0 from absent Taylor drops.
+        let resolvedTA = selectedScope == .fcAndPH ? totalAlkalinity : (usesDropAlkalinity ? taylorTAPpm : totalAlkalinity)
+        let resolvedCH = selectedScope == .fcAndPH ? calciumHardness : (usesDropHardness ? taylorCHPpm : calciumHardness)
 
         if let existing = activeSavedTest {
             // Update existing
@@ -2764,6 +2824,8 @@ private var heroBanner: some View {
             existing.visibleAlgaeAssessment = visibleAlgaeAssessment
             existing.algaeFollowUpResponse = algaeFollowUpResponse
             existing.cloudinessFollowUpResponse = cloudinessFollowUpResponse
+            // Scope is locked while editing (derived from the stored value); this is a no-op reassignment.
+            existing.routineTestScope = selectedScope
             test = existing
         } else {
             test = PoolTest(
@@ -2792,6 +2854,10 @@ private var heroBanner: some View {
                 test.taylorCCDrops = usesDropChlorine ? taylorCCDrops : nil
                 test.taylorTADrops = usesDropAlkalinity ? taylorTADrops : nil
                 test.taylorCHDrops = usesDropHardness ? taylorCHDrops : nil
+            }
+            test.routineTestScope = selectedScope
+            if selectedScope == .fcAndPH, let source = carryForwardSource {
+                test.applyFCAndPHCarryForward(from: source)
             }
             modelContext.insert(test)
         }
@@ -3476,6 +3542,60 @@ private struct TestingMethodSheetHeightKey: PreferenceKey {
     static var defaultValue: CGFloat { 0 }
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// Two-option scope selector (FC & pH vs Full Test) that mimics the native segmented `Picker` so the
+/// requested SF Symbols render reliably. It keeps standard segmented-control proportions, a rounded track
+/// with a raised selected segment, system colors, and full accessibility — no extra styling or animation.
+struct RoutineScopeSegmentedControl: View {
+    @Binding var selection: RoutineTestScope
+    /// When editing a saved test the stored scope is locked; taps are ignored and the control dims.
+    var isDisabled: Bool = false
+
+    /// Left-to-right segment order.
+    static let orderedScopes: [RoutineTestScope] = [.fcAndPH, .fullPanel]
+
+    /// Pure selection rule: a tap while disabled (edit mode) preserves the current scope; otherwise the
+    /// tapped scope wins. Exposed for testing selection/lock behavior.
+    static func nextSelection(current: RoutineTestScope, tapped: RoutineTestScope, isDisabled: Bool) -> RoutineTestScope {
+        isDisabled ? current : tapped
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Self.orderedScopes) { scope in
+                segment(for: scope)
+            }
+        }
+        .padding(2)
+        .background(PoolColor.divider, in: Capsule())
+        .opacity(isDisabled ? 0.5 : 1)
+    }
+
+    private func segment(for scope: RoutineTestScope) -> some View {
+        let isSelected = selection == scope
+        return Label(scope.displayName, systemImage: scope.iconName)
+            .labelStyle(.titleAndIcon)
+            .font(.subheadline.weight(isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? Color.white : PoolColor.primaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background {
+                if isSelected {
+                    Capsule().fill(PoolColor.poolTeal)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selection = Self.nextSelection(current: selection, tapped: scope, isDisabled: isDisabled)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(scope.displayName)
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 

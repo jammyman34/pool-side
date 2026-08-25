@@ -111,6 +111,44 @@ enum VisualIndicator: String, CaseIterable, Identifiable {
     }
 }
 
+/// Which routine chemistry scope a saved test represents. Focused Checks are a separate workflow
+/// (`isFocusedCheck`) and are never represented by this scope.
+enum RoutineTestScope: String, Codable, CaseIterable, Identifiable {
+    case fullPanel
+    case fcAndPH
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fullPanel: return "Full Test"
+        case .fcAndPH:   return "FC & pH"
+        }
+    }
+
+    /// SF Symbol used only on Active Tests / Completed Tests rows.
+    var iconName: String {
+        switch self {
+        case .fullPanel: return "testtube.2"
+        case .fcAndPH:   return "drop.fill"
+        }
+    }
+
+    /// Canonical chemistry parameters a routine test of this scope measures fresh. `fcAndPH` collects only
+    /// chlorine (FC/CC/TC where the method exposes/derives them) and pH; `fullPanel` collects the complete
+    /// panel. Single source of truth for Add Test field gating and for tests. Keys match `ChemicalField`
+    /// raw values and `PoolTest.evidenceDate(for:)` parameter keys.
+    var measuredChemistryParameters: Set<String> {
+        switch self {
+        case .fcAndPH:
+            return ["freeChlorine", "combinedChlorine", "totalChlorine", "pH"]
+        case .fullPanel:
+            return ["freeChlorine", "combinedChlorine", "totalChlorine", "pH",
+                    "totalAlkalinity", "calciumHardness", "cyanuricAcid", "saltLevel", "temperature"]
+        }
+    }
+}
+
 @Model
 final class PoolTest {
 
@@ -153,6 +191,8 @@ final class PoolTest {
     var saltLevelMeasuredAt: Date?
     var isFocusedCheck: Bool = false
     var focusedCheckParametersRaw: String = ""
+    /// Routine scope of this saved test. Defaults to `.fullPanel` so existing rows backfill to Full Test.
+    var routineTestScopeRaw: String = RoutineTestScope.fullPanel.rawValue
     var sourcePoolTestIDRaw: String?
     var sourceWorkflowStepIDRaw: String?
 
@@ -249,6 +289,24 @@ final class PoolTest {
         }
         set {
             focusedCheckParametersRaw = newValue.joined(separator: ",")
+        }
+    }
+
+    var routineTestScope: RoutineTestScope {
+        get { RoutineTestScope(rawValue: routineTestScopeRaw) ?? .fullPanel }
+        set { routineTestScopeRaw = newValue.rawValue }
+    }
+
+    /// FC & pH partial-evidence carry-forward: chlorine (FC/CC/TC) and pH keep this test's fresh date
+    /// (already stamped at init); every unmeasured parameter inherits the source test's ORIGINAL
+    /// measurement timestamp so the mixed-age evidence model never treats it as measured today. Values are
+    /// not fabricated here — they are carried from the entry form (prefilled from the source test).
+    func applyFCAndPHCarryForward(from source: PoolTest) {
+        totalAlkalinityMeasuredAt = source.evidenceDate(for: "totalAlkalinity")
+        calciumHardnessMeasuredAt = source.evidenceDate(for: "calciumHardness")
+        cyanuricAcidMeasuredAt = source.evidenceDate(for: "cyanuricAcid")
+        if saltLevel != nil {
+            saltLevelMeasuredAt = source.evidenceDate(for: "saltLevel")
         }
     }
 

@@ -47,9 +47,12 @@ struct NextTestRecommendation {
 struct NextTestSchedule {
     let fcAndPH: NextTestRecommendation
     let fullPanel: NextTestRecommendation
-    /// The single test the user should see next: the FC & pH check while it is still upcoming,
-    /// otherwise the Full Test Panel. Completing FC & pH never moves the Full Test Panel date.
+    /// The single test the user should see next: the FC & pH check while it is still upcoming and not yet
+    /// satisfied, otherwise the Full Test Panel. Completing FC & pH never moves the Full Test Panel date.
     let firstUpcoming: NextTestRecommendation
+    /// True when an FC & pH routine test at/after the scheduled quick-check date has already been recorded,
+    /// so the FC & pH check no longer appears upcoming (the Full Test Panel remains anchored/unchanged).
+    let fcAndPHSatisfied: Bool
 
     var routineTests: [NextTestRecommendation] { [fcAndPH, fullPanel] }
 }
@@ -64,7 +67,7 @@ struct NextTestRecommendationEngine {
     /// Test Panel date. Conditions attached to a test describe events BEFORE that sample, so the sample
     /// already measured their effect — the routine cadence therefore never adds a same-/next-day
     /// "confirmation" retest. Only a new Full Test Panel re-anchors this schedule.
-    func routineSchedule(mostRecentFullTestDate anchor: Date, now: Date = Date()) -> NextTestSchedule {
+    func routineSchedule(mostRecentFullTestDate anchor: Date, now: Date = Date(), fcAndPHSatisfied: Bool = false) -> NextTestSchedule {
         let fcAndPH = makeRoutineRecommendation(
             from: anchor,
             days: Self.fcAndPHRoutineDays,
@@ -80,10 +83,10 @@ struct NextTestRecommendationEngine {
             source: .routineFullPanel
         )
         let firstUpcoming: NextTestRecommendation = {
-            if let due = fcAndPH.recommendedDate, due > now { return fcAndPH }
+            if !fcAndPHSatisfied, let due = fcAndPH.recommendedDate, due > now { return fcAndPH }
             return fullPanel
         }()
-        return NextTestSchedule(fcAndPH: fcAndPH, fullPanel: fullPanel, firstUpcoming: firstUpcoming)
+        return NextTestSchedule(fcAndPH: fcAndPH, fullPanel: fullPanel, firstUpcoming: firstUpcoming, fcAndPHSatisfied: fcAndPHSatisfied)
     }
 
     private func makeRoutineRecommendation(

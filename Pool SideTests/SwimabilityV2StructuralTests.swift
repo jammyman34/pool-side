@@ -280,6 +280,31 @@ final class SwimabilityV2StructuralTests: ConfigIsolatedTestCase {
         XCTAssertNil(assessment.earliestPredictedReadyTime)
     }
 
+    // The explanation must name the same evidence basis as `evidenceType`, for both observed and legitimate
+    // predicted cases (regression: the summary previously hardcoded "observed").
+    func testEvidenceExplanationMatchesEvidenceType() {
+        let observed = assess(test: makeReadyTest(freeChlorine: 5.0, totalChlorine: 5.0, cyanuricAcid: 60))
+        XCTAssertEqual(observed.evidenceType, .observed)
+        XCTAssertTrue(observed.summary.contains("observed"),
+                      "Observed explanation must say observed: \(observed.summary)")
+        XCTAssertFalse(observed.summary.contains("predicted"),
+                       "Observed explanation must not say predicted: \(observed.summary)")
+
+        let predictedTest = makeReadyTest()
+        predictedTest.treatments.append(makeTreatment(
+            chemicalName: "Liquid Chlorine 12.5%",
+            targetParameter: "freeChlorine",
+            urgency: .optional,
+            isCompleted: true,
+            completedAt: evaluationDate.addingTimeInterval(-2 * 60 * 60),
+            minutesBeforeNext: 60
+        ))
+        let predicted = assess(test: predictedTest)
+        XCTAssertEqual(predicted.evidenceType, .predicted)
+        XCTAssertTrue(predicted.summary.contains("predicted"),
+                      "Predicted explanation must say predicted: \(predicted.summary)")
+    }
+
     func testRecoveryChlorineNotCompletedWithHardBlockersRemainsDoNotSwim() {
         let test = makeReadyTest(
             freeChlorine: 1.0,

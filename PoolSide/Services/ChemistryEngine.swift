@@ -1128,6 +1128,7 @@ struct ChemistryEngine {
         templates = suppressChlorineDuringMixingWindow(templates, for: test, recentHistory: recentHistory)
         templates = suppressLowConfidenceOptionalTreatments(templates, config: config)
         templates = suppressAcidTreatmentsWhenPHIsLowNormal(templates, for: test)
+        templates = suppressStaleParameterTreatmentsForPartialTest(templates, for: test)
         templates = appendActiveAcidWaitAdvisoryIfNeeded(templates, recentHistory: recentHistory)
 
         for i in 0..<templates.count {
@@ -1149,6 +1150,24 @@ struct ChemistryEngine {
         case "calciumHardness": return 240  // 4 hours
         case "cyanuricAcid":    return 2880 // 48 hours
         default:                return 30
+        }
+    }
+
+    /// Only a freshly measured parameter may independently generate a new corrective dose. A routine
+    /// partial (FC & pH) test measures only chlorine + pH; its carried-forward TA/CH/CYA/etc. stay usable
+    /// as context/history/watchlist under the mixed-age evidence model but must not spawn a fresh
+    /// treatment. Scope-gated so full tests, focused-check result tests, and fresh post-treatment tests
+    /// (which measure/update the relevant parameter directly) are unaffected. Zero-amount context/watchlist
+    /// items are always kept.
+    private func suppressStaleParameterTreatmentsForPartialTest(
+        _ templates: [TreatmentTemplate],
+        for test: PoolTest
+    ) -> [TreatmentTemplate] {
+        guard test.routineTestScope == .fcAndPH else { return templates }
+        let measured = test.routineTestScope.measuredChemistryParameters
+        return templates.filter { template in
+            guard template.amount > 0 else { return true }
+            return measured.contains(template.targetParameter)
         }
     }
 

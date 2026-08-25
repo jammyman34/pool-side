@@ -7,11 +7,14 @@ struct PoolStateNormalizer {
     func normalize(request: AIRecommendationRequest, evaluationDate: Date = Date()) -> NormalizedPoolState {
         let test = request.currentTest
         let readings = normalizedReadings(for: test)
+        // Swim-readiness freshness is driven by the parameters that must be freshly measured to judge
+        // readiness — the sanitizer (FC/CC) and pH. CYA is a slow-moving stabilizer used only for the FC
+        // floor value; requiring it to be fresh would wrongly expire a routine FC & pH test that correctly
+        // carries CYA forward under the mixed-age evidence model.
         let readinessEvidenceDate = [
             test.evidenceDate(for: "freeChlorine"),
             test.evidenceDate(for: "combinedChlorine"),
-            test.evidenceDate(for: "pH"),
-            test.evidenceDate(for: "cyanuricAcid")
+            test.evidenceDate(for: "pH")
         ].min() ?? test.date
         let visualIndicators = Set(test.visualIndicators)
         let conditions = test.poolConditions
