@@ -130,7 +130,7 @@ enum RoutineTestScope: String, Codable, CaseIterable, Identifiable {
     var iconName: String {
         switch self {
         case .fullPanel: return "testtube.2"
-        case .fcAndPH:   return "drop.fill"
+        case .fcAndPH:   return "flask.fill"
         }
     }
 

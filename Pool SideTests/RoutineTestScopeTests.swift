@@ -129,7 +129,7 @@ final class RoutineTestScopeTests: ConfigIsolatedTestCase {
         XCTAssertEqual(fullItem?.testScope, .fullPanel)
         XCTAssertEqual(fullItem?.testScope.iconName, "testtube.2")
         XCTAssertEqual(fcItem?.testScope, .fcAndPH)
-        XCTAssertEqual(fcItem?.testScope.iconName, "drop.fill")
+        XCTAssertEqual(fcItem?.testScope.iconName, "flask.fill")
     }
 
     // 15. Focused Checks remain independent: they never anchor the routine schedule and are not a scope.
@@ -154,7 +154,7 @@ final class RoutineTestScopeTests: ConfigIsolatedTestCase {
     func testSegmentedControlExposesBothLabelsAndIcons() {
         XCTAssertEqual(RoutineScopeSegmentedControl.orderedScopes, [.fcAndPH, .fullPanel])
         XCTAssertEqual(RoutineScopeSegmentedControl.orderedScopes.map(\.displayName), ["FC & pH", "Full Test"])
-        XCTAssertEqual(RoutineScopeSegmentedControl.orderedScopes.map(\.iconName), ["drop.fill", "testtube.2"])
+        XCTAssertEqual(RoutineScopeSegmentedControl.orderedScopes.map(\.iconName), ["flask.fill", "testtube.2"])
     }
 
     // 17. Selection behavior: an enabled tap switches scope; an edit-locked (disabled) tap keeps the current scope.

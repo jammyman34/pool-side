@@ -206,7 +206,7 @@ struct DashboardView: View {
                 showingAddTest = true
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "calendar.badge.clock")
+                    Image(systemName: nextTestPillIcon(for: firstUpcoming))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(PoolColor.poolTeal)
 
@@ -791,6 +791,17 @@ struct DashboardView: View {
         let f = DateFormatter()
         f.timeStyle = .short
         return f.string(from: date)
+    }
+
+    private func nextTestPillIcon(for recommendation: NextTestRecommendation?) -> String {
+        // Match the badge icon to the scheduled scope: a flask for the FC & pH quick test,
+        // test tubes for the Full Test Panel. Fall back to the calendar clock when the scope
+        // is unknown (e.g. next test only defined after a treatment completes).
+        switch recommendation?.source {
+        case .routineFCAndPH:   return "flask.fill"
+        case .routineFullPanel: return "testtube.2"
+        default:                return "calendar.badge.clock"
+        }
     }
 
     private func nextTestPillText(for recommendation: NextTestRecommendation?, now: Date = Date()) -> String {

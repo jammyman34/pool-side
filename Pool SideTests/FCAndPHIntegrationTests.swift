@@ -170,7 +170,7 @@ final class FCAndPHIntegrationTests: ConfigIsolatedTestCase {
 
     // 11. Segmented-control test-type icons.
     func testRoutineScopeIcons() {
-        XCTAssertEqual(RoutineTestScope.fcAndPH.iconName, "drop.fill")
+        XCTAssertEqual(RoutineTestScope.fcAndPH.iconName, "flask.fill")
         XCTAssertEqual(RoutineTestScope.fullPanel.iconName, "testtube.2")
     }
 
