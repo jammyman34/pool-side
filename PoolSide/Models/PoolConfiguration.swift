@@ -431,6 +431,24 @@ enum TaylorSampleSize: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// Canonical Taylor K-2006 FAS-DPD chlorine titration conversion. Drop count is the physical observation
+/// the user supplies; ppm is derived as `drops × ppmPerDrop` for the selected sample size. This is the
+/// single source of truth for that conversion, shared by normal Add Test entry and the Focused Check
+/// entry so identical drop observations always produce identical FC/CC/TC ppm and measurement resolution.
+enum TaylorFASDPDReading {
+    /// FC or CC ppm from its titration drop count. Negative drop counts are clamped to zero so the
+    /// interaction can never produce an invalid negative reading.
+    static func chlorinePPM(drops: Int, sampleSize: TaylorSampleSize) -> Double {
+        Double(max(0, drops)) * sampleSize.ppmPerDrop
+    }
+
+    /// Total chlorine = FC + CC, using the same per-drop resolution for both titrations.
+    static func totalChlorinePPM(freeChlorineDrops: Int, combinedChlorineDrops: Int, sampleSize: TaylorSampleSize) -> Double {
+        chlorinePPM(drops: freeChlorineDrops, sampleSize: sampleSize)
+            + chlorinePPM(drops: combinedChlorineDrops, sampleSize: sampleSize)
+    }
+}
+
 enum ChlorinePreference: String, CaseIterable, Codable, Identifiable {
     case saltGenerator = "salt_generator"
     case tablets = "tablets"

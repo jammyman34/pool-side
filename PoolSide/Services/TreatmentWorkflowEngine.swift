@@ -215,10 +215,17 @@ struct TreatmentWorkflowEngine {
         for candidate in steps.sorted(by: { $0.sortOrder < $1.sortOrder }) {
             if candidate.id == step.id { return .current }
             if !candidate.isCompleted && !candidate.isSkipped {
-                if candidate.isFocusedCheckStep, let availableAt = availableDate(for: candidate, in: steps), evaluationDate >= availableAt {
-                    return .upcoming
-                }
-                if !candidate.isFocusedCheckStep {
+                if candidate.isFocusedCheckStep {
+                    // A required (non-optional) focused Check blocks every later step from the moment its
+                    // parent treatment completes — while it is still circulating/waiting AND once it is
+                    // due — until the user records the result. `availableDate` is non-nil only after the
+                    // parent has completed, so an un-started Check (parent still pending) does not block on
+                    // its own account; the pending parent treatment already blocks the downstream step.
+                    // Optional/discretionary Checks never gate downstream treatments.
+                    if candidate.urgency != .optional, availableDate(for: candidate, in: steps) != nil {
+                        return .upcoming
+                    }
+                } else {
                     return .upcoming
                 }
             }

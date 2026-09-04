@@ -1913,16 +1913,72 @@ private extension PoolConditions {
     }
 }
 
+/// Which Taylor chlorine titration a drop-entry keypad is editing.
+private enum FocusedCheckDropTarget: String, Identifiable {
+    case freeChlorine
+    case combinedChlorine
+    var id: String { rawValue }
+}
+
+/// How a focused-Check parameter should be measured, given the user's configured testing method. This is
+/// the single routing rule shared by the entry sheet (and its tests): a parameter + configured method maps
+/// to the appropriate measurement interaction. It never invents behavior for unsupported methods.
+enum FocusedCheckEntryMode: Equatable {
+    /// Guide the physical Taylor K-2006 FAS-DPD titration (sample size + drop counters → ppm).
+    case taylorDropChlorine
+    /// Direct numeric entry of the resulting value (used for methods/parameters without a drop workflow).
+    case directEntry
+}
+
+enum FocusedCheckEntryRouter {
+    /// Resolves the measurement interaction for one Check parameter under the configured method. Only the
+    /// Taylor K-2006 FAS-DPD kit drives the drop-count chlorine workflow, and only for FC/CC. Everything
+    /// else (pH, other liquid-drop brands, digital meters, strips, pool-store) uses direct numeric entry.
+    static func mode(for parameter: String, config: PoolConfiguration) -> FocusedCheckEntryMode {
+        let isTaylorK2006 = config.testMethod == .liquidDropKit
+            && config.liquidDropKitBrand == .taylorK2006FASDPD
+        if isTaylorK2006, parameter == "freeChlorine" || parameter == "combinedChlorine" {
+            return .taylorDropChlorine
+        }
+        return .directEntry
+    }
+}
+
+/// Method-aware focused-Check entry. It resolves the user's configured testing method and, for the
+/// Taylor K-2006 FAS-DPD kit measuring FC/CC, guides the physical drop-count test (sample size + drop
+/// counters) exactly like normal Add Test — the user supplies drop counts and Pool Side computes ppm via
+/// the canonical `TaylorFASDPDReading`. Other methods / parameters keep the direct numeric entry. Only the
+/// Check's own parameters are ever shown, and saving still flows through the unchanged `saveFocusedCheck`.
 private struct FocusedCheckEntrySheet: View {
     let checkStep: Treatment
     let sourceTest: PoolTest
     let onSave: ([String: Double]) async throws -> FocusedCheckResult
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(PoolViewModel.self) private var viewModel
+
+    // Direct numeric entry (non-Taylor methods and non-chlorine parameters).
     @State private var values: [String: String] = [:]
+    // Taylor FAS-DPD drop entry (Taylor K-2006 chlorine parameters). Drops are the physical observation.
+    @State private var sampleSize: TaylorSampleSize = .twentyFiveMl
+    @State private var fcDrops: Int? = nil
+    @State private var ccDrops: Int? = nil
+    @State private var dropEntryTarget: FocusedCheckDropTarget? = nil
+    @State private var dropEntryText: String = ""
+    @State private var dropEntryWantsFocus: Bool = false
+    @State private var didSeed = false
+
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var result: FocusedCheckResult?
+
+    // MARK: Configured method routing
+
+    private var parameters: [String] { checkStep.checkParameters }
+    private func isTaylorDropParameter(_ parameter: String) -> Bool {
+        FocusedCheckEntryRouter.mode(for: parameter, config: viewModel.poolConfig) == .taylorDropChlorine
+    }
+    private var usesTaylorChlorine: Bool { parameters.contains(where: isTaylorDropParameter) }
 
     var body: some View {
         NavigationStack {
@@ -1944,17 +2000,28 @@ private struct FocusedCheckEntrySheet: View {
                     .foregroundStyle(PoolColor.secondaryText)
             }
 
+            if usesTaylorChlorine {
+                Section("Sample Size") {
+                    Picker("Sample Size", selection: $sampleSize) {
+                        ForEach(TaylorSampleSize.allCases) { size in
+                            Text(size.displayLabel).tag(size)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    Text("1 drop = \(sampleSize.ppmPerDrop.formattedTreatmentAmount) ppm")
+                        .font(.caption)
+                        .foregroundStyle(PoolColor.secondaryText)
+                }
+            }
+
             Section("Measurements") {
-                ForEach(checkStep.checkParameters, id: \.self) { parameter in
-                    HStack {
-                        Text(displayName(for: parameter))
-                        Spacer()
-                        TextField("0", text: binding(for: parameter))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 110)
-                        Text(unit(for: parameter))
-                            .foregroundStyle(PoolColor.secondaryText)
+                ForEach(parameters, id: \.self) { parameter in
+                    if isTaylorDropParameter(parameter) {
+                        taylorChlorineRow(parameter)
+                    } else {
+                        genericRow(parameter)
                     }
                 }
             }
@@ -1980,6 +2047,188 @@ private struct FocusedCheckEntrySheet: View {
             }
         }
         .onAppear(perform: seedValues)
+        .sheet(item: $dropEntryTarget) { target in
+            dropEntrySheet(for: target)
+        }
+    }
+
+    // MARK: Taylor drop row (same interaction as Add Test)
+
+    @ViewBuilder
+    private func taylorChlorineRow(_ parameter: String) -> some View {
+        let profile = chlorineProfile(for: parameter)
+        let drops = chlorineDrops(for: parameter).wrappedValue
+        let ppm = TaylorFASDPDReading.chlorinePPM(drops: drops ?? 0, sampleSize: sampleSize)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                if let field = ChemicalField(rawValue: parameter) {
+                    ChemicalIcon(field: field, size: 40)
+                }
+                Text(displayName(for: parameter))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PoolColor.primaryText)
+                Spacer()
+                Text(drops == nil ? "—" : String(format: "%.1f ppm", ppm))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(drops == nil ? PoolColor.secondaryText : PoolColor.primaryText)
+                    .monospacedDigit()
+            }
+
+            chlorineMeter(value: ppm, range: profile.range, goodRange: profile.good, hasValue: drops != nil)
+
+            HStack(spacing: 12) {
+                Text("Drops")
+                    .font(.caption)
+                    .foregroundStyle(PoolColor.secondaryText)
+                Spacer()
+                dropStepper(for: parameter)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func chlorineMeter(value: Double, range: ClosedRange<Double>, goodRange: ClosedRange<Double>, hasValue: Bool) -> some View {
+        ZStack {
+            ChemicalMeterBackground(range: range, goodRange: goodRange)
+                .frame(height: 8)
+            GeometryReader { proxy in
+                let ratio = range.upperBound > range.lowerBound
+                    ? (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+                    : 0
+                let clamped = CGFloat(min(max(ratio, 0), 1))
+                Capsule()
+                    .fill(hasValue ? PoolColor.poolTeal : PoolColor.divider)
+                    .frame(width: 16, height: 16)
+                    .offset(x: clamped * (proxy.size.width - 16))
+                    .opacity(hasValue ? 1 : 0.35)
+            }
+            .frame(height: 16)
+        }
+        .frame(height: 16)
+    }
+
+    private func dropStepper(for parameter: String) -> some View {
+        let binding = chlorineDrops(for: parameter)
+        return HStack(spacing: 12) {
+            Button {
+                if let current = binding.wrappedValue {
+                    binding.wrappedValue = max(0, current - 1)
+                }
+            } label: {
+                Image(systemName: "minus.circle.fill").font(.title3).foregroundStyle(PoolColor.poolTeal)
+            }
+            .buttonStyle(.plain)
+            .disabled(binding.wrappedValue == nil)
+            .opacity(binding.wrappedValue == nil ? 0.35 : 1)
+            .accessibilityLabel("Decrease \(displayName(for: parameter)) drops")
+
+            Button {
+                beginDropEntry(for: parameter)
+            } label: {
+                Text(binding.wrappedValue.map(String.init) ?? "—")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(PoolColor.primaryText)
+                    .monospacedDigit()
+                    .frame(minWidth: 34)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(PoolColor.poolTeal.opacity(0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(displayName(for: parameter)) drops")
+            .accessibilityHint("Opens a numeric entry")
+
+            Button {
+                binding.wrappedValue = (binding.wrappedValue ?? 0) + 1
+            } label: {
+                Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(PoolColor.poolTeal)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Increase \(displayName(for: parameter)) drops")
+        }
+    }
+
+    private func dropEntrySheet(for target: FocusedCheckDropTarget) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Enter a whole number of drops.")
+                    .font(.footnote)
+                    .foregroundStyle(PoolColor.secondaryText)
+
+                DirectNumericTextField(
+                    placeholder: "0",
+                    text: $dropEntryText,
+                    keyboardType: .numberPad,
+                    wantsFocus: $dropEntryWantsFocus
+                )
+                .frame(height: 56)
+                .padding(.horizontal, 16)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(PoolColor.poolTeal.opacity(0.25), lineWidth: 1))
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(PoolColor.sand.ignoresSafeArea())
+            .navigationTitle(displayName(for: target.rawValue) + " Drops")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dropEntryTarget = nil }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { applyDropEntry(for: target) }
+                        .fontWeight(.semibold)
+                        .disabled(Int(dropEntryText.trimmingCharacters(in: .whitespaces)) == nil)
+                }
+            }
+            .onAppear { dropEntryWantsFocus = true }
+            .onDisappear { dropEntryWantsFocus = false }
+        }
+        .presentationDetents([.height(240)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(PoolColor.sand)
+    }
+
+    private func beginDropEntry(for parameter: String) {
+        let target: FocusedCheckDropTarget = parameter == "freeChlorine" ? .freeChlorine : .combinedChlorine
+        dropEntryText = chlorineDrops(for: parameter).wrappedValue.map(String.init) ?? "0"
+        dropEntryWantsFocus = true
+        dropEntryTarget = target
+    }
+
+    private func applyDropEntry(for target: FocusedCheckDropTarget) {
+        if let parsed = Int(dropEntryText.trimmingCharacters(in: .whitespaces)) {
+            chlorineDrops(for: target.rawValue).wrappedValue = max(0, parsed)
+        }
+        dropEntryTarget = nil
+    }
+
+    private func chlorineDrops(for parameter: String) -> Binding<Int?> {
+        parameter == "freeChlorine" ? $fcDrops : $ccDrops
+    }
+
+    private func chlorineProfile(for parameter: String) -> (range: ClosedRange<Double>, good: ClosedRange<Double>) {
+        if parameter == "freeChlorine" {
+            return (0...20, ChemistryEngine().freeChlorineTargetRange(cyanuricAcid: sourceTest.cyanuricAcid))
+        }
+        return (0...3, 0...0.5)
+    }
+
+    // MARK: Generic direct entry (unchanged behavior for other methods / parameters)
+
+    private func genericRow(_ parameter: String) -> some View {
+        HStack {
+            Text(displayName(for: parameter))
+            Spacer()
+            TextField("0", text: binding(for: parameter))
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 110)
+            Text(unit(for: parameter))
+                .foregroundStyle(PoolColor.secondaryText)
+        }
     }
 
     private func binding(for parameter: String) -> Binding<String> {
@@ -1989,9 +2238,16 @@ private struct FocusedCheckEntrySheet: View {
         )
     }
 
+    // MARK: Seeding + save
+
     private func seedValues() {
-        guard values.isEmpty else { return }
-        for parameter in checkStep.checkParameters {
+        guard !didSeed else { return }
+        didSeed = true
+        // Default the sample size to the source test's, so Taylor resolution matches normal Add Test.
+        if let existing = sourceTest.taylorSampleSize { sampleSize = existing }
+        if parameters.contains("freeChlorine") { fcDrops = sourceTest.taylorFCDrops }
+        if parameters.contains("combinedChlorine") { ccDrops = sourceTest.taylorCCDrops }
+        for parameter in parameters where !isTaylorDropParameter(parameter) {
             values[parameter] = defaultValue(for: parameter)
         }
     }
@@ -1999,13 +2255,35 @@ private struct FocusedCheckEntrySheet: View {
     @MainActor
     private func save() async {
         var parsed: [String: Double] = [:]
-        for parameter in checkStep.checkParameters {
+
+        // Taylor chlorine parameters: drops → ppm via the canonical calculator.
+        if usesTaylorChlorine {
+            for parameter in parameters where isTaylorDropParameter(parameter) {
+                guard let drops = chlorineDrops(for: parameter).wrappedValue else {
+                    errorMessage = "Enter the \(displayName(for: parameter)) drop count."
+                    return
+                }
+                parsed[parameter] = TaylorFASDPDReading.chlorinePPM(drops: drops, sampleSize: sampleSize)
+            }
+        }
+
+        // Any remaining parameters use the direct numeric entry.
+        for parameter in parameters where !isTaylorDropParameter(parameter) {
             let text = values[parameter, default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
             guard let value = Double(text), value >= 0 else {
                 errorMessage = "Enter a valid \(displayName(for: parameter)) result."
                 return
             }
             parsed[parameter] = value
+        }
+
+        // Record the Taylor evidence/resolution on the source test BEFORE saving so the regenerated plan and
+        // outcome interpret the new FC/CC at the correct measurement resolution (chlorine resolution derives
+        // from the recorded sample size). This mirrors how Add Test persists the same observation.
+        if usesTaylorChlorine {
+            sourceTest.taylorSampleSize = sampleSize
+            if parameters.contains("freeChlorine") { sourceTest.taylorFCDrops = fcDrops }
+            if parameters.contains("combinedChlorine") { sourceTest.taylorCCDrops = ccDrops }
         }
 
         isSaving = true

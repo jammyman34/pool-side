@@ -172,4 +172,116 @@ final class FocusedCheckGatingTests: ConfigIsolatedTestCase {
         XCTAssertTrue(spy.scheduledWaitCompleteTreatmentIDs.isEmpty,
                       "Skipping a treatment never schedules a wait-complete reminder — the user opted out.")
     }
+
+    // MARK: - Bug 3: method-aware focused-Check entry
+
+    // 1 & 2. Taylor K-2006 FC/CC resolves to the drop-count workflow; pH stays direct entry even on Taylor.
+    func testTaylorK2006FCAndCCSelectsDropEntry() {
+        var cfg = config
+        cfg.testMethod = .liquidDropKit
+        cfg.liquidDropKitBrand = .taylorK2006FASDPD
+        XCTAssertEqual(FocusedCheckEntryRouter.mode(for: "freeChlorine", config: cfg), .taylorDropChlorine)
+        XCTAssertEqual(FocusedCheckEntryRouter.mode(for: "combinedChlorine", config: cfg), .taylorDropChlorine)
+        XCTAssertEqual(FocusedCheckEntryRouter.mode(for: "pH", config: cfg), .directEntry,
+                       "pH is a comparator, not a drop titration — it uses direct entry even on Taylor.")
+    }
+
+    // 11. Methods/brands without a drop workflow keep direct numeric entry.
+    func testDirectEntryMethodsUseDirectEntry() {
+        var strips = config; strips.testMethod = .testStrips
+        XCTAssertEqual(FocusedCheckEntryRouter.mode(for: "freeChlorine", config: strips), .directEntry)
+
+        var otherKit = config
+        otherKit.testMethod = .liquidDropKit
+        otherKit.liquidDropKitBrand = .otherLiquidDropKit
+        XCTAssertEqual(FocusedCheckEntryRouter.mode(for: "freeChlorine", config: otherKit), .directEntry,
+                       "A non-Taylor liquid-drop brand does not use the Taylor titration workflow.")
+
+        var digital = config
+        digital.testMethod = .digitalTester
+        digital.liquidDropKitBrand = .hachColorQ
+        XCTAssertEqual(FocusedCheckEntryRouter.mode(for: "combinedChlorine", config: digital), .directEntry)
+    }
+
+    // 3. A focused FC & CC Check exposes only FC/CC — never TA/CH/CYA/salt/temperature/pH.
+    func testFocusedFCAndCCExposesOnlyFCAndCC() throws {
+        let mc = ModelContext(try container())
+        let test = poolTest(mc, pH: 7.8, fc: 1, cc: 0)
+        let chlorine = treatment(param: "freeChlorine", name: "Liquid Chlorine 12.5%", on: test)
+        let check = TreatmentWorkflowEngine().makeCheckStep(after: chlorine, sortOrder: 1)!
+        XCTAssertEqual(Set(check.checkParameters), ["freeChlorine", "combinedChlorine"])
+        for excluded in ["totalAlkalinity", "calciumHardness", "cyanuricAcid", "saltLevel", "temperature", "pH"] {
+            XCTAssertFalse(check.checkParameters.contains(excluded), "\(excluded) must not appear in an FC & CC Check.")
+        }
+    }
+
+    // 4. Taylor sample size drives the same measurement resolution the engine uses; the focused conversion
+    // is anchored to that same per-drop resolution.
+    func testTaylorSampleSizeResolutionMatchesAddTest() {
+        for size in TaylorSampleSize.allCases {
+            let resolution = MeasurementResolution(testMethod: .liquidDropKit, chlorineSampleSize: size)
+            XCTAssertEqual(resolution.increment(for: .freeChlorine), size.ppmPerDrop)
+            XCTAssertEqual(resolution.increment(for: .combinedChlorine), size.ppmPerDrop)
+            XCTAssertEqual(TaylorFASDPDReading.chlorinePPM(drops: 1, sampleSize: size), size.ppmPerDrop, accuracy: 1e-9)
+        }
+    }
+
+    // 5 & 6. Identical Taylor FC/CC drop observations produce identical ppm. Add Test's taylorFCPpm/CCPpm
+    // now delegate to this exact function, so both entry paths yield identical chemistry by construction.
+    func testIdenticalTaylorDropObservationsProduceIdenticalPpm() {
+        for size in TaylorSampleSize.allCases {
+            for drops in [0, 1, 3, 7, 20] {
+                let expected = Double(drops) * size.ppmPerDrop
+                XCTAssertEqual(TaylorFASDPDReading.chlorinePPM(drops: drops, sampleSize: size), expected, accuracy: 1e-9,
+                               "\(drops) drops @ \(size.displayLabel) must equal \(expected) ppm on every entry path.")
+            }
+        }
+        // TC = FC + CC at the same resolution.
+        XCTAssertEqual(
+            TaylorFASDPDReading.totalChlorinePPM(freeChlorineDrops: 3, combinedChlorineDrops: 1, sampleSize: .twentyFiveMl),
+            0.8, accuracy: 1e-9)
+    }
+
+    // 7. Drop counts can never produce an invalid negative reading.
+    func testDropCountCannotProduceNegativeReading() {
+        XCTAssertEqual(TaylorFASDPDReading.chlorinePPM(drops: -5, sampleSize: .twentyFiveMl), 0, accuracy: 1e-9)
+        XCTAssertEqual(
+            TaylorFASDPDReading.totalChlorinePPM(freeChlorineDrops: -2, combinedChlorineDrops: -1, sampleSize: .tenMl),
+            0, accuracy: 1e-9)
+    }
+
+    // 8 & 9. Saving valid Taylor-derived FC/CC values completes the Check through the existing save path
+    // (records values + resolution, links the result test), which is exactly what unblocks the downstream
+    // treatment per the Bug 1+2 workflow gate.
+    func testSavingTaylorFCCCValuesCompletesCheckThroughExistingPath() async throws {
+        let mc = ModelContext(try container())
+        let spy = NotificationSchedulingSpy(); let v = vm(spy)
+        let test = PoolTest(date: Date(), pH: 7.8, freeChlorine: 1, totalChlorine: 1, totalAlkalinity: 170,
+                            calciumHardness: 380, cyanuricAcid: 52, testMethod: .liquidDropKit)
+        test.taylorSampleSize = .twentyFiveMl
+        mc.insert(test)
+        let chlorine = treatment(param: "freeChlorine", name: "Liquid Chlorine 12.5%", on: test)
+        chlorine.isCompleted = true
+        chlorine.completedAt = Date()
+        let check = TreatmentWorkflowEngine().makeCheckStep(after: chlorine, sortOrder: 1)!
+        test.treatments = [chlorine, check]
+
+        // FC 15 drops @ 25 mL = 3.0 ppm; CC 1 drop = 0.2 ppm — the canonical conversion the sheet uses.
+        let fcPpm = TaylorFASDPDReading.chlorinePPM(drops: 15, sampleSize: .twentyFiveMl)
+        let ccPpm = TaylorFASDPDReading.chlorinePPM(drops: 1, sampleSize: .twentyFiveMl)
+
+        _ = try await v.saveFocusedCheck(
+            check,
+            values: ["freeChlorine": fcPpm, "combinedChlorine": ccPpm],
+            for: test,
+            allTests: [test],
+            modelContext: mc
+        )
+
+        XCTAssertTrue(check.isCompleted, "Saving valid measurements completes the Check.")
+        XCTAssertFalse(check.isSkipped)
+        XCTAssertEqual(check.checkResultTestID, test.id, "The Check points at its own result test.")
+        XCTAssertEqual(test.freeChlorine, fcPpm, accuracy: 1e-9)
+        XCTAssertEqual(test.combinedChlorine, ccPpm, accuracy: 1e-9)
+    }
 }

@@ -443,15 +443,19 @@ struct AddTestView: View {
     }
 
     private var taylorFCPpm: Double {
-        Double(taylorFCDrops ?? 0) * taylorSampleSize.ppmPerDrop
+        TaylorFASDPDReading.chlorinePPM(drops: taylorFCDrops ?? 0, sampleSize: taylorSampleSize)
     }
 
     private var taylorCCPpm: Double {
-        Double(taylorCCDrops ?? 0) * taylorSampleSize.ppmPerDrop
+        TaylorFASDPDReading.chlorinePPM(drops: taylorCCDrops ?? 0, sampleSize: taylorSampleSize)
     }
 
     private var taylorTCPpm: Double {
-        taylorFCPpm + taylorCCPpm
+        TaylorFASDPDReading.totalChlorinePPM(
+            freeChlorineDrops: taylorFCDrops ?? 0,
+            combinedChlorineDrops: taylorCCDrops ?? 0,
+            sampleSize: taylorSampleSize
+        )
     }
 
     private var taylorTAPpm: Double {
@@ -2987,7 +2991,7 @@ private struct DirectNumericEntryConfig {
     }
 }
 
-private struct DirectNumericTextField: UIViewRepresentable {
+struct DirectNumericTextField: UIViewRepresentable {
     let placeholder: String
     @Binding var text: String
     let keyboardType: UIKeyboardType
@@ -3041,7 +3045,9 @@ private struct DirectNumericTextField: UIViewRepresentable {
     }
 }
 
-private enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
+// Internal (not private): reused by the method-aware Focused Check entry so it renders the same
+// parameter icons/labels as Add Test. No behavior change to Add Test.
+enum ChemicalField: String, CaseIterable, Identifiable, Equatable {
     case pH
     case freeChlorine
     case combinedChlorine
@@ -3282,7 +3288,7 @@ private struct ReorderLongPressOverlay: UIViewRepresentable {
     }
 }
 
-private struct ChemicalIcon: View {
+struct ChemicalIcon: View {
     let size: CGFloat
     let field: ChemicalField
 
@@ -3314,7 +3320,7 @@ private struct ChemicalIcon: View {
     }
 }
 
-private struct ChemicalMeterBackground: View {
+struct ChemicalMeterBackground: View {
     let range: ClosedRange<Double>
     let goodRange: ClosedRange<Double>
 
