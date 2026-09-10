@@ -917,7 +917,11 @@ private struct SwipeToDeleteRow<Content: View>: View {
                     .foregroundStyle(.white)
                     .frame(width: deleteWidth)
                     .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
             }
+            // Plain style so the action reads as a flush full-height panel — the automatic (destructive)
+            // button style would draw a tinted rounded-rect behind the icon, leaving a notch over the red.
+            .buttonStyle(.plain)
 
             content
                 .overlay(alignment: .trailing) {

@@ -240,13 +240,9 @@ struct TreatmentPlanSheet: View {
                                 if treatmentSteps.isEmpty {
                                     noTreatmentStepsState
                                 } else {
-                                    VStack(spacing: 0) {
+                                    VStack(spacing: 10) {
                                         ForEach(Array(workflowSteps.enumerated()), id: \.element.id) { index, step in
-                                            // 6pt of separation between Check cards shown back-to-back.
-                                            let previousStepIsCheck = index > 0 && workflowSteps[index - 1].isFocusedCheckStep
-                                            let needsCheckGap = step.isFocusedCheckStep && previousStepIsCheck
                                             workflowStepCard(step, index: index)
-                                                .padding(.top, needsCheckGap ? 6 : 0)
                                         }
                                     }
                                 }
@@ -501,32 +497,31 @@ struct TreatmentPlanSheet: View {
             if case .current = state { return true }
             return false
         }()
-        // Consecutive Check cards are separated by a 6pt gap (added at the ForEach), so the joining
-        // internal divider is suppressed between two Checks to avoid a divider-then-gap seam.
-        let nextStep = index + 1 < workflowSteps.count ? workflowSteps[index + 1] : nil
-        let nextStepIsCheck = nextStep?.isFocusedCheckStep ?? false
-        let showsDivider = nextStep != nil && !(step.isFocusedCheckStep && nextStepIsCheck)
 
+        // Each step is its own bordered card, separated by spacing in the enclosing VStack, so no joining
+        // divider is drawn between cards.
         if step.isFocusedCheckStep {
-            focusedCheckCard(step, state: state, sequenceNumber: index + 1, showsDivider: showsDivider)
+            focusedCheckCard(step, state: state, sequenceNumber: index + 1, showsDivider: false)
         } else {
             TreatmentCardView(
                 treatment: step,
                 nextActionableTreatment: nextTreatment(after: index),
                 allowsActions: isCurrent || step.isCompleted || step.isSkipped,
                 presentation: .row,
-                showsDivider: showsDivider,
+                showsDivider: false,
+                rowCornerRadius: 14,
+                rowBorderColor: PoolColor.sand,
                 onComplete: { t in await completeTreatment(t) },
                 onMarkIncomplete: { t in await markTreatmentIncomplete(t) },
                 onSkip: { t in await skipTreatment(t) },
                 onRestore: { t in await restoreTreatment(t) },
                 openSwipeTreatmentID: $openSwipeTreatmentID
             )
+            .background(workflowBackground(for: state), in: RoundedRectangle(cornerRadius: 14))
             .overlay(alignment: .topLeading) {
                 sequenceBadge(index + 1, state: state)
-                    .offset(x: 6, y: 8)
+                    .offset(x: -8, y: -8)
             }
-            .background(workflowBackground(for: state), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
@@ -624,11 +619,11 @@ struct TreatmentPlanSheet: View {
                     .padding(.horizontal, 18)
             }
         }
-        .background(PoolColor.statusTesting.opacity(0.20), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(PoolColor.statusTesting, lineWidth: 1)
-        )
+        // Fill edge-to-edge with square corners so, when swiped, the card meets the Skip/Restore action
+        // flush. The rounded corners and border live on the stationary container below (traditional
+        // swipe-row behavior), never on the sliding content.
+        .frame(maxWidth: .infinity)
+        .background(PoolColor.statusTesting.opacity(0.20))
 
         return SwipeableSkipRow(
             itemID: checkStep.id,
@@ -637,6 +632,7 @@ struct TreatmentPlanSheet: View {
             cornerRadius: 14,
             skipAccessibilityLabel: "Skip check",
             restoreAccessibilityLabel: "Restore check",
+            contentBorderColor: PoolColor.statusTesting,
             openSwipeID: $openSwipeTreatmentID,
             onSkip: { await skipTreatment(checkStep) },
             onRestore: { await restoreTreatment(checkStep) }
@@ -645,7 +641,7 @@ struct TreatmentPlanSheet: View {
         }
         .overlay(alignment: .topLeading) {
             sequenceBadge(sequenceNumber, state: state)
-                .offset(x: 6, y: 8)
+                .offset(x: -8, y: -8)
         }
     }
 

@@ -13,6 +13,10 @@ struct TreatmentCardView: View {
     var allowsActions: Bool = true
     var presentation: Presentation = .card
     var showsDivider: Bool = true
+    /// Corner radius + optional border for the swipe row's content card. Set by the workflow so the card
+    /// meets its Skip/Restore action flush when swiped.
+    var rowCornerRadius: CGFloat = 16
+    var rowBorderColor: Color? = nil
     var onComplete: @MainActor (Treatment) async -> Void
     var onMarkIncomplete: @MainActor (Treatment) async -> Void
     var onSkip: @MainActor (Treatment) async -> Void
@@ -37,6 +41,43 @@ struct TreatmentCardView: View {
         return PoolColor.urgencyStatusColor(treatment.urgency)
     }
 
+    /// The test parameter this treatment affects, mapped to the Test Log's icon + color language.
+    /// nil for non-chemical targets (e.g. visual indicators, cover), which use a neutral fallback glyph.
+    private var parameterField: ChemicalField? {
+        ChemicalField(rawValue: treatment.targetParameter)
+    }
+
+    /// Leading icon showing which parameter the treatment moves. Intentionally NOT colored by status —
+    /// it uses the same fixed per-parameter color as the Test Log page so the visual vocabulary matches.
+    @ViewBuilder
+    private var parameterIcon: some View {
+        let size: CGFloat = 30
+        if let field = parameterField {
+            ChemicalIcon(field: field, size: size)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(PoolColor.appBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(PoolColor.divider, lineWidth: 1)
+                    )
+                Image(systemName: fallbackParameterSymbol)
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(PoolColor.secondaryText)
+            }
+            .frame(width: size, height: size)
+        }
+    }
+
+    private var fallbackParameterSymbol: String {
+        switch treatment.targetParameter {
+        case "visualIndicators": return "eye"
+        case "cover": return "sun.max"
+        default: return "sparkles"
+        }
+    }
+
     private var urgencyLabel: String {
         treatment.isSkipped ? "Skipped" : treatment.urgency.displayName
     }
@@ -55,6 +96,8 @@ struct TreatmentCardView: View {
             itemID: treatment.id,
             isSkipped: treatment.isSkipped,
             gestureEnabled: allowsActions && !treatment.isCompleted,
+            cornerRadius: rowCornerRadius,
+            contentBorderColor: rowBorderColor,
             openSwipeID: $openSwipeTreatmentID,
             onSkip: { await onSkip(treatment) },
             onRestore: { await onRestore(treatment) }
@@ -174,11 +217,9 @@ struct TreatmentCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row
             HStack(alignment: .top, spacing: 14) {
-                // Urgency dot
-                Circle()
-                    .fill(urgencyColor)
-                    .frame(width: 10, height: 10)
-                    .padding(.top, 5)
+                // Parameter icon — shows which test reading this treatment affects.
+                parameterIcon
+                    .padding(.top, 1)
 
                 // Name + amount + urgency badge
                 VStack(alignment: .leading, spacing: 4) {
@@ -342,6 +383,10 @@ struct SwipeableSkipRow<Content: View>: View {
     let cornerRadius: CGFloat
     let skipAccessibilityLabel: String
     let restoreAccessibilityLabel: String
+    /// Optional stroke drawn around the content card only (not the revealed action). When swiped, the edge
+    /// facing the action becomes square so the card and the action button meet flush.
+    let contentBorderColor: Color?
+    let contentBorderWidth: CGFloat
     let onSkip: @MainActor () async -> Void
     let onRestore: @MainActor () async -> Void
     @Binding var openSwipeID: UUID?
@@ -350,6 +395,7 @@ struct SwipeableSkipRow<Content: View>: View {
     @State private var dragOffset: CGFloat = 0
     @State private var isSkipOpen = false
     @State private var isRestoreOpen = false
+    @State private var rowWidth: CGFloat = 0
     private let actionWidth: CGFloat = 92
 
     init(
@@ -359,6 +405,9 @@ struct SwipeableSkipRow<Content: View>: View {
         cornerRadius: CGFloat = 16,
         skipAccessibilityLabel: String = "Skip",
         restoreAccessibilityLabel: String = "Restore",
+        contentBorderColor: Color? = nil,
+        contentBorderWidth: CGFloat = 1,
+        initiallyOpen: Bool = false,
         openSwipeID: Binding<UUID?>,
         onSkip: @escaping @MainActor () async -> Void,
         onRestore: @escaping @MainActor () async -> Void,
@@ -370,7 +419,11 @@ struct SwipeableSkipRow<Content: View>: View {
         self.cornerRadius = cornerRadius
         self.skipAccessibilityLabel = skipAccessibilityLabel
         self.restoreAccessibilityLabel = restoreAccessibilityLabel
+        self.contentBorderColor = contentBorderColor
+        self.contentBorderWidth = contentBorderWidth
         self._openSwipeID = openSwipeID
+        self._isSkipOpen = State(initialValue: initiallyOpen && !isSkipped)
+        self._isRestoreOpen = State(initialValue: initiallyOpen && isSkipped)
         self.onSkip = onSkip
         self.onRestore = onRestore
         self.content = content()
@@ -384,27 +437,78 @@ struct SwipeableSkipRow<Content: View>: View {
         return isRestoreOpen ? actionWidth : 0
     }
 
+    /// The action is revealed on the trailing side (Skip) when the card slides left, and on the leading side
+    /// (Restore) when it slides right. Drives the content card's per-corner rounding so the edge meeting the
+    /// action goes square while the outer edge stays rounded.
+    private enum RevealSide { case none, trailing, leading }
+    private var revealSide: RevealSide {
+        if cardOffset < 0 { return .trailing }
+        if cardOffset > 0 { return .leading }
+        return .none
+    }
+    /// How much of the action is currently exposed (0…actionWidth).
+    private var revealAmount: CGFloat { min(abs(cardOffset), actionWidth) }
+
+    /// The content card's shape: rounded on its outer edge, a hard square on the edge that meets the
+    /// revealed action.
+    private var contentShape: UnevenRoundedRectangle {
+        let leading: CGFloat = revealSide == .leading ? 0 : cornerRadius
+        let trailing: CGFloat = revealSide == .trailing ? 0 : cornerRadius
+        return UnevenRoundedRectangle(
+            topLeadingRadius: leading,
+            bottomLeadingRadius: leading,
+            bottomTrailingRadius: trailing,
+            topTrailingRadius: trailing
+        )
+    }
+
+    /// A single view carrying the caller's content, its fill, its border, and its clip. Its visible width is
+    /// driven by `revealAmount` (it shrinks from the action side), so the card, its border, and its rounded
+    /// corners are always one unit and can never drift apart from each other while swiping.
+    private var contentCard: some View {
+        content
+            .frame(width: rowWidth > 0 ? rowWidth : nil, alignment: .leading)
+            .frame(
+                width: rowWidth > 0 ? max(rowWidth - revealAmount, 0) : nil,
+                alignment: revealSide == .leading ? .trailing : .leading
+            )
+            .clipShape(contentShape)
+            .overlay {
+                if let contentBorderColor {
+                    contentShape.stroke(contentBorderColor, lineWidth: contentBorderWidth)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isSkipOpen || isRestoreOpen { close(clear: true) }
+            }
+            .conditionalSimultaneousGesture(gesture, enabled: gestureEnabled)
+    }
+
     var body: some View {
-        ZStack {
+        ZStack(alignment: revealSide == .leading ? .trailing : .leading) {
             if gestureEnabled && isSkipped && cardOffset > 0 {
-                restoreAction.zIndex(1)
+                restoreAction
             } else if gestureEnabled && !isSkipped && cardOffset < 0 {
-                skipAction.zIndex(1)
+                skipAction
             }
 
-            content
-                .offset(x: cardOffset)
-                .zIndex(0)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if isSkipOpen || isRestoreOpen { close(clear: true) }
-                }
-                .conditionalSimultaneousGesture(gesture, enabled: gestureEnabled)
-                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isSkipOpen)
-                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isRestoreOpen)
-                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
+            contentCard
         }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .frame(maxWidth: .infinity)
+        // Size the row to the content's height. Without this, the action's `maxHeight: .infinity` is greedy
+        // and, in an unconstrained vertical context (a ScrollView), lets the row grow taller than the card —
+        // making the action button extend past the card's top and bottom.
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: SwipeRowWidthKey.self, value: proxy.size.width)
+            }
+        )
+        .onPreferenceChange(SwipeRowWidthKey.self) { rowWidth = $0 }
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isSkipOpen)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isRestoreOpen)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: dragOffset)
         .onChange(of: openSwipeID) { _, newValue in
             if newValue != itemID { close(clear: false) }
         }
@@ -426,6 +530,8 @@ struct SwipeableSkipRow<Content: View>: View {
         await onRestore(); isRestoreOpen = false; openSwipeID = nil; dragOffset = 0
     }
 
+    // The action's outer corners are rounded and the corner meeting the card content is a hard square, so
+    // the button and card abut flush (independent of the outer clip).
     private var skipAction: some View {
         HStack(spacing: 0) {
             Spacer()
@@ -437,8 +543,17 @@ struct SwipeableSkipRow<Content: View>: View {
                 .foregroundStyle(.white)
                 .frame(width: actionWidth)
                 .frame(maxHeight: .infinity)
-                .background(PoolColor.statusSlight)
+                .background(
+                    PoolColor.statusSlight,
+                    in: UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: cornerRadius,
+                        topTrailingRadius: cornerRadius
+                    )
+                )
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -452,8 +567,17 @@ struct SwipeableSkipRow<Content: View>: View {
                 .foregroundStyle(.white)
                 .frame(width: actionWidth)
                 .frame(maxHeight: .infinity)
-                .background(PoolColor.poolTeal)
+                .background(
+                    PoolColor.poolTeal,
+                    in: UnevenRoundedRectangle(
+                        topLeadingRadius: cornerRadius,
+                        bottomLeadingRadius: cornerRadius,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 0
+                    )
+                )
             }
+            .buttonStyle(.plain)
             Spacer()
         }
     }
@@ -494,6 +618,13 @@ struct SwipeableSkipRow<Content: View>: View {
             if clear { openSwipeID = nil }
             dragOffset = 0
         }
+    }
+}
+
+private struct SwipeRowWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -657,4 +788,85 @@ private extension View {
         .padding()
         .background(PoolColor.appBackground)
         .environment(PoolViewModel())
+}
+
+#Preview("Swipe open — Skip") {
+    let content = VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "testtube.2")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(PoolColor.statusTesting)
+                .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Check FC & CC").font(.subheadline.weight(.semibold))
+                Text("1 hour after adding chlorine").font(.caption).foregroundStyle(.secondary)
+                Text("Ready to check")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(PoolColor.statusTesting.opacity(0.20), in: Capsule())
+            }
+            Spacer()
+            Text("Enter")
+                .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(PoolColor.poolTeal, in: Capsule())
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+
+        Text("Test FC and CC to confirm chlorine is safe before swimming.")
+            .font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 58).padding(.bottom, 14)
+    }
+    .frame(maxWidth: .infinity)
+    .background(PoolColor.statusTesting.opacity(0.20))
+
+    return VStack {
+        SwipeableSkipRow(
+            itemID: UUID(),
+            isSkipped: false,
+            gestureEnabled: true,
+            cornerRadius: 14,
+            contentBorderColor: PoolColor.statusTesting,
+            initiallyOpen: true,
+            openSwipeID: .constant(nil),
+            onSkip: {},
+            onRestore: {}
+        ) {
+            content
+        }
+        Spacer()
+    }
+    .padding()
+    .background(PoolColor.appBackground)
+}
+
+#Preview("Swipe open — Restore") {
+    let content = VStack(alignment: .leading, spacing: 8) {
+        Text("Check FC & CC").font(.subheadline.weight(.semibold))
+        Text("1 hour after adding chlorine").font(.caption).foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(18)
+    .frame(maxWidth: .infinity)
+    .background(PoolColor.statusTesting.opacity(0.20))
+
+    return VStack {
+        SwipeableSkipRow(
+            itemID: UUID(),
+            isSkipped: true,
+            gestureEnabled: true,
+            cornerRadius: 14,
+            contentBorderColor: PoolColor.statusTesting,
+            initiallyOpen: true,
+            openSwipeID: .constant(nil),
+            onSkip: {},
+            onRestore: {}
+        ) {
+            content
+        }
+        Spacer()
+    }
+    .padding()
+    .background(PoolColor.appBackground)
 }

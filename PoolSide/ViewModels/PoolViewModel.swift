@@ -421,32 +421,55 @@ final class PoolViewModel {
         let workflowEngine = TreatmentWorkflowEngine()
         let treatmentSteps = test.treatments
             .filter { !$0.isWatchlistItem && !$0.isFocusedCheckStep }
-            .sorted { $0.sortOrder < $1.sortOrder }
+            .sorted { $0.sortOrder == $1.sortOrder ? $0.createdAt < $1.createdAt : $0.sortOrder < $1.sortOrder }
         let existingParentIDs = Set(
             test.treatments
                 .filter(\.isFocusedCheckStep)
                 .compactMap(\.parentTreatmentID)
         )
-        var nextSortOrder = (test.treatments.map(\.sortOrder).max() ?? 0) + 1
 
         for treatment in treatmentSteps where !existingParentIDs.contains(treatment.id) {
             // A focused Check is created only when the result is actually required (swim safety, a staged
             // corrective dose, or surface/equipment protection). Recommended optimizations on an already-safe
             // pool get no Check.
             guard workflowEngine.requiresFocusedCheck(for: treatment, config: poolConfig) else { continue }
-            guard let check = workflowEngine.makeCheckStep(after: treatment, sortOrder: treatment.sortOrder + 1) else { continue }
-            shiftSortOrders(in: test, startingAt: check.sortOrder)
-            if test.treatments.contains(where: { $0.sortOrder == check.sortOrder }) {
-                check.sortOrder = nextSortOrder
-                nextSortOrder += 1
-            }
+            // makeCheckStep sets the Check's poolTest, so SwiftData's inverse relationship already links it
+            // into test.treatments here. sortOrder is assigned canonically below; insertAndLinkTreatment only
+            // needs to register it with the model context.
+            guard let check = workflowEngine.makeCheckStep(after: treatment, sortOrder: 0) else { continue }
             insertAndLinkTreatment(check, to: test, modelContext: modelContext)
         }
+
+        reindexWorkflowSortOrders(in: test, treatmentSteps: treatmentSteps)
     }
 
-    private func shiftSortOrders(in test: PoolTest, startingAt sortOrder: Int) {
-        for treatment in test.treatments where treatment.sortOrder >= sortOrder {
-            treatment.sortOrder += 1
+    /// Assigns a clean, contiguous sortOrder so each focused Check immediately follows its parent treatment,
+    /// in the order the user actually performs the steps. Watchlist items and any orphaned rows keep their
+    /// relative order after the workflow steps. This is the single authority for workflow step ordering —
+    /// the display and the workflow engine's step-state logic both read sortOrder.
+    private func reindexWorkflowSortOrders(in test: PoolTest, treatmentSteps: [Treatment]) {
+        let checksByParent = Dictionary(
+            grouping: test.treatments.filter(\.isFocusedCheckStep),
+            by: { $0.parentTreatmentID }
+        )
+
+        var ordered: [Treatment] = []
+        for treatment in treatmentSteps {
+            ordered.append(treatment)
+            let checks = (checksByParent[treatment.id] ?? [])
+                .sorted { $0.createdAt < $1.createdAt }
+            ordered.append(contentsOf: checks)
+        }
+
+        // Preserve any remaining rows (watchlist items and orphaned Checks) after the workflow steps.
+        let placedIDs = Set(ordered.map(\.id))
+        let remaining = test.treatments
+            .filter { !placedIDs.contains($0.id) }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        ordered.append(contentsOf: remaining)
+
+        for (index, step) in ordered.enumerated() {
+            step.sortOrder = index
         }
     }
 
